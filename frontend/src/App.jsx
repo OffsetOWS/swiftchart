@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
 import { BarChart3, BookOpen, LayoutDashboard } from "lucide-react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
@@ -8,7 +9,7 @@ import "./styles/global.css";
 
 export default function App() {
   const [page, setPage] = useState("dashboard");
-  const [exchange, setExchange] = useState("binance");
+  const [exchange, setExchange] = useState("hyperliquid");
   const [timeframe, setTimeframe] = useState("4h");
   const [symbol, setSymbol] = useState("SOLUSDT");
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });
@@ -116,3 +117,5 @@ export default function App() {
     </main>
   );
 }
+
+createRoot(document.getElementById("root")).render(<App />);
