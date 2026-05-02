@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 
 backend/.venv/
+bot/.venv/
 backend/*.db
 backend/*.db-*
 

@@ -17,6 +17,7 @@ It is a full-stack, paper-first trading analysis app built with a FastAPI backen
 - Risk settings for account size, risk per trade, max open trades, and minimum R:R
 - Paper-trading ledger backed by SQLite
 - Dark, responsive, Apple-inspired dashboard UI
+- Telegram bot for analysis, top trade ideas, and strategy education
 
 ## Project Structure
 
@@ -36,6 +37,11 @@ frontend/
     pages/
     styles/
     lib/
+bot/
+  main.py
+  handlers.py
+  keyboards.py
+  formatter.py
 vercel.json
 ```
 
@@ -101,6 +107,10 @@ DEFAULT_ACCOUNT_SIZE=10000
 DEFAULT_RISK_PER_TRADE=1
 DEFAULT_MIN_RR=2
 DEFAULT_MAX_OPEN_TRADES=3
+TELEGRAM_BOT_TOKEN=
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
+HYPERLIQUID_API_KEY=
 ```
 
 ## API Endpoints
@@ -114,9 +124,101 @@ POST /api/paper-trade
 GET  /api/paper-trades
 ```
 
+## Telegram Bot
+
+SwiftChart Bot lets users request the same analysis engine from Telegram. It is analysis-only and paper-trading only; it never places real trades.
+
+Supported commands:
+
+```text
+/start
+/analyze SOLUSDT 4h
+/top
+/strategy
+/help
+```
+
+Supported timeframes:
+
+```text
+30m, 1h, 2h, 4h, 6h, 8h, 12h, 1D
+```
+
+### Create the Telegram Bot
+
+1. Open Telegram and message `@BotFather`.
+2. Run `/newbot`.
+3. Set the display name to `SwiftChart Bot`.
+4. Choose a unique username ending in `bot`.
+5. Copy the bot token from BotFather.
+
+### Run the Bot Locally
+
+```bash
+cd bot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Add your token:
+
+```text
+TELEGRAM_BOT_TOKEN=your_botfather_token
+```
+
+Run from the project root so the bot can import the existing backend strategy modules:
+
+```bash
+cd ..
+bot/.venv/bin/python -m bot.main
+```
+
+### Bot Environment Variables
+
+```text
+TELEGRAM_BOT_TOKEN=
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
+HYPERLIQUID_API_KEY=
+APP_NAME=SwiftChart
+DEFAULT_EXCHANGE=hyperliquid
+DEFAULT_TIMEFRAME=4h
+DEFAULT_ACCOUNT_SIZE=10000
+DEFAULT_RISK_PER_TRADE=1
+DEFAULT_MIN_RR=2
+DEFAULT_MAX_OPEN_TRADES=3
+BINANCE_BASE_URL=https://api.binance.com
+HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
+```
+
+The current Binance and Hyperliquid candle connectors use public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
+
+### Deploy the Bot Online
+
+Deploy the `bot/` worker separately from the Vercel website on a Python-capable host such as Render, Railway, Fly.io, or a VPS.
+
+Recommended worker start command:
+
+```bash
+python -m bot.main
+```
+
+Recommended deployment notes:
+
+- Set the working directory to the repository root.
+- Install dependencies from `bot/requirements.txt`.
+- Set `TELEGRAM_BOT_TOKEN` in the host environment.
+- Keep `LIVE_TRADING_ENABLED=false`.
+- Use `DEFAULT_EXCHANGE=hyperliquid` if Binance blocks your host region.
+- The bot uses polling, so it should run as a background worker/service.
+
 ## Vercel Deployment
 
 This repository is configured for Vercel to deploy the React/Vite frontend and expose the FastAPI backend through Vercel Python serverless functions.
+
+The Telegram bot is not deployed on Vercel. Run it separately as a worker on Render, Railway, Fly.io, or a VPS.
 
 Vercel settings:
 
