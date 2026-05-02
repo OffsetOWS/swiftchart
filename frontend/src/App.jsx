@@ -75,6 +75,15 @@ export default function App() {
     runAnalysis();
   }, []);
 
+  useEffect(() => {
+    function updateCursor(event) {
+      document.documentElement.style.setProperty("--cursor-x", `${event.clientX}px`);
+      document.documentElement.style.setProperty("--cursor-y", `${event.clientY}px`);
+    }
+    window.addEventListener("pointermove", updateCursor);
+    return () => window.removeEventListener("pointermove", updateCursor);
+  }, []);
+
   return (
     <main className="app-shell">
       <div className="ambient ambient-one" />
