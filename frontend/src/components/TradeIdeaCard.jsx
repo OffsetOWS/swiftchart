@@ -1,4 +1,4 @@
-import { Activity, Target, ShieldAlert, Zap } from "lucide-react";
+import { Activity, ShieldAlert, Zap } from "lucide-react";
 
 function fmt(value) {
   if (value === undefined || value === null) return "-";
@@ -6,14 +6,16 @@ function fmt(value) {
 }
 
 export default function TradeIdeaCard({ idea, onPaperTrade }) {
+  const directionClass = idea.direction.toLowerCase();
+
   return (
-    <article className="idea-card">
+    <article className={`idea-card ${directionClass}`}>
       <div className="idea-top">
         <div>
           <h3>{idea.symbol} {idea.timeframe}</h3>
           <p>{idea.reason}</p>
         </div>
-        <span className={`badge ${idea.direction.toLowerCase()}`}>
+        <span className={`badge ${directionClass}`}>
           <Activity size={14} /> {idea.direction}
         </span>
       </div>

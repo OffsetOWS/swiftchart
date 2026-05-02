@@ -1,22 +1,19 @@
-import { RefreshCcw } from "lucide-react";
+import { Activity, Bitcoin, Clock3, RefreshCcw, ShieldCheck } from "lucide-react";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 
 export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas }) {
+  const topIdea = topIdeas[0];
+
   return (
-    <div className="dashboard-grid">
-      <section className="panel hero-panel">
+    <div className="dashboard-grid dashboard-bento">
+      <section className="panel hero-panel bento-hero">
         <div className="panel-head">
           <div>
-            <span className="eyebrow">AI MARKET STRUCTURE ENGINE</span>
-            <h1>Trade ideas from live crypto structure.</h1>
-            <p>SwiftChart scans support, resistance, liquidity sweeps, range edges, breakouts, and no-trade zones in one premium dashboard.</p>
+            <span className="eyebrow">AI TRADING TERMINAL</span>
+            <h1>SwiftChart turns market structure into trade ideas.</h1>
+            <p>Scan liquid crypto markets for support, resistance, liquidity sweeps, breakouts, and clean range-edge setups.</p>
           </div>
           <button className="icon-btn" onClick={refreshTopIdeas} title="Refresh top ideas"><RefreshCcw size={18} /></button>
-        </div>
-        <div className="hero-orbit" aria-hidden="true">
-          <span />
-          <span />
-          <span />
         </div>
         <div className="controls">
           <div className="field">
@@ -35,17 +32,14 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
             </div>
           </div>
         </div>
-        <div className="stats bento-stats">
-          <div className="stat stat-wide"><span className="muted">Scanner universe</span><b>10 liquid pairs</b><small>BTC, ETH, SOL, OP, ARB and more</small></div>
-          <div className="stat"><span className="muted">Risk default</span><b>1%</b></div>
-          <div className="stat"><span className="muted">Minimum R:R</span><b>2.0R</b></div>
-          <div className="stat"><span className="muted">Execution</span><b>Paper</b></div>
-        </div>
-        <div className="risk-strip">Trading ideas are not guaranteed profit. Use controlled risk and wait for confirmation.</div>
       </section>
-      <aside className="panel ideas-panel">
+
+      <section className="panel ideas-panel dominant-ideas">
         <div className="panel-head">
-          <h2>Top 5 Trade Ideas</h2>
+          <div>
+            <span className="eyebrow">TOP SETUPS</span>
+            <h2>Top 5 Trade Ideas</h2>
+          </div>
           <span className="badge">{timeframe}</span>
         </div>
         <div className="idea-list">
@@ -53,7 +47,32 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
           {!loadingTopIdeas && topIdeas.length === 0 ? <div className="empty">No clean setups found right now.</div> : null}
           {topIdeas.map((idea) => <TradeIdeaCard key={`${idea.symbol}-${idea.direction}-${idea.rank_score}`} idea={idea} />)}
         </div>
-      </aside>
+      </section>
+
+      <section className="panel mini-card">
+        <Activity size={20} />
+        <span>Market condition</span>
+        <b>{topIdea ? "Setup detected" : "Scanning"}</b>
+      </section>
+      <section className="panel mini-card">
+        <Bitcoin size={20} />
+        <span>Selected coin</span>
+        <b>{topIdea?.symbol || "SOLUSDT"}</b>
+      </section>
+      <section className="panel mini-card">
+        <Clock3 size={20} />
+        <span>Timeframe</span>
+        <b>{timeframe}</b>
+      </section>
+      <section className="panel mini-card">
+        <ShieldCheck size={20} />
+        <span>Strategy status</span>
+        <b>Paper mode</b>
+      </section>
+
+      <section className="panel risk-card">
+        Trading ideas are not guaranteed profit. Use controlled risk and wait for confirmation.
+      </section>
     </div>
   );
 }
