@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.venv/
+
+backend/.venv/
+backend/*.db
+backend/*.db-*
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Existing unrelated local projects/files in this workspace.
+unlock-radar/
+propr_scalper.py
+config.json
+.vercel
