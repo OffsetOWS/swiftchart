@@ -77,10 +77,13 @@ export default function App() {
 
   return (
     <main className="app-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+      <div className="cursor-aura" />
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" />
-          <div><strong>SwiftChart</strong><span>Paper-first crypto market analysis</span></div>
+          <div><strong>SwiftChart</strong><span>AI-powered crypto charting</span></div>
         </div>
         <nav className="nav">
           <button className={page === "dashboard" ? "active" : ""} onClick={() => setPage("dashboard")}><LayoutDashboard size={15} /> Dashboard</button>

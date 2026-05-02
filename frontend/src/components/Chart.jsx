@@ -54,5 +54,10 @@ export default function Chart({ candles, analysis }) {
     };
   }, [candles, analysis]);
 
-  return <div className="chart-host" ref={ref} />;
+  return (
+    <div className="chart-shell">
+      {candles.length === 0 ? <div className="chart-empty">Waiting for candle data</div> : null}
+      <div className="chart-host" ref={ref} />
+    </div>
+  );
 }

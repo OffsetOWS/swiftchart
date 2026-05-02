@@ -8,7 +8,8 @@ export default function Analysis({ state, setters, candles, analysis, loading, o
 
   return (
     <div className="analysis-grid">
-      <aside className="panel">
+      <aside className="panel control-panel">
+        <span className="eyebrow">LIVE ANALYSIS</span>
         <h2>Coin Analysis</h2>
         <div className="field" style={{ marginTop: 14 }}>
           <label>Symbol</label>
@@ -51,6 +52,7 @@ export default function Analysis({ state, setters, candles, analysis, loading, o
       <section className="chart-panel">
         <div className="panel-head">
           <div>
+            <span className="eyebrow">MARKET MAP</span>
             <h2>{symbol} Structure</h2>
             <p>{analysis ? `${analysis.market_condition} at ${analysis.current_price}` : "Fetch candles to run the strategy."}</p>
           </div>
@@ -60,7 +62,8 @@ export default function Analysis({ state, setters, candles, analysis, loading, o
         {analysis?.warning ? <div className="risk-strip">{analysis.warning}</div> : null}
       </section>
 
-      <aside className="panel">
+      <aside className="panel verdict-panel">
+        <span className="eyebrow">SIGNAL STACK</span>
         <h2>Strategy Verdict</h2>
         {analysis ? (
           <>

@@ -17,6 +17,9 @@ export default function TradeIdeaCard({ idea, onPaperTrade }) {
           <Activity size={14} /> {idea.direction}
         </span>
       </div>
+      <div className="confidence-rail" aria-hidden="true">
+        <span style={{ width: `${Math.min(100, Math.max(0, idea.confidence_score))}%` }} />
+      </div>
       <div className="metric-grid">
         <div className="metric"><span>Entry zone</span><b>{fmt(idea.entry_zone[0])} - {fmt(idea.entry_zone[1])}</b></div>
         <div className="metric"><span>Stop loss</span><b>{fmt(idea.stop_loss)}</b></div>

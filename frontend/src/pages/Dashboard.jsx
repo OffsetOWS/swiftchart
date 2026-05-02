@@ -4,13 +4,19 @@ import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas }) {
   return (
     <div className="dashboard-grid">
-      <section className="panel">
+      <section className="panel hero-panel">
         <div className="panel-head">
           <div>
-            <h1>Price-action crypto scanner</h1>
-            <p>Potential setups based on support, resistance, sweeps, breakout confirmation, and no-trade zone filtering.</p>
+            <span className="eyebrow">AI MARKET STRUCTURE ENGINE</span>
+            <h1>Trade ideas from live crypto structure.</h1>
+            <p>SwiftChart scans support, resistance, liquidity sweeps, range edges, breakouts, and no-trade zones in one premium dashboard.</p>
           </div>
           <button className="icon-btn" onClick={refreshTopIdeas} title="Refresh top ideas"><RefreshCcw size={18} /></button>
+        </div>
+        <div className="hero-orbit" aria-hidden="true">
+          <span />
+          <span />
+          <span />
         </div>
         <div className="controls">
           <div className="field">
@@ -29,15 +35,15 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
             </div>
           </div>
         </div>
-        <div className="stats">
-          <div className="stat"><span className="muted">Scan list</span><b>10 liquid pairs</b></div>
+        <div className="stats bento-stats">
+          <div className="stat stat-wide"><span className="muted">Scanner universe</span><b>10 liquid pairs</b><small>BTC, ETH, SOL, OP, ARB and more</small></div>
           <div className="stat"><span className="muted">Risk default</span><b>1%</b></div>
           <div className="stat"><span className="muted">Minimum R:R</span><b>2.0R</b></div>
-          <div className="stat"><span className="muted">Mode</span><b>Paper</b></div>
+          <div className="stat"><span className="muted">Execution</span><b>Paper</b></div>
         </div>
         <div className="risk-strip">Trading ideas are not guaranteed profit. Use controlled risk and wait for confirmation.</div>
       </section>
-      <aside className="panel">
+      <aside className="panel ideas-panel">
         <div className="panel-head">
           <h2>Top 5 Trade Ideas</h2>
           <span className="badge">{timeframe}</span>

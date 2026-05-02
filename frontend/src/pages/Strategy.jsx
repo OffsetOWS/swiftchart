@@ -1,14 +1,16 @@
 export default function Strategy() {
   return (
     <div className="explain">
-      <section className="panel">
+      <section className="panel hero-panel strategy-hero">
+        <span className="eyebrow">SWIFTCHART PLAYBOOK</span>
         <h1>Buy support. Sell resistance. Avoid the middle.</h1>
         <p style={{ marginTop: 14 }}>
           The engine looks for clean ranges, waits for price to reach an edge, and prefers setups where liquidity has been swept or momentum confirms a breakout.
         </p>
         <div className="risk-strip">Every output is a potential setup, not a profit promise.</div>
       </section>
-      <section className="panel">
+      <section className="panel ideas-panel">
+        <span className="eyebrow">RULE ENGINE</span>
         <h2>Strategy Rules</h2>
         <div className="steps" style={{ marginTop: 14 }}>
           {[
