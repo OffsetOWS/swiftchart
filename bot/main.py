@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import sys
@@ -35,6 +36,8 @@ def main() -> None:
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    asyncio.set_event_loop(asyncio.new_event_loop())
     application = build_application()
     application.run_polling(allowed_updates=["message", "callback_query"])
 
