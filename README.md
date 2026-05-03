@@ -138,6 +138,9 @@ Supported commands:
 /start
 /analyze SOLUSDT 4h
 /top
+/subscribe
+/unsubscribe
+/alerts
 /strategy
 /help
 ```
@@ -183,6 +186,15 @@ bot/.venv/bin/python -m bot.main
 
 ```text
 TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_URL=
+TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_ALERT_CHAT_IDS=
+ALERTS_ENABLED=true
+ALERT_EXCHANGE=hyperliquid
+ALERT_TIMEFRAME=4h
+ALERT_SCAN_INTERVAL_SECONDS=1800
+ALERTS_RUN_SECRET=
+BOT_STATE_PATH=.swiftchart_bot_state.json
 BINANCE_API_KEY=
 BINANCE_API_SECRET=
 HYPERLIQUID_API_KEY=
@@ -198,6 +210,36 @@ HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 ```
 
 The current Binance and Hyperliquid candle connectors use public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
+
+### Telegram Trade Alerts
+
+Users can subscribe from Telegram:
+
+```text
+/subscribe
+```
+
+SwiftChart scans for valid setups and sends alerts only for new ideas that pass the strategy score threshold. It deduplicates already-sent alerts with `BOT_STATE_PATH`.
+
+Useful alert settings:
+
+```text
+ALERTS_ENABLED=true
+ALERT_EXCHANGE=hyperliquid
+ALERT_TIMEFRAME=4h
+ALERT_SCAN_INTERVAL_SECONDS=1800
+ALERTS_RUN_SECRET=choose_a_long_random_string
+```
+
+You can also pin alert recipients with `TELEGRAM_ALERT_CHAT_IDS`, a comma-separated list of Telegram chat IDs. This is useful on free hosts where local state can reset.
+
+The webhook app exposes a manual scan endpoint:
+
+```text
+https://your-render-service.onrender.com/alerts/run?secret=your_alert_secret
+```
+
+Use this with an external cron/wake service if the Render free service sleeps. Render Cron Jobs are available but have a minimum monthly charge, and Render background workers are not free.
 
 ### Deploy the Bot on Render
 
@@ -226,6 +268,11 @@ TELEGRAM_WEBHOOK_SECRET=choose_a_long_random_string
 DEFAULT_EXCHANGE=hyperliquid
 DEFAULT_TIMEFRAME=4h
 LIVE_TRADING_ENABLED=false
+ALERTS_ENABLED=true
+ALERT_EXCHANGE=hyperliquid
+ALERT_TIMEFRAME=4h
+ALERT_SCAN_INTERVAL_SECONDS=1800
+ALERTS_RUN_SECRET=choose_a_long_random_string
 ```
 
 `TELEGRAM_WEBHOOK_URL` is optional on Render because the bot uses Render's `RENDER_EXTERNAL_URL` automatically. If you set it manually, use:
@@ -242,7 +289,7 @@ https://your-render-service.onrender.com/health
 
 It should return `{"status":"ok"}`. Then message your bot on Telegram with `/start`.
 
-Free Render web services can spin down after idle time and wake back up on the next incoming request. For truly always-on instant replies, upgrade the service or use a paid worker/VPS.
+Free Render web services can spin down after idle time and wake back up on the next incoming request. For truly always-on instant replies and scheduled scans, use an external cron to hit `/alerts/run`, upgrade the service, or use a paid worker/VPS.
 
 ## Vercel Deployment
 

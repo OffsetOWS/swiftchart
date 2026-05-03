@@ -12,7 +12,7 @@ BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 sys.path.insert(0, str(ROOT))
 
-from bot.handlers import analyze, button_handler, help_command, start, strategy, top  # noqa: E402
+from bot.handlers import alerts_status, analyze, button_handler, help_command, start, strategy, subscribe, top, unsubscribe  # noqa: E402
 
 
 def build_application() -> Application:
@@ -26,6 +26,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("analyze", analyze))
     application.add_handler(CommandHandler("top", top))
+    application.add_handler(CommandHandler("subscribe", subscribe))
+    application.add_handler(CommandHandler("unsubscribe", unsubscribe))
+    application.add_handler(CommandHandler("alerts", alerts_status))
     application.add_handler(CommandHandler("strategy", strategy))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button_handler))

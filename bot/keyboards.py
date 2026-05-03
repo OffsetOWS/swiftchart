@@ -9,7 +9,10 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("Top 5 Trade Ideas", callback_data="top"),
             ],
             [
+                InlineKeyboardButton("Trade Alerts", callback_data="subscribe"),
                 InlineKeyboardButton("Strategy", callback_data="strategy"),
+            ],
+            [
                 InlineKeyboardButton("Help", callback_data="help"),
             ],
         ]
@@ -18,7 +21,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def command_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [["/top", "/strategy"], ["/help", "/analyze SOLUSDT 4h"]],
+        [["/top", "/subscribe"], ["/strategy", "/help"], ["/analyze SOLUSDT 4h"]],
         resize_keyboard=True,
         input_field_placeholder="/analyze SOLUSDT 4h",
     )

@@ -101,6 +101,25 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
     return "\n".join(lines)
 
 
+def format_trade_alert(idea: TradeIdea) -> str:
+    return (
+        f"SwiftChart Trade Alert: {idea.symbol} — {idea.timeframe.upper()}\n\n"
+        f"Signal: Potential {idea.direction}\n"
+        f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
+        f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
+        f"Market Regime: {idea.market_regime or '-'}\n"
+        f"HTF Bias: {idea.higher_timeframe_bias}\n\n"
+        f"Entry: {fmt_zone(idea.entry_zone)}\n"
+        f"Stop Loss: {fmt(idea.stop_loss)}\n"
+        f"TP1: {fmt(idea.take_profit_1)}\n"
+        f"TP2: {fmt(idea.take_profit_2)}\n"
+        f"R:R: {fmt(idea.risk_reward_ratio)}\n\n"
+        f"Reason:\n{idea.reason}\n\n"
+        f"Invalid if:\n{idea.invalid_condition}\n\n"
+        f"{RISK_WARNING}"
+    )
+
+
 def strategy_text() -> str:
     return (
         "SwiftChart Strategy\n\n"
@@ -119,6 +138,8 @@ def help_text() -> str:
         "/start — Open the main menu\n"
         "/analyze SOLUSDT 4h — Analyze a coin and timeframe\n"
         "/top — Show current top 5 trade ideas\n"
+        "/subscribe — Get Telegram alerts when valid setups appear\n"
+        "/unsubscribe — Stop Telegram alerts\n"
         "/strategy — Explain the strategy\n"
         "/help — Show commands\n\n"
         "Supported timeframes: 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1D\n\n"

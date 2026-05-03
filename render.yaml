@@ -17,3 +17,13 @@ services:
         value: 4h
       - key: LIVE_TRADING_ENABLED
         value: "false"
+      - key: ALERTS_ENABLED
+        value: "true"
+      - key: ALERT_EXCHANGE
+        value: hyperliquid
+      - key: ALERT_TIMEFRAME
+        value: 4h
+      - key: ALERT_SCAN_INTERVAL_SECONDS
+        value: "1800"
+      - key: ALERTS_RUN_SECRET
+        sync: false

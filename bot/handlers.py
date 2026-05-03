@@ -9,6 +9,7 @@ from app.models.schemas import RiskSettings
 from app.strategy.trade_ideas import analyze_dataframe
 from bot.formatter import format_analysis, format_top_ideas, help_text, strategy_text
 from bot.keyboards import command_keyboard, main_menu_keyboard
+from bot.storage import add_subscriber, get_subscribers, remove_subscriber
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,34 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await status.edit_text(f"Could not scan top ideas: {exc}\n\nNot financial advice. Manage your risk.")
 
 
+async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    add_subscriber(chat_id)
+    await update.effective_message.reply_text(
+        "Alerts enabled.\n\n"
+        "SwiftChart will notify this chat when a new valid setup appears. "
+        "Only setups scoring 65/100 or higher are eligible.\n\n"
+        "Use /unsubscribe to stop alerts.\n\n"
+        "Not financial advice. Manage your risk."
+    )
+
+
+async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    remove_subscriber(chat_id)
+    await update.effective_message.reply_text("Alerts disabled for this chat.")
+
+
+async def alerts_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    subscribers = get_subscribers()
+    enabled = update.effective_chat.id in subscribers
+    await update.effective_message.reply_text(
+        f"Alert status: {'enabled' if enabled else 'disabled'}\n"
+        f"Subscribers: {len(subscribers)}\n\n"
+        "Use /subscribe to receive setup alerts or /unsubscribe to stop them."
+    )
+
+
 async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(strategy_text())
 
@@ -152,6 +181,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.message.reply_text("Type /analyze SOLUSDT 4h to analyze a coin.")
     elif query.data == "top":
         await top(update, context)
+    elif query.data == "subscribe":
+        await subscribe(update, context)
     elif query.data == "strategy":
         await query.message.reply_text(strategy_text())
     elif query.data == "help":

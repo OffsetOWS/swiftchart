@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -6,10 +7,12 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from telegram import Update
 from telegram.ext import Application
 
+from bot.alerts import alert_loop, run_alert_scan
 from bot.main import build_application
 
 logger = logging.getLogger(__name__)
 telegram_app: Application | None = None
+alert_task: asyncio.Task | None = None
 
 
 def webhook_url() -> str | None:
@@ -26,7 +29,7 @@ def webhook_url() -> str | None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global telegram_app
+    global alert_task, telegram_app
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
@@ -49,9 +52,19 @@ async def lifespan(_: FastAPI):
     else:
         logger.warning("No webhook URL configured. Set TELEGRAM_WEBHOOK_URL or WEBHOOK_URL.")
 
+    if os.getenv("ALERTS_ENABLED", "true").lower() == "true":
+        alert_task = asyncio.create_task(alert_loop(telegram_app.bot))
+        logger.info("Telegram trade alert scanner enabled.")
+
     try:
         yield
     finally:
+        if alert_task is not None:
+            alert_task.cancel()
+            try:
+                await alert_task
+            except asyncio.CancelledError:
+                pass
         if telegram_app is not None:
             await telegram_app.stop()
             await telegram_app.shutdown()
@@ -68,6 +81,25 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+def check_alert_secret(secret: str | None, x_swiftchart_alert_secret: str | None) -> None:
+    expected = os.getenv("ALERTS_RUN_SECRET")
+    if expected and secret != expected and x_swiftchart_alert_secret != expected:
+        raise HTTPException(status_code=403, detail="Invalid alert secret.")
+
+
+@app.get("/alerts/run")
+async def run_alerts(secret: str | None = None, x_swiftchart_alert_secret: str | None = Header(default=None)):
+    check_alert_secret(secret, x_swiftchart_alert_secret)
+    if telegram_app is None:
+        raise HTTPException(status_code=503, detail="Telegram app is not ready.")
+    return await run_alert_scan(telegram_app.bot)
+
+
+@app.post("/alerts/run")
+async def run_alerts_post(secret: str | None = None, x_swiftchart_alert_secret: str | None = Header(default=None)):
+    return await run_alerts(secret=secret, x_swiftchart_alert_secret=x_swiftchart_alert_secret)
 
 
 @app.post("/telegram/webhook")
