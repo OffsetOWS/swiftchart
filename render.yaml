@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: swiftchart-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r bot/requirements.txt
+    startCommand: uvicorn bot.webhook:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: DEFAULT_EXCHANGE
+        value: hyperliquid
+      - key: DEFAULT_TIMEFRAME
+        value: 4h
+      - key: LIVE_TRADING_ENABLED
+        value: "false"

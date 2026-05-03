@@ -108,6 +108,8 @@ DEFAULT_RISK_PER_TRADE=1
 DEFAULT_MIN_RR=2
 DEFAULT_MAX_OPEN_TRADES=3
 TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_URL=
+TELEGRAM_WEBHOOK_SECRET=
 BINANCE_API_KEY=
 BINANCE_API_SECRET=
 HYPERLIQUID_API_KEY=
@@ -195,30 +197,56 @@ HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 
 The current Binance and Hyperliquid candle connectors use public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
 
-### Deploy the Bot Online
+### Deploy the Bot on Render
 
-Deploy the `bot/` worker separately from the Vercel website on a Python-capable host such as Render, Railway, Fly.io, or a VPS.
+Render's free tier supports free web services. Background workers are not free, so SwiftChart Bot includes a webhook web service for Render and keeps polling available for local testing.
 
-Recommended worker start command:
+The repo includes `render.yaml` with:
 
-```bash
-python -m bot.main
+```text
+Build command: pip install -r bot/requirements.txt
+Start command: uvicorn bot.webhook:app --host 0.0.0.0 --port $PORT
+Service type: Web Service
+Plan: Free
 ```
 
-Recommended deployment notes:
+Recommended Render steps:
 
-- Set the working directory to the repository root.
-- Install dependencies from `bot/requirements.txt`.
-- Set `TELEGRAM_BOT_TOKEN` in the host environment.
-- Keep `LIVE_TRADING_ENABLED=false`.
-- Use `DEFAULT_EXCHANGE=hyperliquid` if Binance blocks your host region.
-- The bot uses polling, so it should run as a background worker/service.
+1. Rotate your BotFather token before deploying if it was ever exposed in local logs.
+2. Go to Render, click **New**, then **Blueprint**.
+3. Connect the GitHub repo `OffsetOWS/swiftchart`.
+4. Select the `main` branch and let Render read `render.yaml`.
+5. Add environment variables:
+
+```text
+TELEGRAM_BOT_TOKEN=your_botfather_token
+TELEGRAM_WEBHOOK_SECRET=choose_a_long_random_string
+DEFAULT_EXCHANGE=hyperliquid
+DEFAULT_TIMEFRAME=4h
+LIVE_TRADING_ENABLED=false
+```
+
+`TELEGRAM_WEBHOOK_URL` is optional on Render because the bot uses Render's `RENDER_EXTERNAL_URL` automatically. If you set it manually, use:
+
+```text
+https://your-render-service.onrender.com/telegram/webhook
+```
+
+After the first successful deploy, open:
+
+```text
+https://your-render-service.onrender.com/health
+```
+
+It should return `{"status":"ok"}`. Then message your bot on Telegram with `/start`.
+
+Free Render web services can spin down after idle time and wake back up on the next incoming request. For truly always-on instant replies, upgrade the service or use a paid worker/VPS.
 
 ## Vercel Deployment
 
 This repository is configured for Vercel to deploy the React/Vite frontend and expose the FastAPI backend through Vercel Python serverless functions.
 
-The Telegram bot is not deployed on Vercel. Run it separately as a worker on Render, Railway, Fly.io, or a VPS.
+The Telegram bot is not deployed on Vercel. Run it separately as a Render web service, Railway service, Fly.io app, or VPS process.
 
 Vercel settings:
 

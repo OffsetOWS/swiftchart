@@ -16,7 +16,8 @@ from bot.handlers import analyze, button_handler, help_command, start, strategy,
 
 
 def build_application() -> Application:
-    load_dotenv()
+    load_dotenv(ROOT / ".env")
+    load_dotenv(ROOT / "bot" / ".env")
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required.")
