@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field
 
 Direction = Literal["Long", "Short"]
 MarketCondition = Literal[
+    "RANGE_BOUND",
+    "TRENDING_UP",
+    "TRENDING_DOWN",
+    "BREAKOUT",
+    "BREAKDOWN",
+    "CHOP",
+    "NO_TRADE",
     "Trending up",
     "Trending down",
     "Range-bound",
@@ -30,6 +37,11 @@ class Zone(BaseModel):
     upper: float
     strength: float
     touches: int
+    lower_bound: float | None = None
+    upper_bound: float | None = None
+    strength_score: float | None = None
+    last_reaction_time: datetime | None = None
+    role: Literal["SUPPORT", "RESISTANCE"] | None = None
 
 
 class LiquiditySweep(BaseModel):
@@ -38,6 +50,9 @@ class LiquiditySweep(BaseModel):
     candle_time: datetime
     reclaim_price: float
     strength: float
+    sweep_direction: Literal["bullish", "bearish"] | None = None
+    confirmation_status: Literal["confirmed", "unconfirmed"] = "confirmed"
+    sweep_quality_score: float | None = None
 
 
 class RiskSettings(BaseModel):
@@ -53,6 +68,10 @@ class TradeIdea(BaseModel):
     timeframe: str
     exchange: str
     direction: Direction
+    market_regime: MarketCondition | None = None
+    higher_timeframe_bias: Literal["HTF_BULLISH", "HTF_BEARISH", "HTF_NEUTRAL"] = "HTF_NEUTRAL"
+    setup_grade: str | None = None
+    setup_score: float | None = None
     entry_zone: tuple[float, float]
     stop_loss: float
     take_profit_1: float
@@ -61,6 +80,7 @@ class TradeIdea(BaseModel):
     reason: str
     confidence_score: float
     invalid_condition: str
+    warning: str = "Not financial advice. Manage risk."
     rank_score: float = 0
     position_size_units: float | None = None
     risk_amount: float | None = None
@@ -77,6 +97,8 @@ class AnalysisResponse(BaseModel):
     liquidity_sweeps: list[LiquiditySweep]
     trade_ideas: list[TradeIdea]
     warning: str | None = None
+    higher_timeframe_bias: Literal["HTF_BULLISH", "HTF_BEARISH", "HTF_NEUTRAL"] = "HTF_NEUTRAL"
+    no_trade_reason: str | None = None
 
 
 class Market(BaseModel):

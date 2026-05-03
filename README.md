@@ -10,9 +10,11 @@ It is a full-stack, paper-first trading analysis app built with a FastAPI backen
 - Hyperliquid OHLCV market data connector
 - Modular exchange layer for future sources
 - Swing high and swing low detection
-- Horizontal support and resistance zones
-- Liquidity sweep / stop-hunt detection
-- Range, breakout, breakdown, trend, and no-trade-zone classification
+- Scored support and resistance zones with touches, reaction strength, volume response, and recency
+- Confirmed liquidity sweep / stop-hunt detection
+- RANGE_BOUND, TRENDING_UP, TRENDING_DOWN, BREAKOUT, BREAKDOWN, CHOP, and NO_TRADE regime classification
+- Multi-timeframe bias filter
+- Setup scoring and grading; only 65/100+ trade ideas are shown
 - Top 5 trade idea scanner across liquid crypto pairs
 - Risk settings for account size, risk per trade, max open trades, and minimum R:R
 - Paper-trading ledger backed by SQLite

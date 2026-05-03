@@ -8,6 +8,15 @@ from app.strategy.trade_ideas import analyze_dataframe
 router = APIRouter()
 
 
+def higher_timeframes_for(timeframe: str) -> list[str]:
+    normalized = timeframe.lower()
+    if normalized in {"30m", "1h"}:
+        return ["4h", "1d"]
+    if normalized in {"2h", "4h", "6h", "8h", "12h"}:
+        return ["1d"]
+    return []
+
+
 @router.get("/markets", response_model=list[Market])
 async def markets(exchange: str = Query(default="binance")):
     try:
@@ -59,7 +68,13 @@ async def analyze(
         df = await client.get_candles(symbol, timeframe, 320)
         if len(df) < 80:
             raise HTTPException(status_code=422, detail="Not enough candle history for analysis.")
-        return analyze_dataframe(symbol.upper(), timeframe, exchange, df, risk)
+        htf_dfs = []
+        for htf in higher_timeframes_for(timeframe):
+            try:
+                htf_dfs.append(await client.get_candles(symbol, htf, 240))
+            except Exception:
+                continue
+        return analyze_dataframe(symbol.upper(), timeframe, exchange, df, risk, htf_dfs)
     except HTTPException:
         raise
     except Exception as exc:
@@ -88,9 +103,23 @@ async def top_ideas(
         try:
             df = await client.get_candles(symbol, timeframe, 260)
             if len(df) >= 80:
-                analysis = analyze_dataframe(symbol, timeframe, exchange, df, risk)
+                htf_dfs = []
+                for htf in higher_timeframes_for(timeframe):
+                    try:
+                        htf_dfs.append(await client.get_candles(symbol, htf, 220))
+                    except Exception:
+                        continue
+                analysis = analyze_dataframe(symbol, timeframe, exchange, df, risk, htf_dfs)
                 ideas.extend(analysis.trade_ideas)
         except Exception as exc:
             errors.append({"symbol": symbol, "error": str(exc)})
     ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]
-    return {"timeframe": timeframe, "exchange": exchange, "ideas": ranked, "errors": errors}
+    return {
+        "timeframe": timeframe,
+        "exchange": exchange,
+        "ideas": ranked,
+        "errors": errors,
+        "message": None
+        if len(ranked) >= 5
+        else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
+    }

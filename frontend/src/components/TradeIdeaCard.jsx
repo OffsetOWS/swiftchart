@@ -7,6 +7,7 @@ function fmt(value) {
 
 export default function TradeIdeaCard({ idea, onPaperTrade }) {
   const directionClass = idea.direction.toLowerCase();
+  const score = idea.setup_score ?? idea.confidence_score;
 
   return (
     <article className={`idea-card ${directionClass}`}>
@@ -20,9 +21,13 @@ export default function TradeIdeaCard({ idea, onPaperTrade }) {
         </span>
       </div>
       <div className="confidence-rail" aria-hidden="true">
-        <span style={{ width: `${Math.min(100, Math.max(0, idea.confidence_score))}%` }} />
+        <span style={{ width: `${Math.min(100, Math.max(0, score))}%` }} />
       </div>
       <div className="metric-grid">
+        <div className="metric"><span>Setup score</span><b>{score}/100</b></div>
+        <div className="metric"><span>Grade</span><b>{idea.setup_grade || "Valid Setup"}</b></div>
+        <div className="metric"><span>Market regime</span><b>{idea.market_regime || "-"}</b></div>
+        <div className="metric"><span>HTF bias</span><b>{idea.higher_timeframe_bias || "HTF_NEUTRAL"}</b></div>
         <div className="metric"><span>Entry zone</span><b>{fmt(idea.entry_zone[0])} - {fmt(idea.entry_zone[1])}</b></div>
         <div className="metric"><span>Stop loss</span><b>{fmt(idea.stop_loss)}</b></div>
         <div className="metric"><span>Take profit 1</span><b>{fmt(idea.take_profit_1)}</b></div>

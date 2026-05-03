@@ -27,6 +27,14 @@ def validate_timeframe(value: str) -> str | None:
     return timeframe
 
 
+def higher_timeframes_for(timeframe: str) -> list[str]:
+    if timeframe in {"30m", "1h"}:
+        return ["4h", "1d"]
+    if timeframe in {"2h", "4h", "6h", "8h", "12h"}:
+        return ["1d"]
+    return []
+
+
 async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None):
     settings = get_settings()
     selected_exchange = exchange or settings.default_exchange
@@ -34,6 +42,12 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
     df = await client.get_candles(symbol.upper(), timeframe, 320)
     if len(df) < 80:
         raise ValueError("Not enough candle history for analysis.")
+    htf_dfs = []
+    for htf in higher_timeframes_for(timeframe):
+        try:
+            htf_dfs.append(await client.get_candles(symbol.upper(), htf, 240))
+        except Exception as exc:
+            logger.warning("HTF fetch failed for %s %s: %s", symbol, htf, exc)
     risk = RiskSettings(
         account_size=settings.default_account_size,
         risk_per_trade_pct=settings.default_risk_per_trade,
@@ -41,7 +55,7 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
         max_open_trades=settings.default_max_open_trades,
         preferred_timeframe=timeframe,
     )
-    return analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk)
+    return analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
 
 
 async def scan_top_ideas(timeframe: str, exchange: str | None = None):
@@ -60,7 +74,13 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None):
         try:
             df = await client.get_candles(symbol, timeframe, 260)
             if len(df) >= 80:
-                analysis = analyze_dataframe(symbol, timeframe, selected_exchange, df, risk)
+                htf_dfs = []
+                for htf in higher_timeframes_for(timeframe):
+                    try:
+                        htf_dfs.append(await client.get_candles(symbol, htf, 220))
+                    except Exception:
+                        continue
+                analysis = analyze_dataframe(symbol, timeframe, selected_exchange, df, risk, htf_dfs)
                 ideas.extend(analysis.trade_ideas)
         except Exception as exc:
             logger.warning("Top idea scan failed for %s on %s: %s", symbol, selected_exchange, exc)

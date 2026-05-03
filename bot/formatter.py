@@ -35,6 +35,9 @@ def format_analysis(analysis: AnalysisResponse) -> str:
     if idea is None:
         trade_block = (
             "Signal: No Trade\n"
+            "Setup Score: -\n"
+            "Grade: No Trade\n"
+            f"HTF Bias: {analysis.higher_timeframe_bias}\n"
             "Entry: -\n"
             "Stop Loss: -\n"
             "TP1: -\n"
@@ -47,6 +50,9 @@ def format_analysis(analysis: AnalysisResponse) -> str:
     else:
         trade_block = (
             f"Signal: {signal_label(idea)}\n"
+            f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
+            f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
+            f"HTF Bias: {idea.higher_timeframe_bias}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"Stop Loss: {fmt(idea.stop_loss)}\n"
             f"TP1: {fmt(idea.take_profit_1)}\n"
@@ -59,7 +65,7 @@ def format_analysis(analysis: AnalysisResponse) -> str:
 
     return (
         f"SwiftChart Analysis: {analysis.symbol} — {timeframe}\n\n"
-        f"Market Condition: {analysis.market_condition}\n"
+        f"Market Regime: {analysis.market_condition}\n"
         f"Support Zone: {_zone_range(analysis.support_zones)}\n"
         f"Resistance Zone: {_zone_range(analysis.resistance_zones)}\n"
         f"{trade_block}\n\n"
@@ -73,15 +79,19 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
     if not ideas:
         return (
             f"SwiftChart Top 5 — {timeframe.upper()} ({exchange})\n\n"
-            "No clean setups found right now.\n\n"
+            "Only 0 valid setups found. Other coins are currently no-trade.\n\n"
             f"{RISK_WARNING}"
         )
 
     lines = [f"SwiftChart Top 5 — {timeframe.upper()} ({exchange})"]
+    if len(ideas) < 5:
+        lines.append(f"Only {len(ideas)} valid setups found. Other coins are currently no-trade.")
     for index, idea in enumerate(ideas, start=1):
         lines.append(
             "\n"
             f"{index}. {idea.symbol} — {idea.direction}\n"
+            f"Score: {fmt(idea.setup_score or idea.confidence_score)}/100 | Grade: {idea.setup_grade or 'Valid Setup'}\n"
+            f"Regime: {idea.market_regime or '-'} | HTF: {idea.higher_timeframe_bias}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"SL: {fmt(idea.stop_loss)} | TP1: {fmt(idea.take_profit_1)} | TP2: {fmt(idea.take_profit_2)}\n"
             f"R:R: {fmt(idea.risk_reward_ratio)} | Confidence: {fmt(idea.confidence_score)}%\n"
@@ -94,10 +104,11 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
 def strategy_text() -> str:
     return (
         "SwiftChart Strategy\n\n"
-        "SwiftChart detects support/resistance, liquidity sweeps, range conditions, breakouts, "
-        "and avoids mid-range entries.\n\n"
+        "SwiftChart classifies market regime first, scores support/resistance zones, confirms liquidity sweeps, "
+        "checks higher-timeframe bias, and rejects unclear or mid-range setups.\n\n"
         "Simple version:\n"
-        "Buy near support, sell near resistance, avoid the middle, and wait for liquidity sweeps.\n\n"
+        "Buy near support, sell near resistance, avoid the middle, and wait for liquidity sweeps.\n"
+        "Only setups scoring 65/100 or higher are shown.\n\n"
         f"{RISK_WARNING}"
     )
 
