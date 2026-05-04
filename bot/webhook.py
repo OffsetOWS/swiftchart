@@ -1,7 +1,14 @@
 import asyncio
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BACKEND = ROOT / "backend"
+sys.path.insert(0, str(BACKEND))
+sys.path.insert(0, str(ROOT))
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from telegram import Update
