@@ -1,68 +1,16 @@
-import { Activity, Bitcoin, Clock3, RefreshCcw, ShieldCheck } from "lucide-react";
+import { RefreshCcw } from "lucide-react";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 
-const FEATURES = [
-  "liquidity sweeps",
-  "support & resistance",
-  "top 5 trade ideas",
-  "Binance data",
-  "Hyperliquid data",
-  "paper trading",
-  "range detection",
-  "breakout alerts",
-];
-
-export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas }) {
+export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas, compact = false }) {
   const topIdea = topIdeas[0];
 
   return (
-    <div className="home-flow">
-      <section className="portfolio-hero">
-        <div className="hero-copy">
-          <span className="eyebrow">SWIFTCHART</span>
-          <h1>
-            <span>SwiftChart</span>
-            <span>AI-powered crypto market analysis.</span>
-            <span>Find ranges. Detect sweeps. Avoid bad entries.</span>
-          </h1>
-          <p>SwiftChart helps traders detect support, resistance, liquidity sweeps, range conditions, and high-probability crypto trade ideas.</p>
-          <button className="launch-cta" onClick={() => document.getElementById("dashboard-preview")?.scrollIntoView({ behavior: "smooth" })}>
-            Launch SwiftChart
-          </button>
-        </div>
-        <div className="hero-chart" aria-hidden="true">
-          <span className="chart-line line-a" />
-          <span className="chart-line line-b" />
-          <span className="chart-line line-c" />
-          <span className="chart-node node-a" />
-          <span className="chart-node node-b" />
-          <span className="chart-node node-c" />
-        </div>
-      </section>
-
-      <section className="marquee-stack" aria-label="SwiftChart features">
-        {FEATURES.map((feature, index) => (
-          <div className="marquee-row" key={feature}>
-            <div className={`marquee-track ${index % 2 ? "reverse" : ""}`}>
-              {Array.from({ length: 8 }).map((_, itemIndex) => (
-                <span key={`${feature}-${itemIndex}`}>{feature}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </section>
-
-      <section id="dashboard-preview" className="dashboard-grid dashboard-bento">
-        <div className="section-kicker">
-          <span className="eyebrow">LIVE PRODUCT PREVIEW</span>
-          <h2>Main dashboard preview</h2>
-        </div>
-
-        <section className="panel hero-panel bento-hero">
+    <div className={compact ? "dashboard-grid compact-dashboard" : "dashboard-grid dashboard-bento"}>
+        <section className="panel hero-panel bento-hero" id="about-us">
           <div>
-            <span className="eyebrow">ANALYSIS CONTROLS</span>
-            <h2>Choose your exchange and timeframe.</h2>
-            <p>Scan liquid crypto markets for clean range edges, swept liquidity, and breakout conditions.</p>
+            <span className="eyebrow">MARKET TERMINAL</span>
+            <h2>{compact ? "Trade Ideas" : "Dashboard"}</h2>
+            <p>Scan liquid markets for clean edges, swept liquidity, and breakout conditions without forcing mid-range noise.</p>
           </div>
           <button className="icon-btn" onClick={refreshTopIdeas} title="Refresh top ideas"><RefreshCcw size={18} /></button>
           <div className="controls">
@@ -84,6 +32,18 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
           </div>
         </section>
 
+        {!compact ? (
+          <section className="panel chart-preview-panel">
+            <span className="eyebrow">CHART PREVIEW</span>
+            <div className="terminal-chart-preview" aria-hidden="true">
+              <span className="range-line support" />
+              <span className="range-line resistance" />
+              {Array.from({ length: 18 }).map((_, index) => <i key={index} style={{ "--h": `${18 + ((index * 13) % 54)}%` }} />)}
+            </div>
+            <p>{topIdea ? `${topIdea.symbol} is the current strongest candidate.` : "Waiting for a clean setup from the scanner."}</p>
+          </section>
+        ) : null}
+
         <section className="panel ideas-panel dominant-ideas">
           <div className="panel-head">
             <div>
@@ -100,22 +60,18 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
         </section>
 
         <section className="panel mini-card">
-          <Activity size={20} />
           <span>Market condition</span>
           <b>{topIdea ? "Setup detected" : "Scanning"}</b>
         </section>
         <section className="panel mini-card">
-          <Bitcoin size={20} />
           <span>Selected coin</span>
           <b>{topIdea?.symbol || "SOLUSDT"}</b>
         </section>
         <section className="panel mini-card">
-          <Clock3 size={20} />
           <span>Timeframe</span>
           <b>{timeframe}</b>
         </section>
         <section className="panel mini-card">
-          <ShieldCheck size={20} />
           <span>Strategy status</span>
           <b>Paper mode</b>
         </section>
@@ -129,7 +85,6 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
         <section className="panel risk-card">
           Trading ideas are not guaranteed profit. Use controlled risk and wait for confirmation.
         </section>
-      </section>
     </div>
   );
 }
