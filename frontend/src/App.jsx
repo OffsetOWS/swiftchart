@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { BarChart3, BookOpen, History, LayoutDashboard } from "lucide-react";
+import { BarChart3, History, LayoutDashboard } from "lucide-react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
-import Strategy from "./pages/Strategy.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
 import { createPaperTrade, getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
 import "./styles/global.css";
@@ -99,7 +98,6 @@ export default function App() {
           <button className={page === "dashboard" ? "active" : ""} onClick={() => setPage("dashboard")}><LayoutDashboard size={15} /> Dashboard</button>
           <button className={page === "analysis" ? "active" : ""} onClick={() => setPage("analysis")}><BarChart3 size={15} /> Coin Analysis</button>
           <button className={page === "history" ? "active" : ""} onClick={() => setPage("history")}><History size={15} /> Trade History</button>
-          <button className={page === "strategy" ? "active" : ""} onClick={() => setPage("strategy")}><BookOpen size={15} /> Strategy</button>
         </nav>
       </header>
 
@@ -128,7 +126,6 @@ export default function App() {
         />
       )}
       {page === "history" && <TradeHistory />}
-      {page === "strategy" && <Strategy />}
     </main>
   );
 }
