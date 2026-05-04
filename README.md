@@ -335,6 +335,14 @@ It should return `{"status":"ok"}`. Then message your bot on Telegram with `/sta
 
 Free Render web services can spin down after idle time and wake back up on the next incoming request. For truly always-on instant replies and scheduled scans, use an external cron to hit `/alerts/run`, upgrade the service, or use a paid worker/VPS.
 
+If Render logs show `can't use getUpdates method while webhook is active`, the service is running the local polling entrypoint by mistake. Update the Render service start command to:
+
+```text
+uvicorn bot.webhook:app --host 0.0.0.0 --port $PORT
+```
+
+Do not use `python -m bot.main` for the hosted Render web service. That command is only for local polling tests.
+
 ## Vercel Deployment
 
 This repository is configured for Vercel to deploy the React/Vite frontend and expose the FastAPI backend through Vercel Python serverless functions.

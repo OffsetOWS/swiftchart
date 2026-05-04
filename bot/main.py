@@ -61,7 +61,7 @@ def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     asyncio.set_event_loop(asyncio.new_event_loop())
     application = build_application()
-    application.run_polling(allowed_updates=["message", "callback_query"])
+    application.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=True)
 
 
 if __name__ == "__main__":
