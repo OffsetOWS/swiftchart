@@ -43,3 +43,26 @@ export function createPaperTrade(payload) {
 export function getPaperTrades() {
   return request("/api/paper-trades");
 }
+
+export function getTradeHistory(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, value);
+    }
+  });
+  const query = params.toString();
+  return request(`/api/trade-history${query ? `?${query}` : ""}`);
+}
+
+export function getTradeHistoryDetail(id) {
+  return request(`/api/trade-history/${id}`);
+}
+
+export function checkTradeHistory() {
+  return request("/api/trade-history/check", { method: "POST" });
+}
+
+export function getTradeStats() {
+  return request("/api/trade-stats");
+}

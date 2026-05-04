@@ -120,6 +120,39 @@ def format_trade_alert(idea: TradeIdea) -> str:
     )
 
 
+def format_history(records: list[dict]) -> str:
+    if not records:
+        return "SwiftChart History\n\nNo saved trade ideas yet."
+
+    lines = ["SwiftChart History — Latest 5"]
+    for record in records[:5]:
+        r_multiple = record.get("pnl_r_multiple")
+        lines.append(
+            "\n"
+            f"{record['symbol']} — {record['timeframe'].upper()} — {record['direction']}\n"
+            f"Status: {record['status']} | Result: {record['result']}\n"
+            f"Setup Score: {fmt(record.get('setup_score'))}/100\n"
+            f"TP/SL: TP1 {fmt(record['take_profit_1'])} | TP2 {fmt(record['take_profit_2'])} | SL {fmt(record['stop_loss'])}\n"
+            f"R Multiple: {fmt(r_multiple)}"
+        )
+    lines.append(f"\n{RISK_WARNING}")
+    return "\n".join(lines)
+
+
+def format_stats(data: dict) -> str:
+    return (
+        "SwiftChart Performance Stats\n\n"
+        f"Total setups: {data['total_ideas']}\n"
+        f"Win rate: {fmt(data['win_rate'])}%\n"
+        f"TP hit rate: {fmt(data['tp_hit_rate'])}%\n"
+        f"SL hit rate: {fmt(data['sl_hit_rate'])}%\n"
+        f"Average R: {fmt(data['average_r_multiple'])}\n"
+        f"Open setups: {data['open_count']}\n"
+        f"Ambiguous: {data['ambiguous_count']}\n\n"
+        f"{RISK_WARNING}"
+    )
+
+
 def strategy_text() -> str:
     return (
         "SwiftChart Strategy\n\n"
@@ -140,6 +173,9 @@ def help_text() -> str:
         "/top — Show current top 5 trade ideas\n"
         "/subscribe — Get Telegram alerts when valid setups appear\n"
         "/unsubscribe — Stop Telegram alerts\n"
+        "/history — Show latest saved trade ideas and outcomes\n"
+        "/stats — Show performance summary\n"
+        "/checktrades — Manually update saved outcomes\n"
         "/strategy — Explain the strategy\n"
         "/help — Show commands\n\n"
         "Supported timeframes: 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1D\n\n"

@@ -109,6 +109,7 @@ DEFAULT_ACCOUNT_SIZE=10000
 DEFAULT_RISK_PER_TRADE=1
 DEFAULT_MIN_RR=2
 DEFAULT_MAX_OPEN_TRADES=3
+TRADE_HISTORY_EXPIRY_BARS=12
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_URL=
 TELEGRAM_WEBHOOK_SECRET=
@@ -126,6 +127,46 @@ GET  /api/analyze?symbol=SOLUSDT&timeframe=4h
 GET  /api/top-ideas?timeframe=4h
 POST /api/paper-trade
 GET  /api/paper-trades
+GET  /api/trade-history
+GET  /api/trade-history/{id}
+POST /api/trade-history/check
+GET  /api/trade-stats
+```
+
+## Trade History and Outcome Tracking
+
+SwiftChart saves every generated trade idea as an immutable historical analysis record. Saved records keep the original entry zone, stop, targets, score, reason, and invalidation even if the strategy changes later.
+
+Outcome checking fetches later candles and updates:
+
+```text
+PENDING
+ENTRY_TRIGGERED
+TP1_HIT
+TP2_HIT
+SL_HIT
+EXPIRED
+INVALIDATED
+AMBIGUOUS
+```
+
+Results are:
+
+```text
+WIN
+PARTIAL_WIN
+LOSS
+NO_ENTRY
+AMBIGUOUS
+OPEN
+```
+
+If TP and SL occur inside the same candle, SwiftChart marks the result `AMBIGUOUS` unless lower-timeframe data is available to resolve order. Ambiguous outcomes are not counted as wins or losses.
+
+Manual outcome check:
+
+```bash
+curl -X POST http://localhost:8000/api/trade-history/check
 ```
 
 ## Telegram Bot
@@ -141,6 +182,9 @@ Supported commands:
 /subscribe
 /unsubscribe
 /alerts
+/history
+/stats
+/checktrades
 /strategy
 /help
 ```

@@ -12,12 +12,27 @@ BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 sys.path.insert(0, str(ROOT))
 
-from bot.handlers import alerts_status, analyze, button_handler, help_command, start, strategy, subscribe, top, unsubscribe  # noqa: E402
+from bot.handlers import (  # noqa: E402
+    alerts_status,
+    analyze,
+    button_handler,
+    check_trades,
+    help_command,
+    history,
+    start,
+    stats_command,
+    strategy,
+    subscribe,
+    top,
+    unsubscribe,
+)
+from app.utils.database import init_db  # noqa: E402
 
 
 def build_application() -> Application:
     load_dotenv(ROOT / ".env")
     load_dotenv(ROOT / "bot" / ".env")
+    init_db()
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required.")
@@ -29,6 +44,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("subscribe", subscribe))
     application.add_handler(CommandHandler("unsubscribe", unsubscribe))
     application.add_handler(CommandHandler("alerts", alerts_status))
+    application.add_handler(CommandHandler("history", history))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("checktrades", check_trades))
     application.add_handler(CommandHandler("strategy", strategy))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button_handler))

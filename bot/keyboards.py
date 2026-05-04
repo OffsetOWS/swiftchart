@@ -21,7 +21,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def command_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [["/top", "/subscribe"], ["/strategy", "/help"], ["/analyze SOLUSDT 4h"]],
+        [["/top", "/history"], ["/stats", "/checktrades"], ["/subscribe", "/strategy"], ["/help", "/analyze SOLUSDT 4h"]],
         resize_keyboard=True,
         input_field_placeholder="/analyze SOLUSDT 4h",
     )

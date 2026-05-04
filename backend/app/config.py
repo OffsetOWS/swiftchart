@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     default_risk_per_trade: float = Field(default=1.0, ge=0.01, le=20)
     default_min_rr: float = Field(default=2.0, ge=0.1)
     default_max_open_trades: int = Field(default=3, ge=1)
+    trade_history_expiry_bars: int = Field(default=12, ge=1)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

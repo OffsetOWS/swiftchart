@@ -5,6 +5,17 @@ from pydantic import BaseModel, Field
 
 
 Direction = Literal["Long", "Short"]
+TradeHistoryStatus = Literal[
+    "PENDING",
+    "ENTRY_TRIGGERED",
+    "TP1_HIT",
+    "TP2_HIT",
+    "SL_HIT",
+    "EXPIRED",
+    "INVALIDATED",
+    "AMBIGUOUS",
+]
+TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "LOSS", "NO_ENTRY", "AMBIGUOUS", "OPEN"]
 MarketCondition = Literal[
     "RANGE_BOUND",
     "TRENDING_UP",
@@ -125,3 +136,48 @@ class PaperTrade(PaperTradeCreate):
     id: int
     status: Literal["open", "closed"] = "open"
     created_at: datetime
+
+
+class TradeHistoryRecord(BaseModel):
+    id: int
+    symbol: str
+    timeframe: str
+    exchange: str
+    direction: str
+    market_regime: str | None = None
+    higher_timeframe_bias: str | None = None
+    setup_score: float | None = None
+    setup_grade: str | None = None
+    entry_zone_low: float
+    entry_zone_high: float
+    stop_loss: float
+    take_profit_1: float
+    take_profit_2: float
+    risk_reward: float
+    confidence: float
+    reason: str
+    invalidation: str
+    created_at: datetime
+    status: TradeHistoryStatus
+    outcome_checked_at: datetime | None = None
+    entry_triggered_at: datetime | None = None
+    closed_at: datetime | None = None
+    result: TradeHistoryResult
+    pnl_r_multiple: float | None = None
+
+
+class TradeStats(BaseModel):
+    total_ideas: int
+    entry_triggered_count: int
+    win_count: int
+    loss_count: int
+    no_entry_count: int
+    ambiguous_count: int
+    open_count: int
+    tp_hit_rate: float
+    sl_hit_rate: float
+    win_rate: float
+    average_r_multiple: float
+    best_setup_grade_performance: list[dict]
+    best_timeframe_performance: list[dict]
+    best_symbol_performance: list[dict]

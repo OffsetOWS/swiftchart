@@ -6,8 +6,9 @@ from telegram.ext import ContextTypes
 from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
 from app.exchanges.factory import get_exchange
 from app.models.schemas import RiskSettings
+from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas, stats
 from app.strategy.trade_ideas import analyze_dataframe
-from bot.formatter import format_analysis, format_top_ideas, help_text, strategy_text
+from bot.formatter import format_analysis, format_history, format_stats, format_top_ideas, help_text, strategy_text
 from bot.keyboards import command_keyboard, main_menu_keyboard
 from bot.storage import add_subscriber, get_subscribers, remove_subscriber
 
@@ -56,7 +57,9 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
         max_open_trades=settings.default_max_open_trades,
         preferred_timeframe=timeframe,
     )
-    return analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
+    analysis = analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
+    save_trade_ideas(analysis.trade_ideas)
+    return analysis
 
 
 async def scan_top_ideas(timeframe: str, exchange: str | None = None):
@@ -85,7 +88,9 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None):
                 ideas.extend(analysis.trade_ideas)
         except Exception as exc:
             logger.warning("Top idea scan failed for %s on %s: %s", symbol, selected_exchange, exc)
-    return sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5], selected_exchange
+    ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]
+    save_trade_ideas(ranked)
+    return ranked, selected_exchange
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -164,6 +169,25 @@ async def alerts_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"Subscribers: {len(subscribers)}\n\n"
         "Use /subscribe to receive setup alerts or /unsubscribe to stop them."
     )
+
+
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    records = list_trade_history({})[:5]
+    await update.effective_message.reply_text(format_history(records))
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(format_stats(stats()))
+
+
+async def check_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    status = await update.effective_message.reply_text("Checking saved trade outcomes...")
+    try:
+        result = await check_trade_outcomes()
+        await status.edit_text(f"Trade outcome check complete.\nChecked: {result['checked']}\nUpdated: {result['updated']}")
+    except Exception as exc:
+        logger.exception("Trade outcome check failed")
+        await status.edit_text(f"Could not check trades: {exc}")
 
 
 async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

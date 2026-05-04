@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
 from app.exchanges.factory import get_exchange
 from app.models.schemas import Candle, Market, RiskSettings
+from app.services.trade_history import save_trade_ideas
 from app.strategy.trade_ideas import analyze_dataframe
 
 router = APIRouter()
@@ -74,7 +75,9 @@ async def analyze(
                 htf_dfs.append(await client.get_candles(symbol, htf, 240))
             except Exception:
                 continue
-        return analyze_dataframe(symbol.upper(), timeframe, exchange, df, risk, htf_dfs)
+        analysis = analyze_dataframe(symbol.upper(), timeframe, exchange, df, risk, htf_dfs)
+        save_trade_ideas(analysis.trade_ideas)
+        return analysis
     except HTTPException:
         raise
     except Exception as exc:
@@ -114,6 +117,7 @@ async def top_ideas(
         except Exception as exc:
             errors.append({"symbol": symbol, "error": str(exc)})
     ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]
+    save_trade_ideas(ranked)
     return {
         "timeframe": timeframe,
         "exchange": exchange,

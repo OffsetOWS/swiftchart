@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.routes.markets import router as markets_router
 from app.routes.paper_trades import router as paper_trades_router
+from app.routes.trade_history import router as trade_history_router
 from app.utils.database import init_db
 
 settings = get_settings()
@@ -36,3 +37,4 @@ def health():
 
 app.include_router(markets_router, prefix="/api", tags=["markets"])
 app.include_router(paper_trades_router, prefix="/api", tags=["paper-trades"])
+app.include_router(trade_history_router, prefix="/api", tags=["trade-history"])
