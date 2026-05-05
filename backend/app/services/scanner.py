@@ -19,9 +19,11 @@ logger = logging.getLogger(__name__)
 SCAN_TTL_SECONDS = 120
 SCAN_INTERVAL_SECONDS = 120
 MAX_CONCURRENT_FETCHES = 8
+MAX_MARKETS_PER_SCAN = 45
 PREFILTER_LIMIT = 260
 FULL_LIMIT = 260
 _scan_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+_scan_offsets: dict[str, int] = {}
 _scan_lock = asyncio.Lock()
 _background_task: asyncio.Task | None = None
 
@@ -88,6 +90,19 @@ async def discover_scan_markets(exchange: str) -> list[dict]:
             seen.add(key)
             output.append({"exchange": name, "symbol": symbol, "volume": market.get("volume"), "active": True})
     return output
+
+
+def scan_window(exchange: str, markets: list[dict]) -> list[dict]:
+    if len(markets) <= MAX_MARKETS_PER_SCAN:
+        return markets
+    key = exchange.lower()
+    start = _scan_offsets.get(key, 0) % len(markets)
+    end = start + MAX_MARKETS_PER_SCAN
+    selected = markets[start:end]
+    if len(selected) < MAX_MARKETS_PER_SCAN:
+        selected.extend(markets[: MAX_MARKETS_PER_SCAN - len(selected)])
+    _scan_offsets[key] = (start + MAX_MARKETS_PER_SCAN) % len(markets)
+    return selected
 
 
 def prefilter_dataframe(df: pd.DataFrame) -> tuple[bool, float, float]:
@@ -161,8 +176,9 @@ async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool 
 
         started = monotonic()
         markets = await discover_scan_markets(exchange)
+        scan_markets = scan_window(exchange, markets)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
-        candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in markets])
+        candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
         candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:80]
         risk = _risk(timeframe)
@@ -187,6 +203,7 @@ async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool 
             "message": None if len(ranked) >= 5 else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
             "scan_stats": {
                 "markets": len(markets),
+                "scan_window": len(scan_markets),
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
                 "valid_setups": len(ranked),
@@ -195,8 +212,9 @@ async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool 
         }
         _scan_cache[key] = (monotonic(), result)
         logger.info(
-            "Scan completed: Markets: %s Filtered: %s Analyzed: %s Valid setups: %s Time: %ss",
+            "Scan completed: Markets: %s Scan window: %s Filtered: %s Analyzed: %s Valid setups: %s Time: %ss",
             len(markets),
+            len(scan_markets),
             len(candidates),
             len(candidates),
             len(ranked),

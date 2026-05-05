@@ -144,7 +144,7 @@ Top Ideas uses a two-stage pipeline:
 1. Fast prefilter for volume, volatility, range position, and obvious chop.
 2. Full strategy scoring only on markets that pass the prefilter.
 
-The scanner discovers Hyperliquid markets dynamically, combines them with Binance when `exchange=all`, skips failed or incomplete markets safely, and logs scan metrics such as total markets, filtered markets, analyzed markets, valid setups, and duration.
+The scanner discovers Hyperliquid markets dynamically, combines them with Binance when `exchange=all`, scans large market universes in rotating batches to avoid API rate limits, skips failed or incomplete markets safely, and logs scan metrics such as total markets, scan window size, filtered markets, analyzed markets, valid setups, and duration.
 
 Fast cached scan:
 
