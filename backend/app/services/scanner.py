@@ -67,7 +67,17 @@ async def discover_scan_markets(exchange: str) -> list[dict]:
             markets = []
         if name == "binance":
             preferred = {symbol.upper() for symbol in DEFAULT_SCAN_LIST}
-            markets = [market for market in markets if market.get("symbol") in preferred] or markets[:80]
+            markets = [market for market in markets if market.get("symbol") in preferred]
+            if not markets:
+                markets = [
+                    {
+                        "symbol": symbol,
+                        "exchange": name,
+                        "volume": None,
+                        "active": True,
+                    }
+                    for symbol in DEFAULT_SCAN_LIST
+                ]
         for market in markets:
             symbol = str(market.get("symbol", "")).upper()
             if not symbol or not market.get("active", True):
