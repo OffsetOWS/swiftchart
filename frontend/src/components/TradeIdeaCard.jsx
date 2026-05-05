@@ -14,6 +14,7 @@ export default function TradeIdeaCard({ idea, onPaperTrade }) {
       <div className="idea-top">
         <div>
           <h3>{idea.symbol} {idea.timeframe}</h3>
+          <span className="exchange-label">{idea.exchange || "exchange"}</span>
           <p>{idea.reason}</p>
         </div>
         <span className={`badge ${directionClass}`}>

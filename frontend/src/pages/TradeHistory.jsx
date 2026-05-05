@@ -3,7 +3,7 @@ import { Fragment } from "react";
 import { useEffect, useState } from "react";
 import { checkTradeHistory, getTradeHistory, getTradeStats } from "../lib/api.js";
 
-const EMPTY_FILTERS = { symbol: "", timeframe: "", direction: "", status: "", result: "", date_from: "", date_to: "" };
+const EMPTY_FILTERS = { symbol: "", timeframe: "", exchange: "all", direction: "", status: "", result: "", date_from: "", date_to: "", sort: "desc" };
 
 function fmt(value) {
   if (value === undefined || value === null || value === "") return "-";
@@ -33,14 +33,19 @@ export default function TradeHistory() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [records, setRecords] = useState([]);
   const [stats, setStats] = useState(null);
+  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 });
   const [expanded, setExpanded] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  async function load() {
+  async function load(page = pagination.page) {
     setLoading(true);
     try {
-      const [historyData, statsData] = await Promise.all([getTradeHistory(filters), getTradeStats()]);
-      setRecords(historyData);
+      const [historyData, statsData] = await Promise.all([getTradeHistory({ ...filters, page, limit: pagination.limit }), getTradeStats()]);
+      const returnedRecords = Array.isArray(historyData) ? historyData : historyData.records;
+      setRecords(returnedRecords || []);
+      if (!Array.isArray(historyData)) {
+        setPagination({ page: historyData.page, limit: historyData.limit, total: historyData.total, pages: historyData.pages });
+      }
       setStats(statsData);
     } finally {
       setLoading(false);
@@ -97,6 +102,11 @@ export default function TradeHistory() {
         </div>
         <div className="history-filters">
           <input placeholder="Symbol" value={filters.symbol} onChange={(e) => setFilters({ ...filters, symbol: e.target.value.toUpperCase() })} />
+          <select value={filters.exchange} onChange={(e) => setFilters({ ...filters, exchange: e.target.value })}>
+            <option value="all">All exchanges</option>
+            <option value="binance">Binance</option>
+            <option value="hyperliquid">Hyperliquid</option>
+          </select>
           <select value={filters.timeframe} onChange={(e) => setFilters({ ...filters, timeframe: e.target.value })}>
             <option value="">Any timeframe</option>
             {["30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"].map((tf) => <option key={tf}>{tf}</option>)}
@@ -116,14 +126,18 @@ export default function TradeHistory() {
           </select>
           <input type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
           <input type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
-          <button className="primary" onClick={load}>{loading ? "Loading..." : "Apply"}</button>
+          <select value={filters.sort} onChange={(e) => setFilters({ ...filters, sort: e.target.value })}>
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
+          </select>
+          <button className="primary" onClick={() => load(1)}>{loading ? "Loading..." : "Apply"}</button>
         </div>
 
         <div className="history-table-wrap">
           <table className="history-table">
             <thead>
               <tr>
-                <th>Date</th><th>Symbol</th><th>TF</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>Score</th><th>Status</th><th>Result</th><th>R</th>
+                <th>Date</th><th>Exchange</th><th>Symbol</th><th>TF</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>Score</th><th>Status</th><th>Result</th><th>R</th>
               </tr>
             </thead>
             <tbody>
@@ -131,6 +145,7 @@ export default function TradeHistory() {
                 <Fragment key={record.id}>
                   <tr onClick={() => setExpanded(expanded === record.id ? null : record.id)}>
                     <td>{dt(record.created_at)}</td>
+                    <td>{record.exchange}</td>
                     <td>{record.symbol}</td>
                     <td>{record.timeframe}</td>
                     <td>{record.direction}</td>
@@ -145,7 +160,7 @@ export default function TradeHistory() {
                   </tr>
                   {expanded === record.id ? (
                     <tr className="detail-row">
-                      <td colSpan="12">
+                      <td colSpan="13">
                         <div className="history-detail">
                           <p><b>Regime:</b> {record.market_regime || "-"} | <b>HTF:</b> {record.higher_timeframe_bias || "-"}</p>
                           <p><b>Reason:</b> {record.reason}</p>
@@ -160,6 +175,13 @@ export default function TradeHistory() {
             </tbody>
           </table>
           {records.length === 0 ? <div className="empty">No saved trade ideas match these filters.</div> : null}
+        </div>
+        <div className="history-pagination">
+          <span>{pagination.total} records · page {pagination.page || 1} of {pagination.pages || 1}</span>
+          <div>
+            <button className="secondary" disabled={loading || pagination.page <= 1} onClick={() => load(pagination.page - 1)}>Previous</button>
+            <button className="secondary" disabled={loading || pagination.page >= pagination.pages} onClick={() => load(pagination.page + 1)}>Next</button>
+          </div>
         </div>
       </section>
     </div>

@@ -74,7 +74,21 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None):
         preferred_timeframe=timeframe,
     )
     ideas = []
-    for symbol in DEFAULT_SCAN_LIST:
+    scan_symbols = list(DEFAULT_SCAN_LIST)
+    if selected_exchange == "hyperliquid":
+        try:
+            markets = await client.get_markets()
+            seen = set(scan_symbols)
+            for market in markets:
+                symbol = str(market.get("symbol") or "").upper()
+                if symbol and symbol not in seen:
+                    scan_symbols.append(symbol)
+                    seen.add(symbol)
+                if len(scan_symbols) >= settings.hyperliquid_scan_limit:
+                    break
+        except Exception as exc:
+            logger.warning("Could not fetch Hyperliquid market list for bot scan: %s", exc)
+    for symbol in scan_symbols:
         try:
             df = await client.get_candles(symbol, timeframe, 260)
             if len(df) >= 80:

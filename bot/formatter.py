@@ -129,7 +129,7 @@ def format_history(records: list[dict]) -> str:
         r_multiple = record.get("pnl_r_multiple")
         lines.append(
             "\n"
-            f"{record['symbol']} — {record['timeframe'].upper()} — {record['direction']}\n"
+            f"{record['symbol']} — {record['timeframe'].upper()} — {record['direction']} ({record.get('exchange', '-')})\n"
             f"Status: {record['status']} | Result: {record['result']}\n"
             f"Setup Score: {fmt(record.get('setup_score'))}/100\n"
             f"TP/SL: TP1 {fmt(record['take_profit_1'])} | TP2 {fmt(record['take_profit_2'])} | SL {fmt(record['stop_loss'])}\n"

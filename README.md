@@ -7,7 +7,7 @@ It is a full-stack, paper-first trading analysis app built with a FastAPI backen
 ## Features
 
 - Binance OHLCV market data connector
-- Hyperliquid OHLCV market data connector
+- Hyperliquid OHLCV market data connector with HIP-3 perp DEX symbol support
 - Modular exchange layer for future sources
 - Swing high and swing low detection
 - Scored support and resistance zones with touches, reaction strength, volume response, and recency
@@ -16,6 +16,7 @@ It is a full-stack, paper-first trading analysis app built with a FastAPI backen
 - Multi-timeframe bias filter
 - Setup scoring and grading; only 65/100+ trade ideas are shown
 - Top 5 trade idea scanner across liquid crypto pairs
+- Exchange filter for Binance, Hyperliquid, or all supported exchanges
 - Risk settings for account size, risk per trade, max open trades, and minimum R:R
 - Paper-trading ledger backed by SQLite
 - Dark, responsive, Apple-inspired dashboard UI
@@ -101,6 +102,8 @@ ENVIRONMENT=development
 DATABASE_URL=sqlite:///./swiftchart.db
 BINANCE_BASE_URL=https://api.binance.com
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
+HYPERLIQUID_HIP3_DEXES=
+HYPERLIQUID_SCAN_LIMIT=40
 FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 LIVE_TRADING_ENABLED=false
 DEFAULT_EXCHANGE=binance
@@ -136,6 +139,14 @@ GET  /api/trade-stats
 ## Trade History and Outcome Tracking
 
 SwiftChart saves every generated trade idea as an immutable historical analysis record. Saved records keep the original entry zone, stop, targets, score, reason, and invalidation even if the strategy changes later.
+
+Trade history is paginated and sorted newest-first by default:
+
+```text
+GET /api/trade-history?page=1&limit=20&sort=desc
+```
+
+Optional filters include `symbol`, `exchange`, `timeframe`, `direction`, `status`, `result`, `date_from`, and `date_to`. Empty filters do not hide old, pending, open, expired, or no-entry records.
 
 Outcome checking fetches later candles and updates:
 
@@ -254,6 +265,19 @@ HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 ```
 
 The current Binance and Hyperliquid candle connectors use public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
+
+### Hyperliquid HIP-3 Markets
+
+Hyperliquid HIP-3 markets use the normal `/info` candle snapshot endpoint, but candles require the DEX-prefixed coin name such as `xyz:XYZ100`. SwiftChart supports this format internally and exposes HIP-3 markets through the Hyperliquid exchange connector.
+
+If the public `perpDexs` metadata endpoint is unavailable from your host, set known HIP-3 DEX names manually:
+
+```text
+HYPERLIQUID_HIP3_DEXES=xyz,flx
+HYPERLIQUID_SCAN_LIMIT=40
+```
+
+You can analyze a HIP-3-only market by selecting Hyperliquid or All Exchanges and using either the displayed symbol from `/api/markets?exchange=hyperliquid` or a DEX-prefixed symbol such as `xyz:XYZ100USDT`.
 
 ### Telegram Trade Alerts
 

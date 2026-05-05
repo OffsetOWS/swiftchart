@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 from typing import Iterable
 
 import pandas as pd
@@ -21,6 +22,8 @@ TIMEFRAME_MINUTES = {
     "12h": 720,
     "1d": 1440,
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -81,13 +84,13 @@ def row_to_dict(row) -> dict:
     return data
 
 
-def list_trade_history(filters: dict) -> list[dict]:
+def _history_where(filters: dict) -> tuple[str, list]:
     clauses = []
     values = []
-    for field in ("symbol", "timeframe", "status", "result"):
+    for field in ("symbol", "timeframe", "exchange", "status", "result"):
         if filters.get(field):
             clauses.append(f"{field} = ?")
-            values.append(str(filters[field]).upper() if field in {"symbol", "status", "result"} else filters[field])
+            values.append(str(filters[field]).upper() if field in {"symbol", "status", "result"} else str(filters[field]).lower() if field == "exchange" else filters[field])
     if filters.get("direction"):
         clauses.append("direction = ?")
         values.append(str(filters["direction"]).upper())
@@ -96,14 +99,38 @@ def list_trade_history(filters: dict) -> list[dict]:
         values.append(filters["date_from"])
     if filters.get("date_to"):
         clauses.append("created_at <= ?")
-        values.append(filters["date_to"])
+        date_to = str(filters["date_to"])
+        values.append(f"{date_to} 23:59:59" if len(date_to) == 10 else date_to)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where, values
+
+
+def query_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str = "desc") -> dict:
+    page = max(1, int(page or 1))
+    limit = min(250, max(1, int(limit or 20)))
+    direction = "ASC" if str(sort).lower() == "asc" else "DESC"
+    where, values = _history_where(filters)
+    offset = (page - 1) * limit
     with get_connection() as connection:
+        total = int(connection.execute(f"SELECT COUNT(*) AS count FROM trade_ideas {where}", values).fetchone()["count"])
         rows = connection.execute(
-            f"SELECT * FROM trade_ideas {where} ORDER BY created_at DESC, id DESC LIMIT 500",
-            values,
+            f"SELECT * FROM trade_ideas {where} ORDER BY created_at {direction}, id {direction} LIMIT ? OFFSET ?",
+            [*values, limit, offset],
         ).fetchall()
-    return [row_to_dict(row) for row in rows]
+    if total == 0:
+        logger.info("No trade history records found for filters=%s", {key: value for key, value in filters.items() if value})
+    return {
+        "records": [row_to_dict(row) for row in rows],
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit if total else 0,
+        "sort": "asc" if direction == "ASC" else "desc",
+    }
+
+
+def list_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str = "desc") -> list[dict]:
+    return query_trade_history(filters, page=page, limit=limit, sort=sort)["records"]
 
 
 def get_trade_history(trade_id: int) -> dict | None:

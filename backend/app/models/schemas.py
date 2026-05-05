@@ -114,9 +114,13 @@ class AnalysisResponse(BaseModel):
 
 class Market(BaseModel):
     symbol: str
+    display_symbol: str | None = None
+    raw_symbol: str | None = None
     base_asset: str
     quote_asset: str
     exchange: str
+    dex: str | None = None
+    is_hip3: bool = False
 
 
 class PaperTradeCreate(BaseModel):
@@ -181,3 +185,12 @@ class TradeStats(BaseModel):
     best_setup_grade_performance: list[dict]
     best_timeframe_performance: list[dict]
     best_symbol_performance: list[dict]
+
+
+class TradeHistoryPage(BaseModel):
+    records: list[TradeHistoryRecord]
+    page: int
+    limit: int
+    total: int
+    pages: int
+    sort: Literal["asc", "desc"]
