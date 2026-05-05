@@ -10,8 +10,6 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./swiftchart.db"
     binance_base_url: str = "https://api.binance.com"
     hyperliquid_base_url: str = "https://api.hyperliquid.xyz"
-    hyperliquid_hip3_dexes: str = ""
-    hyperliquid_scan_limit: int = Field(default=40, ge=1, le=250)
     frontend_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     live_trading_enabled: bool = False
     default_exchange: str = "binance"

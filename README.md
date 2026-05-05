@@ -7,7 +7,7 @@ It is a full-stack, paper-first trading analysis app built with a FastAPI backen
 ## Features
 
 - Binance OHLCV market data connector
-- Hyperliquid OHLCV market data connector with HIP-3 perp DEX symbol support
+- Hyperliquid OHLCV market data connector
 - Modular exchange layer for future sources
 - Swing high and swing low detection
 - Scored support and resistance zones with touches, reaction strength, volume response, and recency
@@ -102,8 +102,6 @@ ENVIRONMENT=development
 DATABASE_URL=sqlite:///./swiftchart.db
 BINANCE_BASE_URL=https://api.binance.com
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
-HYPERLIQUID_HIP3_DEXES=
-HYPERLIQUID_SCAN_LIMIT=40
 FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 LIVE_TRADING_ENABLED=false
 DEFAULT_EXCHANGE=binance
@@ -266,18 +264,6 @@ HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 
 The current Binance and Hyperliquid candle connectors use public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
 
-### Hyperliquid HIP-3 Markets
-
-Hyperliquid HIP-3 markets use the normal `/info` candle snapshot endpoint, but candles require the DEX-prefixed coin name such as `xyz:XYZ100`. SwiftChart supports this format internally and exposes HIP-3 markets through the Hyperliquid exchange connector.
-
-If the public `perpDexs` metadata endpoint is unavailable from your host, set known HIP-3 DEX names manually:
-
-```text
-HYPERLIQUID_HIP3_DEXES=xyz,flx
-HYPERLIQUID_SCAN_LIMIT=40
-```
-
-You can analyze a HIP-3-only market by selecting Hyperliquid or All Exchanges and using either the displayed symbol from `/api/markets?exchange=hyperliquid` or a DEX-prefixed symbol such as `xyz:XYZ100USDT`.
 
 ### Telegram Trade Alerts
 

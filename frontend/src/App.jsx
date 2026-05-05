@@ -6,6 +6,8 @@ import TradeHistory from "./pages/TradeHistory.jsx";
 import { createPaperTrade, getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
 import "./styles/global.css";
 
+const HYPERLIQUID_REF_URL = "https://app.hyperliquid.xyz/join/OFFSET";
+
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [sound, setSound] = useState(false);
@@ -53,6 +55,7 @@ export default function App() {
   }
 
   async function paperTrade(idea) {
+    window.open(HYPERLIQUID_REF_URL, "_blank", "noopener,noreferrer");
     const entry = (idea.entry_zone[0] + idea.entry_zone[1]) / 2;
     await createPaperTrade({
       symbol: idea.symbol,

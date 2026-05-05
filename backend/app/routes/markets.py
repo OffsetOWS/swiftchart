@@ -15,30 +15,7 @@ async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
 
 
 async def _market_scan_symbols(exchange: str) -> list[str]:
-    if exchange == "binance":
-        return DEFAULT_SCAN_LIST
-
-    client = get_exchange("hyperliquid")
-    settings = get_settings()
-    try:
-        markets = await client.get_markets()
-    except Exception:
-        return DEFAULT_SCAN_LIST
-
-    symbols: list[str] = []
-    seen: set[str] = set()
-    for symbol in DEFAULT_SCAN_LIST:
-        seen.add(symbol)
-        symbols.append(symbol)
-    for market in markets:
-        symbol = str(market.get("symbol") or "").upper()
-        if not symbol or symbol in seen:
-            continue
-        seen.add(symbol)
-        symbols.append(symbol)
-        if len(symbols) >= settings.hyperliquid_scan_limit:
-            break
-    return symbols
+    return DEFAULT_SCAN_LIST
 
 
 def higher_timeframes_for(timeframe: str) -> list[str]:

@@ -114,13 +114,9 @@ class AnalysisResponse(BaseModel):
 
 class Market(BaseModel):
     symbol: str
-    display_symbol: str | None = None
-    raw_symbol: str | None = None
     base_asset: str
     quote_asset: str
     exchange: str
-    dex: str | None = None
-    is_hip3: bool = False
 
 
 class PaperTradeCreate(BaseModel):
