@@ -3,9 +3,10 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
-from app.exchanges.factory import get_exchange
+from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.models.schemas import RiskSettings
+from app.services.market_data import get_candles_cached
+from app.services.scanner import cached_top_ideas
 from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas, stats
 from app.strategy.trade_ideas import analyze_dataframe
 from bot.formatter import format_analysis, format_history, format_stats, format_top_ideas, help_text, strategy_text
@@ -40,14 +41,13 @@ def higher_timeframes_for(timeframe: str) -> list[str]:
 async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None):
     settings = get_settings()
     selected_exchange = exchange or settings.default_exchange
-    client = get_exchange(selected_exchange)
-    df = await client.get_candles(symbol.upper(), timeframe, 320)
+    df = await get_candles_cached(selected_exchange, symbol.upper(), timeframe, 320)
     if len(df) < 80:
         raise ValueError("Not enough candle history for analysis.")
     htf_dfs = []
     for htf in higher_timeframes_for(timeframe):
         try:
-            htf_dfs.append(await client.get_candles(symbol.upper(), htf, 240))
+            htf_dfs.append(await get_candles_cached(selected_exchange, symbol.upper(), htf, 240))
         except Exception as exc:
             logger.warning("HTF fetch failed for %s %s: %s", symbol, htf, exc)
     risk = RiskSettings(
@@ -63,34 +63,9 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
 
 
 async def scan_top_ideas(timeframe: str, exchange: str | None = None):
-    settings = get_settings()
-    selected_exchange = exchange or settings.default_exchange
-    client = get_exchange(selected_exchange)
-    risk = RiskSettings(
-        account_size=settings.default_account_size,
-        risk_per_trade_pct=settings.default_risk_per_trade,
-        min_rr=settings.default_min_rr,
-        max_open_trades=settings.default_max_open_trades,
-        preferred_timeframe=timeframe,
-    )
-    ideas = []
-    for symbol in DEFAULT_SCAN_LIST:
-        try:
-            df = await client.get_candles(symbol, timeframe, 260)
-            if len(df) >= 80:
-                htf_dfs = []
-                for htf in higher_timeframes_for(timeframe):
-                    try:
-                        htf_dfs.append(await client.get_candles(symbol, htf, 220))
-                    except Exception:
-                        continue
-                analysis = analyze_dataframe(symbol, timeframe, selected_exchange, df, risk, htf_dfs)
-                ideas.extend(analysis.trade_ideas)
-        except Exception as exc:
-            logger.warning("Top idea scan failed for %s on %s: %s", symbol, selected_exchange, exc)
-    ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]
-    save_trade_ideas(ranked)
-    return ranked, selected_exchange
+    selected_exchange = exchange or "all"
+    result = await cached_top_ideas(selected_exchange, timeframe)
+    return result["ideas"], result.get("exchange", selected_exchange)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

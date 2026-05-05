@@ -2,8 +2,9 @@ from fastapi import APIRouter, HTTPException, Query
 import logging
 
 from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
-from app.exchanges.factory import get_exchange
 from app.models.schemas import Candle, Market, RiskSettings
+from app.services.market_data import get_candles_cached, get_markets_cached
+from app.services.scanner import cached_top_ideas
 from app.services.trade_history import save_trade_ideas
 from app.strategy.trade_ideas import analyze_dataframe
 
@@ -12,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
-    client = get_exchange(exchange)
-    return await client.get_candles(symbol, timeframe, limit)
+    return await get_candles_cached(exchange, symbol, timeframe, limit)
 
 
 async def _market_scan_symbols(exchange: str) -> list[str]:
@@ -36,12 +36,11 @@ async def markets(exchange: str = Query(default="binance")):
             output = []
             for name in ("binance", "hyperliquid"):
                 try:
-                    output.extend(await get_exchange(name).get_markets())
+                    output.extend(await get_markets_cached(name))
                 except Exception:
                     continue
             return output
-        client = get_exchange(exchange)
-        return await client.get_markets()
+        return await get_markets_cached(exchange)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch markets from {exchange}: {exc}") from exc
 
@@ -98,15 +97,14 @@ async def analyze(
         analysis = None
         for selected_exchange in exchanges:
             try:
-                client = get_exchange(selected_exchange)
-                df = await client.get_candles(symbol, timeframe, 320)
+                df = await get_candles_cached(selected_exchange, symbol, timeframe, 320)
                 if len(df) < 80:
                     last_error = "Not enough candle history for analysis."
                     continue
                 htf_dfs = []
                 for htf in higher_timeframes_for(timeframe):
                     try:
-                        htf_dfs.append(await client.get_candles(symbol, htf, 240))
+                        htf_dfs.append(await get_candles_cached(selected_exchange, symbol, htf, 240))
                     except Exception:
                         continue
                 analysis = analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
@@ -127,10 +125,15 @@ async def analyze(
 
 @router.get("/top-ideas")
 async def top_ideas(
-    exchange: str = Query(default="binance"),
+    exchange: str = Query(default="all"),
     timeframe: str = Query(default="4h"),
     symbols: str | None = Query(default=None, description="Comma-separated symbols"),
 ):
+    if timeframe.lower() not in SUPPORTED_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
+    if symbols is None:
+        return await cached_top_ideas(exchange, timeframe)
+
     selected_exchanges = ["binance", "hyperliquid"] if exchange.lower() == "all" else [exchange]
     settings = get_settings()
     risk = RiskSettings(
@@ -143,16 +146,15 @@ async def top_ideas(
     ideas = []
     errors = []
     for selected_exchange in selected_exchanges:
-        client = get_exchange(selected_exchange)
         scan_symbols = [item.strip().upper() for item in symbols.split(",")] if symbols else await _market_scan_symbols(selected_exchange)
         for symbol in scan_symbols:
             try:
-                df = await client.get_candles(symbol, timeframe, 260)
+                df = await get_candles_cached(selected_exchange, symbol, timeframe, 260)
                 if len(df) >= 80:
                     htf_dfs = []
                     for htf in higher_timeframes_for(timeframe):
                         try:
-                            htf_dfs.append(await client.get_candles(symbol, htf, 220))
+                            htf_dfs.append(await get_candles_cached(selected_exchange, symbol, htf, 220))
                         except Exception:
                             continue
                     analysis = analyze_dataframe(symbol, timeframe, selected_exchange, df, risk, htf_dfs)

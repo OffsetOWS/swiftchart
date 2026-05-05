@@ -13,7 +13,7 @@ export default function App() {
   const [sound, setSound] = useState(false);
   const [nightMode, setNightMode] = useState(false);
   const [clock, setClock] = useState("");
-  const [exchange, setExchange] = useState("hyperliquid");
+  const [exchange, setExchange] = useState("all");
   const [timeframe, setTimeframe] = useState("4h");
   const [symbol, setSymbol] = useState("SOLUSDT");
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });

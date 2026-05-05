@@ -26,7 +26,12 @@ from bot.handlers import (  # noqa: E402
     top,
     unsubscribe,
 )
+from app.services.scanner import start_background_scanner  # noqa: E402
 from app.utils.database import init_db  # noqa: E402
+
+
+async def post_init(_application: Application) -> None:
+    start_background_scanner()
 
 
 def build_application() -> Application:
@@ -37,7 +42,7 @@ def build_application() -> Application:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required.")
 
-    application = Application.builder().token(token).build()
+    application = Application.builder().token(token).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("analyze", analyze))
     application.add_handler(CommandHandler("top", top))

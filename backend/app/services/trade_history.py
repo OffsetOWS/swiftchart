@@ -7,8 +7,8 @@ from typing import Iterable
 import pandas as pd
 
 from app.config import get_settings
-from app.exchanges.factory import get_exchange
 from app.models.schemas import TradeIdea
+from app.services.market_data import get_candles_cached
 from app.utils.database import get_connection
 
 
@@ -335,8 +335,7 @@ async def check_trade_outcomes() -> dict:
     changed = 0
     for raw in rows:
         row = row_to_dict(raw)
-        client = get_exchange(row["exchange"])
-        candles = await client.get_candles(row["symbol"], row["timeframe"], 1000)
+        candles = await get_candles_cached(row["exchange"], row["symbol"], row["timeframe"], 1000)
         outcome = evaluate_trade(row, candles)
         checked += 1
         if outcome["status"] != row["status"] or outcome["result"] != row["result"]:

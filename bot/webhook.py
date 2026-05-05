@@ -14,6 +14,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from telegram import Update
 from telegram.ext import Application
 
+from app.services.scanner import start_background_scanner
 from bot.alerts import alert_loop, run_alert_scan
 from bot.main import build_application
 
@@ -46,6 +47,7 @@ async def lifespan(_: FastAPI):
     telegram_app = build_application()
     await telegram_app.initialize()
     await telegram_app.start()
+    start_background_scanner()
 
     url = webhook_url()
     if url:

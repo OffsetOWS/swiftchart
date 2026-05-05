@@ -17,6 +17,7 @@ It is a full-stack, paper-first trading analysis app built with a FastAPI backen
 - Setup scoring and grading; only 65/100+ trade ideas are shown
 - Top 5 trade idea scanner across liquid crypto pairs
 - Exchange filter for Binance, Hyperliquid, or all supported exchanges
+- Cached OHLCV/market data and a background scanner so Top Ideas can load quickly
 - Risk settings for account size, risk per trade, max open trades, and minimum R:R
 - Paper-trading ledger backed by SQLite
 - Dark, responsive, Apple-inspired dashboard UI
@@ -133,6 +134,25 @@ GET  /api/trade-history/{id}
 POST /api/trade-history/check
 GET  /api/trade-stats
 ```
+
+## Performance and Market Scanning
+
+SwiftChart caches candles per `exchange + symbol + timeframe` and caches exchange market lists to avoid repeated API hits. Short timeframes refresh faster, while higher timeframes stay cached longer.
+
+Top Ideas uses a two-stage pipeline:
+
+1. Fast prefilter for volume, volatility, range position, and obvious chop.
+2. Full strategy scoring only on markets that pass the prefilter.
+
+The scanner discovers Hyperliquid markets dynamically, combines them with Binance when `exchange=all`, skips failed or incomplete markets safely, and logs scan metrics such as total markets, filtered markets, analyzed markets, valid setups, and duration.
+
+Fast cached scan:
+
+```text
+GET /api/top-ideas?exchange=all&timeframe=4h
+```
+
+The FastAPI backend starts a background scanner on startup. Telegram `/top` also reads from the same cached scanner path, so repeated requests return much faster.
 
 ## Trade History and Outcome Tracking
 
