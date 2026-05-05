@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from functools import cached_property
+import asyncio
 
 import httpx
 import pandas as pd
@@ -29,9 +30,15 @@ class HyperliquidClient(ExchangeClient):
 
     async def _post_info(self, payload: dict) -> dict | list:
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(f"{self.base_url}/info", json=payload)
+            for attempt in range(3):
+                response = await client.post(f"{self.base_url}/info", json=payload)
+                if response.status_code != 429:
+                    response.raise_for_status()
+                    return response.json()
+                if attempt < 2:
+                    await asyncio.sleep(0.6 * (attempt + 1))
             response.raise_for_status()
-        return response.json()
+        return []
 
     @cached_property
     def configured_hip3_dexes(self) -> list[str]:
@@ -112,25 +119,6 @@ class HyperliquidClient(ExchangeClient):
         dex, coin = self._coin_from_symbol(symbol)
         if dex:
             return coin if coin.lower().startswith(f"{dex.lower()}:") else f"{dex}:{coin}"
-
-        target_symbol = self._normalized_symbol(coin)
-        try:
-            markets = await self.get_markets()
-        except Exception:
-            markets = []
-
-        exact = [
-            market
-            for market in markets
-            if market.get("display_symbol") == target_symbol or market.get("symbol") == target_symbol
-        ]
-        if len(exact) == 1:
-            return str(exact[0].get("raw_symbol") or coin)
-        if exact:
-            main = next((market for market in exact if not market.get("is_hip3")), None)
-            if main:
-                return str(main.get("raw_symbol") or coin)
-            return str(exact[0].get("raw_symbol") or coin)
         return coin
 
     async def get_candles(self, symbol: str, timeframe: str, limit: int = 300) -> pd.DataFrame:
