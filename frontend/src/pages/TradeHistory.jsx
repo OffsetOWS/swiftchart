@@ -36,17 +36,24 @@ export default function TradeHistory() {
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 });
   const [expanded, setExpanded] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   async function load(page = pagination.page) {
     setLoading(true);
+    setMessage("");
     try {
       const [historyData, statsData] = await Promise.all([getTradeHistory({ ...filters, page, limit: pagination.limit }), getTradeStats()]);
       const returnedRecords = Array.isArray(historyData) ? historyData : historyData.records;
       setRecords(returnedRecords || []);
       if (!Array.isArray(historyData)) {
         setPagination({ page: historyData.page, limit: historyData.limit, total: historyData.total, pages: historyData.pages });
+        setMessage(historyData.total ? `Loaded ${historyData.total} saved analyses.` : "No saved analyses yet. Run an analysis first.");
+      } else {
+        setMessage(returnedRecords?.length ? `Loaded ${returnedRecords.length} saved analyses.` : "No saved analyses yet. Run an analysis first.");
       }
       setStats(statsData);
+    } catch (error) {
+      setMessage(`Could not load trade history: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -54,9 +61,12 @@ export default function TradeHistory() {
 
   async function runCheck() {
     setLoading(true);
+    setMessage("");
     try {
       await checkTradeHistory();
       await load();
+    } catch (error) {
+      setMessage(`Could not check trade outcomes: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -134,6 +144,7 @@ export default function TradeHistory() {
         </div>
 
         <div className="history-table-wrap">
+          {message ? <div className="history-state">{message}</div> : null}
           <table className="history-table">
             <thead>
               <tr>

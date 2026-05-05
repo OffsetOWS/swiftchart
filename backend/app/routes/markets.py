@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
+import logging
 
 from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
 from app.exchanges.factory import get_exchange
@@ -7,6 +8,7 @@ from app.services.trade_history import save_trade_ideas
 from app.strategy.trade_ideas import analyze_dataframe
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
@@ -114,7 +116,8 @@ async def analyze(
                 continue
         if analysis is None:
             raise HTTPException(status_code=422, detail=str(last_error or "Could not analyze symbol."))
-        save_trade_ideas(analysis.trade_ideas)
+        saved_ids = save_trade_ideas(analysis.trade_ideas)
+        logger.info("Analysis generated %s ideas and saved %s for %s %s on %s", len(analysis.trade_ideas), len(saved_ids), symbol, timeframe, analysis.exchange)
         return analysis
     except HTTPException:
         raise
@@ -157,7 +160,8 @@ async def top_ideas(
             except Exception as exc:
                 errors.append({"exchange": selected_exchange, "symbol": symbol, "error": str(exc)})
     ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]
-    save_trade_ideas(ranked)
+    saved_ids = save_trade_ideas(ranked)
+    logger.info("Top ideas generated %s ranked ideas and saved %s for exchange=%s timeframe=%s", len(ranked), len(saved_ids), exchange, timeframe)
     return {
         "timeframe": timeframe,
         "exchange": exchange,

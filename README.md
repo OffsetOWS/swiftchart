@@ -138,6 +138,8 @@ GET  /api/trade-stats
 
 SwiftChart saves every generated trade idea as an immutable historical analysis record. Saved records keep the original entry zone, stop, targets, score, reason, and invalidation even if the strategy changes later.
 
+Generated trade ideas are saved automatically from website analysis, website Top 5 scans, Telegram `/analyze`, and Telegram `/top`. Duplicates with the same symbol, timeframe, direction, entry, stop, and targets generated within 30 minutes are skipped.
+
 Trade history is paginated and sorted newest-first by default:
 
 ```text
@@ -177,6 +179,8 @@ Manual outcome check:
 ```bash
 curl -X POST http://localhost:8000/api/trade-history/check
 ```
+
+If the website backend and Telegram bot are deployed as separate services, they must point at the same durable `DATABASE_URL` to share history. Local SQLite works when both run from the same project machine. Vercel `/tmp` SQLite and Render local SQLite are separate ephemeral files, so use a shared database for persistent cross-service production history.
 
 ## Telegram Bot
 

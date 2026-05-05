@@ -30,6 +30,10 @@ def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
+def _sqlite_cutoff(minutes: int = 30) -> str:
+    return (datetime.now(UTC) - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _parse_dt(value: str | datetime) -> datetime:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=UTC)
@@ -38,41 +42,83 @@ def _parse_dt(value: str | datetime) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _recent_duplicate_id(connection, idea: TradeIdea) -> int | None:
+    row = connection.execute(
+        """
+        SELECT id FROM trade_ideas
+        WHERE symbol = ?
+          AND timeframe = ?
+          AND exchange = ?
+          AND direction = ?
+          AND ABS(entry_zone_low - ?) < 0.00000001
+          AND ABS(entry_zone_high - ?) < 0.00000001
+          AND ABS(stop_loss - ?) < 0.00000001
+          AND ABS(take_profit_1 - ?) < 0.00000001
+          AND ABS(take_profit_2 - ?) < 0.00000001
+          AND created_at >= ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (
+            idea.symbol.upper(),
+            idea.timeframe,
+            idea.exchange,
+            idea.direction.upper(),
+            idea.entry_zone[0],
+            idea.entry_zone[1],
+            idea.stop_loss,
+            idea.take_profit_1,
+            idea.take_profit_2,
+            _sqlite_cutoff(30),
+        ),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
 def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
     ids: list[int] = []
     with get_connection() as connection:
         for idea in ideas:
-            cursor = connection.execute(
-                """
-                INSERT INTO trade_ideas (
-                    symbol, timeframe, exchange, direction, market_regime,
-                    higher_timeframe_bias, setup_score, setup_grade,
-                    entry_zone_low, entry_zone_high, stop_loss, take_profit_1,
-                    take_profit_2, risk_reward, confidence, reason, invalidation
+            try:
+                duplicate_id = _recent_duplicate_id(connection, idea)
+                if duplicate_id is not None:
+                    logger.info("Skipped duplicate trade idea id=%s symbol=%s timeframe=%s exchange=%s", duplicate_id, idea.symbol, idea.timeframe, idea.exchange)
+                    continue
+                cursor = connection.execute(
+                    """
+                    INSERT INTO trade_ideas (
+                        symbol, timeframe, exchange, direction, market_regime,
+                        higher_timeframe_bias, setup_score, setup_grade,
+                        entry_zone_low, entry_zone_high, stop_loss, take_profit_1,
+                        take_profit_2, risk_reward, confidence, reason, invalidation
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        idea.symbol.upper(),
+                        idea.timeframe,
+                        idea.exchange,
+                        idea.direction.upper(),
+                        idea.market_regime,
+                        idea.higher_timeframe_bias,
+                        idea.setup_score,
+                        idea.setup_grade,
+                        idea.entry_zone[0],
+                        idea.entry_zone[1],
+                        idea.stop_loss,
+                        idea.take_profit_1,
+                        idea.take_profit_2,
+                        idea.risk_reward_ratio,
+                        idea.confidence_score,
+                        idea.reason,
+                        idea.invalid_condition,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    idea.symbol.upper(),
-                    idea.timeframe,
-                    idea.exchange,
-                    idea.direction.upper(),
-                    idea.market_regime,
-                    idea.higher_timeframe_bias,
-                    idea.setup_score,
-                    idea.setup_grade,
-                    idea.entry_zone[0],
-                    idea.entry_zone[1],
-                    idea.stop_loss,
-                    idea.take_profit_1,
-                    idea.take_profit_2,
-                    idea.risk_reward_ratio,
-                    idea.confidence_score,
-                    idea.reason,
-                    idea.invalid_condition,
-                ),
-            )
-            ids.append(int(cursor.lastrowid))
+                trade_id = int(cursor.lastrowid)
+                ids.append(trade_id)
+                logger.info("Saved trade idea id=%s symbol=%s timeframe=%s exchange=%s direction=%s", trade_id, idea.symbol, idea.timeframe, idea.exchange, idea.direction)
+            except Exception:
+                logger.exception("Failed to save trade idea symbol=%s timeframe=%s exchange=%s", idea.symbol, idea.timeframe, idea.exchange)
     return ids
 
 

@@ -1,8 +1,12 @@
 import sqlite3
 from contextlib import contextmanager
+import logging
 from pathlib import Path
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+_INITIALIZED = False
 
 
 def _sqlite_path() -> Path:
@@ -12,11 +16,25 @@ def _sqlite_path() -> Path:
     return Path(url.replace("sqlite:///", "", 1))
 
 
-@contextmanager
-def get_connection():
+def _connect():
     path = _sqlite_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
+    return connection
+
+
+def ensure_db() -> None:
+    global _INITIALIZED
+    if _INITIALIZED:
+        return
+    init_db()
+
+
+@contextmanager
+def get_connection():
+    ensure_db()
+    connection = _connect()
     try:
         yield connection
         connection.commit()
@@ -25,7 +43,9 @@ def get_connection():
 
 
 def init_db() -> None:
-    with get_connection() as connection:
+    global _INITIALIZED
+    with _connect() as connection:
+        logger.info("SwiftChart database connected at %s", _sqlite_path())
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS paper_trades (
@@ -96,3 +116,5 @@ def init_db() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_symbol ON trade_ideas(symbol)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_status ON trade_ideas(status)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_result ON trade_ideas(result)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_dedupe ON trade_ideas(symbol, timeframe, exchange, direction, entry_zone_low, entry_zone_high, stop_loss, take_profit_1, take_profit_2, created_at)")
+    _INITIALIZED = True
