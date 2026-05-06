@@ -10,7 +10,8 @@ import pandas as pd
 from app.config import DEFAULT_SCAN_LIST, get_settings
 from app.models.schemas import RiskSettings, TradeIdea
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.trade_history import save_trade_ideas
+from app.services.trade_history import save_signal_reviews, save_trade_ideas
+from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.support_resistance import average_true_range
 from app.strategy.trade_ideas import MIN_SETUP_SCORE, analyze_dataframe
 
@@ -155,6 +156,7 @@ async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSet
                 except Exception:
                     continue
             analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
+            save_signal_reviews(analysis.rejected_signals)
             return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
         except Exception as exc:
             logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
@@ -181,8 +183,48 @@ async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool 
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
         candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:80]
+        breadth_values = []
+        global_scores = []
+        for candidate in candidates:
+            close = candidate.candles["close"].astype(float)
+            if len(close) >= 80:
+                ema = close.ewm(span=200 if len(close) >= 200 else 100, adjust=False).mean()
+                breadth_values.append(float(close.iloc[-1]) > float(ema.iloc[-1]))
+            if candidate.symbol.upper() in {"BTCUSDT", "ETHUSDT"}:
+                global_scores.append(regime_score_from_dataframe(candidate.candles))
+        breadth_above_ma_pct = round(sum(1 for value in breadth_values if value) / len(breadth_values) * 100, 1) if breadth_values else None
+        global_score = round(sum(global_scores) / len(global_scores), 1) if global_scores else None
         risk = _risk(timeframe)
-        analyzed = await asyncio.gather(*[_analyze_candidate(candidate, timeframe, risk, semaphore) for candidate in candidates])
+
+        async def analyze_with_context(candidate: Candidate) -> list[TradeIdea]:
+            async with semaphore:
+                try:
+                    df = candidate.candles
+                    if len(df) < 80:
+                        return []
+                    htf_dfs = []
+                    for htf in higher_timeframes_for(timeframe):
+                        try:
+                            htf_dfs.append(await get_candles_cached(candidate.exchange, candidate.symbol, htf, 220))
+                        except Exception:
+                            continue
+                    analysis = analyze_dataframe(
+                        candidate.symbol,
+                        timeframe,
+                        candidate.exchange,
+                        df,
+                        risk,
+                        htf_dfs,
+                        global_regime_score=global_score,
+                        breadth_above_ma_pct=breadth_above_ma_pct,
+                    )
+                    save_signal_reviews(analysis.rejected_signals)
+                    return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+                except Exception as exc:
+                    logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
+                    return []
+
+        analyzed = await asyncio.gather(*[analyze_with_context(candidate) for candidate in candidates])
         ideas = [idea for group in analyzed for idea in group]
         ranked = sorted(
             ideas,
@@ -208,6 +250,8 @@ async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool 
                 "analyzed": len(candidates),
                 "valid_setups": len(ranked),
                 "duration_seconds": duration,
+                "global_regime_score": global_score,
+                "breadth_above_ma_pct": breadth_above_ma_pct,
             },
         }
         _scan_cache[key] = (monotonic(), result)

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     default_max_open_trades: int = Field(default=3, ge=1)
     trade_history_expiry_bars: int = Field(default=12, ge=1)
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 SUPPORTED_TIMEFRAMES = ["30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"]

@@ -31,6 +31,8 @@ MarketCondition = Literal[
     "Breakdown",
     "No-trade zone",
 ]
+MarketRegimeLabel = Literal["Strong Bullish", "Weak Bullish", "Ranging / Neutral", "Weak Bearish", "Strong Bearish"]
+TrendAlignment = Literal["with-trend", "counter-trend", "range-trade"]
 
 
 class Candle(BaseModel):
@@ -95,6 +97,41 @@ class TradeIdea(BaseModel):
     rank_score: float = 0
     position_size_units: float | None = None
     risk_amount: float | None = None
+    regime_score: float | None = None
+    regime_label: MarketRegimeLabel | None = None
+    regime_bias: str | None = None
+    regime_updated_at: datetime | None = None
+    trend_alignment: TrendAlignment | None = None
+    regime_confidence_adjustment: float = 0
+    reversal_confirmations: list[str] = Field(default_factory=list)
+    regime_explanation: str | None = None
+
+
+class MarketRegimeSnapshot(BaseModel):
+    score: float
+    label: MarketRegimeLabel
+    bias: str
+    long_bias: str
+    short_bias: str
+    updated_at: datetime
+    components: dict[str, float | str | None] = Field(default_factory=dict)
+    explanation: str = ""
+
+
+class SignalReview(BaseModel):
+    symbol: str
+    timeframe: str
+    exchange: str
+    direction: Direction
+    accepted: bool
+    reason: str
+    base_score: float | None = None
+    adjusted_score: float | None = None
+    confidence_adjustment: float = 0
+    regime_score: float
+    regime_label: MarketRegimeLabel
+    trend_alignment: TrendAlignment
+    reversal_confirmations: list[str] = Field(default_factory=list)
 
 
 class AnalysisResponse(BaseModel):
@@ -110,6 +147,8 @@ class AnalysisResponse(BaseModel):
     warning: str | None = None
     higher_timeframe_bias: Literal["HTF_BULLISH", "HTF_BEARISH", "HTF_NEUTRAL"] = "HTF_NEUTRAL"
     no_trade_reason: str | None = None
+    market_regime_data: MarketRegimeSnapshot | None = None
+    rejected_signals: list[SignalReview] = Field(default_factory=list)
 
 
 class Market(BaseModel):
@@ -164,6 +203,12 @@ class TradeHistoryRecord(BaseModel):
     closed_at: datetime | None = None
     result: TradeHistoryResult
     pnl_r_multiple: float | None = None
+    regime_score: float | None = None
+    regime_label: str | None = None
+    trend_alignment: str | None = None
+    regime_confidence_adjustment: float | None = None
+    reversal_confirmations: str | None = None
+    regime_explanation: str | None = None
 
 
 class TradeStats(BaseModel):
@@ -181,6 +226,10 @@ class TradeStats(BaseModel):
     best_setup_grade_performance: list[dict]
     best_timeframe_performance: list[dict]
     best_symbol_performance: list[dict]
+    direction_performance: list[dict] = Field(default_factory=list)
+    regime_performance: list[dict] = Field(default_factory=list)
+    accepted_vs_rejected: list[dict] = Field(default_factory=list)
+    counter_trend_performance: list[dict] = Field(default_factory=list)
 
 
 class TradeHistoryPage(BaseModel):

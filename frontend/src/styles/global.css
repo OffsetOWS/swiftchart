@@ -803,6 +803,14 @@ p {
   line-height: 0.95;
   letter-spacing: -0.03em;
 }
+.regime-card b {
+  font-size: 23px;
+}
+.regime-timestamp b {
+  font-size: 16px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
 .risk-card {
   color: var(--amber);
   border-color: rgba(128,99,21,0.35);
@@ -899,6 +907,12 @@ p {
 .metric b {
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+.confirmation-list {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: rgba(245,245,238,0.14);
 }
 
 .analysis-grid {

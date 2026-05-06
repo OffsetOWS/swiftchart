@@ -3,6 +3,9 @@ import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 
 export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas, compact = false }) {
   const topIdea = topIdeas[0];
+  const regimeLabel = topIdea?.regime_label || "Scanning";
+  const regimeScore = topIdea?.regime_score;
+  const lastRegimeUpdate = topIdea?.regime_updated_at ? new Date(topIdea.regime_updated_at).toLocaleString() : "-";
 
   return (
     <div className={compact ? "dashboard-grid compact-dashboard" : "dashboard-grid dashboard-bento"}>
@@ -60,21 +63,26 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
           </div>
         </section>
 
-        <section className="panel mini-card">
-          <span>Market condition</span>
-          <b>{topIdea ? "Setup detected" : "Scanning"}</b>
+        <section className="panel mini-card regime-card">
+          <span>Market regime</span>
+          <b>{regimeLabel}</b>
         </section>
         <section className="panel mini-card">
-          <span>Selected coin</span>
-          <b>{topIdea?.symbol || "SOLUSDT"}</b>
+          <span>Regime score</span>
+          <b>{regimeScore !== undefined && regimeScore !== null ? `${regimeScore > 0 ? "+" : ""}${regimeScore}` : "-"}</b>
         </section>
         <section className="panel mini-card">
-          <span>Timeframe</span>
-          <b>{timeframe}</b>
+          <span>Long bias</span>
+          <b>{topIdea?.regime_label?.includes("Bearish") ? "Reduced" : topIdea ? "Favored" : "-"}</b>
         </section>
         <section className="panel mini-card">
-          <span>Strategy status</span>
-          <b>Paper mode</b>
+          <span>Short bias</span>
+          <b>{topIdea?.regime_label?.includes("Bullish") ? "Reduced" : topIdea ? "Favored" : "-"}</b>
+        </section>
+
+        <section className="panel mini-card regime-timestamp">
+          <span>Last regime update</span>
+          <b>{lastRegimeUpdate}</b>
         </section>
 
         <section className="panel strategy-statement">

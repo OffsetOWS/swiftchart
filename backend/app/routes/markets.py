@@ -5,7 +5,8 @@ from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
 from app.models.schemas import Candle, Market, RiskSettings
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.scanner import cached_top_ideas
-from app.services.trade_history import save_trade_ideas
+from app.services.trade_history import save_signal_reviews, save_trade_ideas
+from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.trade_ideas import analyze_dataframe
 
 router = APIRouter()
@@ -27,6 +28,20 @@ def higher_timeframes_for(timeframe: str) -> list[str]:
     if normalized in {"2h", "4h", "6h", "8h", "12h"}:
         return ["1d"]
     return []
+
+
+async def global_regime_score(exchange: str, timeframe: str) -> float | None:
+    scores = []
+    for symbol in ("BTCUSDT", "ETHUSDT"):
+        try:
+            df = await get_candles_cached(exchange, symbol, timeframe, 260)
+            if len(df) >= 80:
+                scores.append(regime_score_from_dataframe(df))
+        except Exception:
+            continue
+    if not scores:
+        return None
+    return round(sum(scores) / len(scores), 1)
 
 
 @router.get("/markets", response_model=list[Market])
@@ -107,7 +122,15 @@ async def analyze(
                         htf_dfs.append(await get_candles_cached(selected_exchange, symbol, htf, 240))
                     except Exception:
                         continue
-                analysis = analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
+                analysis = analyze_dataframe(
+                    symbol.upper(),
+                    timeframe,
+                    selected_exchange,
+                    df,
+                    risk,
+                    htf_dfs,
+                    global_regime_score=await global_regime_score(selected_exchange, timeframe),
+                )
                 break
             except Exception as exc:
                 last_error = exc
@@ -115,7 +138,8 @@ async def analyze(
         if analysis is None:
             raise HTTPException(status_code=422, detail=str(last_error or "Could not analyze symbol."))
         saved_ids = save_trade_ideas(analysis.trade_ideas)
-        logger.info("Analysis generated %s ideas and saved %s for %s %s on %s", len(analysis.trade_ideas), len(saved_ids), symbol, timeframe, analysis.exchange)
+        saved_reviews = save_signal_reviews(analysis.rejected_signals)
+        logger.info("Analysis generated %s ideas, rejected %s, and saved %s ideas/%s reviews for %s %s on %s", len(analysis.trade_ideas), len(analysis.rejected_signals), len(saved_ids), saved_reviews, symbol, timeframe, analysis.exchange)
         return analysis
     except HTTPException:
         raise
@@ -157,8 +181,17 @@ async def top_ideas(
                             htf_dfs.append(await get_candles_cached(selected_exchange, symbol, htf, 220))
                         except Exception:
                             continue
-                    analysis = analyze_dataframe(symbol, timeframe, selected_exchange, df, risk, htf_dfs)
+                    analysis = analyze_dataframe(
+                        symbol,
+                        timeframe,
+                        selected_exchange,
+                        df,
+                        risk,
+                        htf_dfs,
+                        global_regime_score=await global_regime_score(selected_exchange, timeframe),
+                    )
                     ideas.extend(analysis.trade_ideas)
+                    save_signal_reviews(analysis.rejected_signals)
             except Exception as exc:
                 errors.append({"exchange": selected_exchange, "symbol": symbol, "error": str(exc)})
     ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]

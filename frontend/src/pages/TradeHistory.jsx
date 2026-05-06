@@ -99,6 +99,18 @@ export default function TradeHistory() {
           <div className="stat"><span>Best timeframe</span><b>{bestLabel(stats?.best_timeframe_performance, "timeframe")}</b></div>
           <div className="stat"><span>Best coin</span><b>{bestLabel(stats?.best_symbol_performance, "symbol")}</b></div>
           <div className="stat"><span>Best grade</span><b>{bestLabel(stats?.best_setup_grade_performance, "setup_grade")}</b></div>
+          <div className="stat"><span>Best direction</span><b>{bestLabel(stats?.direction_performance, "direction")}</b></div>
+          <div className="stat"><span>Best regime</span><b>{bestLabel(stats?.regime_performance, "regime_label")}</b></div>
+          <div className="stat"><span>Counter trend</span><b>{bestLabel(stats?.counter_trend_performance, "trend_alignment")}</b></div>
+        </div>
+        <div className="stats history-stats compact">
+          {(stats?.accepted_vs_rejected || []).map((item) => (
+            <div className="stat" key={item.status}>
+              <span>{item.status} signals</span>
+              <b>{item.count}</b>
+              <small>Avg adjusted {item.average_adjusted_score}</small>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -148,7 +160,7 @@ export default function TradeHistory() {
           <table className="history-table">
             <thead>
               <tr>
-                <th>Date</th><th>Exchange</th><th>Symbol</th><th>TF</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>Score</th><th>Status</th><th>Result</th><th>R</th>
+                <th>Date</th><th>Exchange</th><th>Symbol</th><th>TF</th><th>Dir</th><th>Regime</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>Score</th><th>Status</th><th>Result</th><th>R</th>
               </tr>
             </thead>
             <tbody>
@@ -160,6 +172,7 @@ export default function TradeHistory() {
                     <td>{record.symbol}</td>
                     <td>{record.timeframe}</td>
                     <td>{record.direction}</td>
+                    <td>{record.regime_label || record.market_regime || "-"} {record.regime_score !== null && record.regime_score !== undefined ? `(${record.regime_score > 0 ? "+" : ""}${record.regime_score})` : ""}</td>
                     <td>{fmt(record.entry_zone_low)} - {fmt(record.entry_zone_high)}</td>
                     <td>{fmt(record.stop_loss)}</td>
                     <td>{fmt(record.take_profit_1)}</td>
@@ -171,10 +184,12 @@ export default function TradeHistory() {
                   </tr>
                   {expanded === record.id ? (
                     <tr className="detail-row">
-                      <td colSpan="13">
+                      <td colSpan="14">
                         <div className="history-detail">
-                          <p><b>Regime:</b> {record.market_regime || "-"} | <b>HTF:</b> {record.higher_timeframe_bias || "-"}</p>
+                          <p><b>Regime:</b> {record.regime_label || record.market_regime || "-"} ({fmt(record.regime_score)}) | <b>HTF:</b> {record.higher_timeframe_bias || "-"} | <b>Trade:</b> {record.trend_alignment || "-"}</p>
+                          <p><b>Regime adjustment:</b> {fmt(record.regime_confidence_adjustment)} | <b>Confirmations:</b> {record.reversal_confirmations || "[]"}</p>
                           <p><b>Reason:</b> {record.reason}</p>
+                          <p><b>Regime explanation:</b> {record.regime_explanation || "-"}</p>
                           <p><b>Invalidation:</b> {record.invalidation}</p>
                           <p><b>Entry:</b> {dt(record.entry_triggered_at)} | <b>Closed:</b> {dt(record.closed_at)} | <b>Checked:</b> {dt(record.outcome_checked_at)}</p>
                         </div>

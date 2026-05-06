@@ -28,6 +28,14 @@ def signal_label(idea: TradeIdea | None) -> str:
     return f"Potential {idea.direction}"
 
 
+def regime_line(idea: TradeIdea | None, analysis: AnalysisResponse | None = None) -> str:
+    regime = idea.regime_label if idea else analysis.market_regime_data.label if analysis and analysis.market_regime_data else None
+    score = idea.regime_score if idea else analysis.market_regime_data.score if analysis and analysis.market_regime_data else None
+    if regime and score is not None:
+        return f"{regime} ({score:+.0f})"
+    return str(regime or "-")
+
+
 def format_analysis(analysis: AnalysisResponse) -> str:
     idea = analysis.trade_ideas[0] if analysis.trade_ideas else None
     timeframe = analysis.timeframe.upper()
@@ -37,6 +45,7 @@ def format_analysis(analysis: AnalysisResponse) -> str:
             "Signal: No Trade\n"
             "Setup Score: -\n"
             "Grade: No Trade\n"
+            f"Market Regime: {regime_line(None, analysis)}\n"
             f"HTF Bias: {analysis.higher_timeframe_bias}\n"
             "Entry: -\n"
             "Stop Loss: -\n"
@@ -52,6 +61,8 @@ def format_analysis(analysis: AnalysisResponse) -> str:
             f"Signal: {signal_label(idea)}\n"
             f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
             f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
+            f"Market Regime: {regime_line(idea)}\n"
+            f"Trade Bias: {idea.trend_alignment or '-'} | Regime Adj: {idea.regime_confidence_adjustment:+.0f}\n"
             f"HTF Bias: {idea.higher_timeframe_bias}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"Stop Loss: {fmt(idea.stop_loss)}\n"
@@ -65,7 +76,7 @@ def format_analysis(analysis: AnalysisResponse) -> str:
 
     return (
         f"SwiftChart Analysis: {analysis.symbol} — {timeframe}\n\n"
-        f"Market Regime: {analysis.market_condition}\n"
+        f"Market Regime: {regime_line(idea, analysis)}\n"
         f"Support Zone: {_zone_range(analysis.support_zones)}\n"
         f"Resistance Zone: {_zone_range(analysis.resistance_zones)}\n"
         f"{trade_block}\n\n"
@@ -91,7 +102,7 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
             "\n"
             f"{index}. {idea.symbol} — {idea.direction}\n"
             f"Score: {fmt(idea.setup_score or idea.confidence_score)}/100 | Grade: {idea.setup_grade or 'Valid Setup'}\n"
-            f"Regime: {idea.market_regime or '-'} | HTF: {idea.higher_timeframe_bias}\n"
+            f"Regime: {regime_line(idea)} | Trade: {idea.trend_alignment or '-'} | HTF: {idea.higher_timeframe_bias}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"SL: {fmt(idea.stop_loss)} | TP1: {fmt(idea.take_profit_1)} | TP2: {fmt(idea.take_profit_2)}\n"
             f"R:R: {fmt(idea.risk_reward_ratio)} | Confidence: {fmt(idea.confidence_score)}%\n"
@@ -107,7 +118,8 @@ def format_trade_alert(idea: TradeIdea) -> str:
         f"Signal: Potential {idea.direction}\n"
         f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
         f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
-        f"Market Regime: {idea.market_regime or '-'}\n"
+        f"Market Regime: {regime_line(idea)}\n"
+        f"Trade Bias: {idea.trend_alignment or '-'} | Regime Adj: {idea.regime_confidence_adjustment:+.0f}\n"
         f"HTF Bias: {idea.higher_timeframe_bias}\n\n"
         f"Entry: {fmt_zone(idea.entry_zone)}\n"
         f"Stop Loss: {fmt(idea.stop_loss)}\n"

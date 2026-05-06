@@ -319,7 +319,17 @@ https://your-render-service.onrender.com/alerts/run?secret=your_alert_secret
 
 Use this with an external cron/wake service if the Render free service sleeps. Render Cron Jobs are available but have a minimum monthly charge, and Render background workers are not free.
 
-### Deploy the Bot on Render
+### VPS Deployment
+
+SwiftChart now uses a VPS-first deployment workflow. The frontend is built with Vite and served by Nginx, the FastAPI backend runs behind Nginx on port 8000, and the Telegram bot runs with PM2 in polling mode.
+
+Use [DEPLOYMENT.md](DEPLOYMENT.md) for the full Contabo Ubuntu VPS setup.
+
+The VPS workflow replaces Render for the Telegram bot. Render web services and `render.yaml` are no longer required.
+
+### Legacy Render Notes
+
+These notes are kept only for historical context. Do not use Render for the current SwiftChart bot deployment.
 
 Render's free tier supports free web services. Background workers are not free, so SwiftChart Bot includes a webhook web service for Render and keeps polling available for local testing.
 

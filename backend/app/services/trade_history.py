@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 import logging
 from typing import Iterable
 
 import pandas as pd
 
 from app.config import get_settings
-from app.models.schemas import TradeIdea
+from app.models.schemas import SignalReview, TradeIdea
 from app.services.market_data import get_candles_cached
 from app.utils.database import get_connection
 
@@ -90,9 +91,11 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         symbol, timeframe, exchange, direction, market_regime,
                         higher_timeframe_bias, setup_score, setup_grade,
                         entry_zone_low, entry_zone_high, stop_loss, take_profit_1,
-                        take_profit_2, risk_reward, confidence, reason, invalidation
+                        take_profit_2, risk_reward, confidence, reason, invalidation,
+                        regime_score, regime_label, trend_alignment, regime_confidence_adjustment,
+                        reversal_confirmations, regime_explanation
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         idea.symbol.upper(),
@@ -112,14 +115,81 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         idea.confidence_score,
                         idea.reason,
                         idea.invalid_condition,
+                        idea.regime_score,
+                        idea.regime_label,
+                        idea.trend_alignment,
+                        idea.regime_confidence_adjustment,
+                        json.dumps(idea.reversal_confirmations),
+                        idea.regime_explanation,
                     ),
                 )
                 trade_id = int(cursor.lastrowid)
+                connection.execute(
+                    """
+                    INSERT INTO signal_reviews (
+                        symbol, timeframe, exchange, direction, accepted, reason,
+                        base_score, adjusted_score, confidence_adjustment,
+                        regime_score, regime_label, trend_alignment, reversal_confirmations
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        idea.symbol.upper(),
+                        idea.timeframe,
+                        idea.exchange,
+                        idea.direction.upper(),
+                        1,
+                        "Signal accepted and saved as a trade idea.",
+                        None,
+                        idea.confidence_score,
+                        idea.regime_confidence_adjustment,
+                        idea.regime_score or 0,
+                        idea.regime_label or "Ranging / Neutral",
+                        idea.trend_alignment or "range-trade",
+                        json.dumps(idea.reversal_confirmations),
+                    ),
+                )
                 ids.append(trade_id)
                 logger.info("Saved trade idea id=%s symbol=%s timeframe=%s exchange=%s direction=%s", trade_id, idea.symbol, idea.timeframe, idea.exchange, idea.direction)
             except Exception:
                 logger.exception("Failed to save trade idea symbol=%s timeframe=%s exchange=%s", idea.symbol, idea.timeframe, idea.exchange)
     return ids
+
+
+def save_signal_reviews(reviews: Iterable[SignalReview]) -> int:
+    count = 0
+    with get_connection() as connection:
+        for review in reviews:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO signal_reviews (
+                        symbol, timeframe, exchange, direction, accepted, reason,
+                        base_score, adjusted_score, confidence_adjustment,
+                        regime_score, regime_label, trend_alignment, reversal_confirmations
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        review.symbol.upper(),
+                        review.timeframe,
+                        review.exchange,
+                        review.direction.upper(),
+                        1 if review.accepted else 0,
+                        review.reason,
+                        review.base_score,
+                        review.adjusted_score,
+                        review.confidence_adjustment,
+                        review.regime_score,
+                        review.regime_label,
+                        review.trend_alignment,
+                        json.dumps(review.reversal_confirmations),
+                    ),
+                )
+                count += 1
+            except Exception:
+                logger.exception("Failed to save signal review symbol=%s timeframe=%s exchange=%s", review.symbol, review.timeframe, review.exchange)
+    return count
 
 
 def row_to_dict(row) -> dict:
@@ -347,6 +417,7 @@ async def check_trade_outcomes() -> dict:
 def stats() -> dict:
     with get_connection() as connection:
         rows = [dict(row) for row in connection.execute("SELECT * FROM trade_ideas").fetchall()]
+        review_rows = [dict(row) for row in connection.execute("SELECT * FROM signal_reviews").fetchall()]
     total = len(rows)
     entry_triggered = [row for row in rows if row.get("entry_triggered_at")]
     wins = [row for row in rows if row["result"] in {"WIN", "PARTIAL_WIN"}]
@@ -381,6 +452,20 @@ def stats() -> dict:
             )
         return sorted(output, key=lambda item: (item["win_rate"], item["average_r"], item["count"]), reverse=True)[:5]
 
+    def review_grouped() -> list[dict]:
+        buckets: dict[str, list[dict]] = {"accepted": [], "rejected": []}
+        for row in review_rows:
+            buckets["accepted" if int(row.get("accepted") or 0) else "rejected"].append(row)
+        return [
+            {
+                "status": key,
+                "count": len(items),
+                "average_base_score": round(sum(float(item["base_score"] or 0) for item in items) / len(items), 2) if items else 0,
+                "average_adjusted_score": round(sum(float(item["adjusted_score"] or 0) for item in items) / len(items), 2) if items else 0,
+            }
+            for key, items in buckets.items()
+        ]
+
     return {
         "total_ideas": total,
         "entry_triggered_count": len(entry_triggered),
@@ -396,4 +481,8 @@ def stats() -> dict:
         "best_setup_grade_performance": grouped("setup_grade"),
         "best_timeframe_performance": grouped("timeframe"),
         "best_symbol_performance": grouped("symbol"),
+        "direction_performance": grouped("direction"),
+        "regime_performance": grouped("regime_label"),
+        "accepted_vs_rejected": review_grouped(),
+        "counter_trend_performance": grouped("trend_alignment"),
     }
