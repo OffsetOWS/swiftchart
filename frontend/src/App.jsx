@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Analytics } from "@vercel/analytics/react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
@@ -108,9 +109,11 @@ export default function App() {
   ];
 
   return (
-    <main className={nightMode ? "app-shell dark-mode" : "app-shell"}>
-      <div className="grain" />
-      <div className="cursor-aura" />
+    <>
+      <Analytics />
+      <main className={nightMode ? "app-shell dark-mode" : "app-shell"}>
+        <div className="grain" />
+        <div className="cursor-aura" />
 
       <section className="landing-stage" aria-label="SwiftChart terminal introduction">
         <header className="reference-header">
@@ -246,6 +249,7 @@ export default function App() {
         </div>
       </section>
     </main>
+    </>
   );
 }
 
