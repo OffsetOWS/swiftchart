@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Analytics } from "@vercel/analytics/react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
@@ -245,6 +246,7 @@ export default function App() {
           )}
         </div>
       </section>
+      <Analytics />
     </main>
   );
 }
