@@ -1,9 +1,10 @@
+import logging
+
 import pandas as pd
 
 from app.models.schemas import AnalysisResponse, LiquiditySweep, MarketRegimeSnapshot, RiskSettings, SignalReview, TradeIdea, Zone
 from app.strategy.liquidity_sweep import detect_liquidity_sweeps
 from app.strategy.market_structure import (
-    classify_market,
     higher_timeframe_bias,
     momentum_confirmation,
     range_position,
@@ -14,6 +15,8 @@ from app.strategy.market_regime import detect_market_regime
 
 
 MIN_SETUP_SCORE = 65
+
+logger = logging.getLogger(__name__)
 
 
 def _rr(entry: float, stop: float, target: float, direction: str) -> float:
@@ -180,16 +183,74 @@ def _reversal_confirmations(
 
 
 def _regime_alignment(direction: str, market_regime: MarketRegimeSnapshot) -> str:
-    label = market_regime.label
-    if label == "Ranging / Neutral":
+    regime_type = market_regime.regime_type
+    if regime_type == "RANGE_BOUND":
         return "range-trade"
-    if (direction == "Long" and "Bullish" in label) or (direction == "Short" and "Bearish" in label):
+    bullish_types = {"TRENDING_UP", "BREAKOUT", "TRANSITION_TO_BULLISH"}
+    bearish_types = {"TRENDING_DOWN", "BREAKDOWN", "TRANSITION_TO_BEARISH"}
+    if (direction == "Long" and regime_type in bullish_types) or (direction == "Short" and regime_type in bearish_types):
         return "with-trend"
     return "counter-trend"
 
 
 def _regime_adjustment(direction: str, score: float, market_regime: MarketRegimeSnapshot, confirmations: list[str]) -> tuple[float, float, str | None]:
     alignment = _regime_alignment(direction, market_regime)
+    bearish_structure_active = bool(market_regime.components.get("bearish_structure_active"))
+    structure_reclaimed_bullish = bool(market_regime.components.get("structure_reclaimed_bullish"))
+    bullish_structure_active = bool(market_regime.components.get("bullish_structure_active"))
+    structure_reclaimed_bearish = bool(market_regime.components.get("structure_reclaimed_bearish"))
+
+    if bearish_structure_active and direction == "Long":
+        required_reversal_confirmations = 3
+        if not structure_reclaimed_bullish:
+            penalty = -55
+            return score + penalty, penalty, (
+                "Long signal rejected because bearish structure is active: price broke recent support, "
+                "LH/LL structure is present, and EMA/momentum confirmation is bearish. "
+                "Minor bounces are disabled until price reclaims structure."
+            )
+        if score < 75 or len(confirmations) < required_reversal_confirmations:
+            penalty = -35
+            return score + penalty, penalty, (
+                f"Long signal rejected because bearish structure is active and reversal quality is not high enough; "
+                f"score {score:.0f}, confirmations {len(confirmations)}/{required_reversal_confirmations}."
+            )
+
+    if bullish_structure_active and direction == "Short":
+        required_reversal_confirmations = 3
+        if not structure_reclaimed_bearish:
+            penalty = -55
+            return score + penalty, penalty, (
+                "Short signal rejected because bullish structure is active: price reclaimed recent resistance, "
+                "HH/HL structure is present, and EMA/momentum confirmation is bullish."
+            )
+        if score < 75 or len(confirmations) < required_reversal_confirmations:
+            penalty = -35
+            return score + penalty, penalty, (
+                f"Short signal rejected because bullish structure is active and reversal quality is not high enough; "
+                f"score {score:.0f}, confirmations {len(confirmations)}/{required_reversal_confirmations}."
+            )
+
+    if market_regime.trade_decision == "NO_TRADE":
+        penalty = -40
+        return score + penalty, penalty, f"{direction} signal rejected because the market regime decision is NO_TRADE ({market_regime.label})."
+
+    if market_regime.is_transition:
+        transition_direction = "Long" if market_regime.regime_type == "TRANSITION_TO_BULLISH" else "Short"
+        if direction != transition_direction:
+            penalty = -35
+            return score + penalty, penalty, (
+                f"{direction} signal rejected because the market is in {market_regime.label}; "
+                f"only {transition_direction.lower()} setups can be reconsidered after confirmation."
+            )
+        required_transition_confirmations = 2
+        if market_regime.trade_decision == "WAIT" or len(confirmations) < required_transition_confirmations:
+            penalty = -25
+            return score + penalty, penalty, (
+                f"{direction} signal rejected because {market_regime.label} needs "
+                f"{required_transition_confirmations} confirmations before trading; found {len(confirmations)}."
+            )
+
     if alignment == "range-trade":
         return score, 0, None
     strength = abs(market_regime.score)
@@ -207,6 +268,40 @@ def _regime_adjustment(direction: str, score: float, market_regime: MarketRegime
             f"and only has {len(confirmations)} reversal confirmation{'s' if len(confirmations) != 1 else ''}; {required} required."
         )
     return adjusted, penalty, f"Counter-trend {direction.lower()} allowed with {len(confirmations)} strong reversal confirmations."
+
+
+def _log_signal_review(
+    *,
+    symbol: str,
+    timeframe: str,
+    exchange: str,
+    direction: str,
+    accepted: bool,
+    reason: str,
+    market_regime: MarketRegimeSnapshot,
+    base_score: float,
+    adjusted_score: float,
+    confidence_adjustment: float,
+) -> None:
+    logger.info(
+        (
+            "Signal %s symbol=%s timeframe=%s exchange=%s direction=%s bias=%s bias_reason=%s "
+            "flip_trigger=%s regime=%s base_score=%.1f adjusted_score=%.1f adjustment=%.1f reason=%s"
+        ),
+        "accepted" if accepted else "rejected",
+        symbol,
+        timeframe,
+        exchange,
+        direction,
+        market_regime.bias,
+        market_regime.bias_reason,
+        market_regime.bias_flip_trigger,
+        market_regime.regime_type,
+        base_score,
+        adjusted_score,
+        confidence_adjustment,
+        reason,
+    )
 
 
 def _build_idea(
@@ -236,7 +331,34 @@ def _build_idea(
     entry = (entry_low + entry_high) / 2
     rr = _rr(entry, stop, tp2, direction)
     if rr < settings.min_rr:
-        return None, None
+        rejected_reason = f"Signal rejected because risk/reward {rr:.2f} is below minimum {settings.min_rr:.2f}."
+        _log_signal_review(
+            symbol=symbol,
+            timeframe=timeframe,
+            exchange=exchange,
+            direction=direction,
+            accepted=False,
+            reason=rejected_reason,
+            market_regime=market_regime_data,
+            base_score=0,
+            adjusted_score=0,
+            confidence_adjustment=0,
+        )
+        return None, SignalReview(
+            symbol=symbol,
+            timeframe=timeframe,
+            exchange=exchange,
+            direction=direction,
+            accepted=False,
+            reason=rejected_reason,
+            base_score=None,
+            adjusted_score=None,
+            confidence_adjustment=0,
+            regime_score=market_regime_data.score,
+            regime_label=market_regime_data.label,
+            trend_alignment=_regime_alignment(direction, market_regime_data),
+            reversal_confirmations=[],
+        )
 
     score, parts = _score_setup(
         regime=regime,
@@ -266,6 +388,18 @@ def _build_idea(
     if rejected_reason is None and adjusted_score < MIN_SETUP_SCORE:
         rejected_reason = "Signal rejected because setup score is below 65 after regime adjustment."
     if rejected_reason:
+        _log_signal_review(
+            symbol=symbol,
+            timeframe=timeframe,
+            exchange=exchange,
+            direction=direction,
+            accepted=False,
+            reason=rejected_reason,
+            market_regime=market_regime_data,
+            base_score=score,
+            adjusted_score=adjusted_score,
+            confidence_adjustment=confidence_adjustment,
+        )
         return None, SignalReview(
             symbol=symbol,
             timeframe=timeframe,
@@ -313,6 +447,11 @@ def _build_idea(
         risk_amount=risk_amount,
         regime_score=market_regime_data.score,
         regime_label=market_regime_data.label,
+        regime_type=market_regime_data.regime_type,
+        regime_confidence_score=market_regime_data.confidence_score,
+        regime_structure=market_regime_data.structure,
+        regime_trade_decision=market_regime_data.trade_decision,
+        is_regime_transition=market_regime_data.is_transition,
         regime_bias=market_regime_data.bias,
         regime_updated_at=market_regime_data.updated_at,
         trend_alignment=trend_alignment,
@@ -335,6 +474,18 @@ def _build_idea(
         trend_alignment=trend_alignment,
         reversal_confirmations=confirmations,
     )
+    _log_signal_review(
+        symbol=symbol,
+        timeframe=timeframe,
+        exchange=exchange,
+        direction=direction,
+        accepted=True,
+        reason=review.reason,
+        market_regime=market_regime_data,
+        base_score=score,
+        adjusted_score=adjusted_score,
+        confidence_adjustment=confidence_adjustment,
+    )
     return idea, review
 
 
@@ -351,6 +502,35 @@ def build_trade_ideas(
     htf_bias: str,
     market_regime_data: MarketRegimeSnapshot,
 ) -> tuple[list[TradeIdea], str | None, list[SignalReview]]:
+    if market_regime_data.trade_decision == "WAIT":
+        logger.info(
+            "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=WAIT",
+            symbol,
+            timeframe,
+            exchange,
+            market_regime_data.bias,
+            market_regime_data.bias_reason,
+            market_regime_data.bias_flip_trigger,
+        )
+        return [], (
+            f"WAIT / NO TRADE: {market_regime_data.label} has {market_regime_data.confidence_score:.0f}% confidence. "
+            f"{market_regime_data.explanation}"
+        ), []
+    if market_regime_data.trade_decision == "NO_TRADE":
+        logger.info(
+            "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=NO_TRADE",
+            symbol,
+            timeframe,
+            exchange,
+            market_regime_data.bias,
+            market_regime_data.bias_reason,
+            market_regime_data.bias_flip_trigger,
+        )
+        return [], (
+            f"NO TRADE: regime confidence is {market_regime_data.confidence_score:.0f}% or market is {market_regime_data.label}. "
+            f"{market_regime_data.explanation}"
+        ), []
+
     if support is None or resistance is None:
         return [], "NO TRADE: not enough clean support/resistance structure.", []
 
@@ -367,7 +547,7 @@ def build_trade_ideas(
     bearish_sweep = _latest_sweep(sweeps, "bearish")
     unconfirmed = _latest_sweep(sweeps, "bullish", False) or _latest_sweep(sweeps, "bearish", False)
 
-    if regime in {"CHOP", "NO_TRADE"}:
+    if regime in {"CHOP", "NO_TRADE", "TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}:
         if position is not None and 0.25 < position < 0.75:
             return [], "NO TRADE: price is currently mid-range.", []
         if unconfirmed and unconfirmed.confirmation_status != "confirmed":
@@ -570,9 +750,9 @@ def analyze_dataframe(
     supports, resistances = find_support_resistance(df)
     support, resistance = nearest_range(float(df["close"].iloc[-1]), supports, resistances)
     sweeps = detect_liquidity_sweeps(df, supports, resistances)
-    regime = classify_market(df, support, resistance)
     htf_bias = higher_timeframe_bias(htf_dfs)
     market_regime_data = detect_market_regime(df, htf_dfs, global_score=global_regime_score, breadth_above_ma_pct=breadth_above_ma_pct)
+    regime = market_regime_data.regime_type
     ideas, no_trade_reason, signal_reviews = build_trade_ideas(
         symbol,
         timeframe,

@@ -23,6 +23,8 @@ MarketCondition = Literal[
     "BREAKOUT",
     "BREAKDOWN",
     "CHOP",
+    "TRANSITION_TO_BULLISH",
+    "TRANSITION_TO_BEARISH",
     "NO_TRADE",
     "Trending up",
     "Trending down",
@@ -31,7 +33,17 @@ MarketCondition = Literal[
     "Breakdown",
     "No-trade zone",
 ]
-MarketRegimeLabel = Literal["Strong Bullish", "Weak Bullish", "Ranging / Neutral", "Weak Bearish", "Strong Bearish"]
+MarketRegimeType = Literal[
+    "RANGE_BOUND",
+    "TRENDING_UP",
+    "TRENDING_DOWN",
+    "BREAKOUT",
+    "BREAKDOWN",
+    "CHOP",
+    "TRANSITION_TO_BULLISH",
+    "TRANSITION_TO_BEARISH",
+]
+MarketRegimeLabel = str
 TrendAlignment = Literal["with-trend", "counter-trend", "range-trade"]
 
 
@@ -99,6 +111,11 @@ class TradeIdea(BaseModel):
     risk_amount: float | None = None
     regime_score: float | None = None
     regime_label: MarketRegimeLabel | None = None
+    regime_type: MarketRegimeType | None = None
+    regime_confidence_score: float | None = None
+    regime_structure: str | None = None
+    regime_trade_decision: str | None = None
+    is_regime_transition: bool = False
     regime_bias: str | None = None
     regime_updated_at: datetime | None = None
     trend_alignment: TrendAlignment | None = None
@@ -110,11 +127,19 @@ class TradeIdea(BaseModel):
 class MarketRegimeSnapshot(BaseModel):
     score: float
     label: MarketRegimeLabel
+    regime_type: MarketRegimeType
+    confidence_score: float
+    confidence_breakdown: dict[str, float] = Field(default_factory=dict)
+    structure: str = "Unknown"
+    is_transition: bool = False
+    trade_decision: Literal["TRADE_ALLOWED", "WAIT", "NO_TRADE"] = "NO_TRADE"
     bias: str
     long_bias: str
     short_bias: str
+    bias_reason: str = ""
+    bias_flip_trigger: str | None = None
     updated_at: datetime
-    components: dict[str, float | str | None] = Field(default_factory=dict)
+    components: dict[str, bool | float | str | None] = Field(default_factory=dict)
     explanation: str = ""
 
 
