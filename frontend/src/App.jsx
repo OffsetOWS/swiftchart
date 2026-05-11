@@ -24,6 +24,7 @@ function trackEvent(name, properties = {}) {
 export default function App() {
   const isLandingPage = window.location.pathname === "/";
   const isLaunchPage = window.location.pathname === "/launch";
+  const isAppPage = window.location.pathname === "/app";
   const isAuthPage = window.location.pathname === "/auth" || window.location.pathname === "/login" || window.location.pathname === "/signup";
   const [page, setPage] = useState("dashboard");
   const [nightMode, setNightMode] = useState(true);
@@ -148,6 +149,26 @@ export default function App() {
     ["settings", "Settings"],
   ];
 
+  const nav = (
+    <nav className={isAppPage ? "nav app-nav" : "nav"} aria-label="SwiftChart sections">
+      {tabs.map(([key, label]) => (
+        <button key={key} className={page === key ? "active" : ""} onClick={() => openPage(key)}>
+          <span />
+          {label}
+        </button>
+      ))}
+    </nav>
+  );
+
+  const themeControl = (
+    <div className="theme-control">
+      <span>{nightMode ? "Night" : "Day"}</span>
+      <button className={nightMode ? "theme-toggle on" : "theme-toggle"} onClick={() => setNightMode((value) => !value)} aria-label="Toggle night and day theme" aria-pressed={nightMode}>
+        <i />
+      </button>
+    </div>
+  );
+
   if (isLandingPage) {
     return (
       <>
@@ -177,59 +198,56 @@ export default function App() {
 
   return (
     <>
-    <main className={nightMode ? "app-shell dark-mode" : "app-shell"}>
+    <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"}${isAppPage ? " app-view" : ""}`}>
       <div className="grain" />
       <div className="cursor-aura" />
 
-      <section className="landing-stage" aria-label="SwiftChart terminal introduction">
-        <header className="reference-header">
-          <div />
-          <div className="theme-control">
-            <span>{nightMode ? "Night" : "Day"}</span>
-            <button className={nightMode ? "theme-toggle on" : "theme-toggle"} onClick={() => setNightMode((value) => !value)} aria-label="Toggle night and day theme" aria-pressed={nightMode}>
-              <i />
-            </button>
-          </div>
-        </header>
+      {!isAppPage ? (
+        <section className="landing-stage" aria-label="SwiftChart terminal introduction">
+          <header className="reference-header">
+            <div />
+            {themeControl}
+          </header>
 
-        <div className="terminal-hero">
-          <div className="hero-logo-shell" aria-label="SwiftChart logo">
-            <img src={swiftChartLogo} alt="SwiftChart" className="hero-logo-image" />
+          <div className="terminal-hero">
+            <div className="hero-logo-shell" aria-label="SwiftChart logo">
+              <img src={swiftChartLogo} alt="SwiftChart" className="hero-logo-image" />
+            </div>
           </div>
-        </div>
 
-        <div className="stage-footer">
-          <div className="footer-menu-wrap">
-            <nav className="side-menu footer-menu" aria-label="Site menu">
-              {["About us", "Contacts", "FAQ"].map((item) => (
-                <a key={item} href={`#${item.toLowerCase().replaceAll(" ", "-")}`}>
-                  <span className="menu-dot" />
-                  {item}
-                </a>
-              ))}
-            </nav>
-            <p>// AI-powered market analysis across crypto</p>
+          <div className="stage-footer">
+            <div className="footer-menu-wrap">
+              <nav className="side-menu footer-menu" aria-label="Site menu">
+                {["About us", "Contacts", "FAQ"].map((item) => (
+                  <a key={item} href={`#${item.toLowerCase().replaceAll(" ", "-")}`}>
+                    <span className="menu-dot" />
+                    {item}
+                  </a>
+                ))}
+              </nav>
+              <p>// AI-powered market analysis across crypto</p>
+            </div>
+            <button onClick={() => document.getElementById("terminal-workspace")?.scrollIntoView({ behavior: "smooth" })}>Scroll Down ■</button>
+            <p>{clock || "10 : 22 pm"}</p>
           </div>
-          <button onClick={() => document.getElementById("terminal-workspace")?.scrollIntoView({ behavior: "smooth" })}>Scroll Down ■</button>
-          <p>{clock || "10 : 22 pm"}</p>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <section id="terminal-workspace" className="terminal-workspace">
-        <div className="workspace-intro">
-          <span>SwiftChart</span>
-          <h1>Mysterious market structure, made readable.</h1>
-          <p>Top trade ideas, range context, chart analysis, alerts, and trade memory stay intact below the quiet terminal shell.</p>
-        </div>
+        {!isAppPage ? (
+          <div className="workspace-intro">
+            <span>SwiftChart</span>
+            <h1>Mysterious market structure, made readable.</h1>
+            <p>Top trade ideas, range context, chart analysis, alerts, and trade memory stay intact below the quiet terminal shell.</p>
+          </div>
+        ) : null}
 
-        <nav className="nav" aria-label="SwiftChart sections">
-          {tabs.map(([key, label]) => (
-            <button key={key} className={page === key ? "active" : ""} onClick={() => openPage(key)}>
-              <span />
-              {label}
-            </button>
-          ))}
-        </nav>
+        {isAppPage ? (
+          <div className="app-top-controls">
+            {nav}
+            <div className="app-theme-control">{themeControl}</div>
+          </div>
+        ) : nav}
 
         {notice ? <div className="risk-strip">{notice}</div> : null}
 

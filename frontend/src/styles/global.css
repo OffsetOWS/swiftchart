@@ -308,6 +308,9 @@ p {
   margin: 0 auto;
   padding: 80px 0 64px;
 }
+.app-view .terminal-workspace {
+  padding-top: 28px;
+}
 .workspace-intro {
   display: grid;
   gap: 16px;
@@ -396,6 +399,40 @@ p {
 }
 .nav button.active {
   box-shadow: 0 8px 24px rgba(0,0,0,0.08), inset 0 1px 0 var(--glass-edge);
+}
+.app-top-controls {
+  position: sticky;
+  top: 16px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.app-top-controls .nav {
+  position: relative;
+  top: auto;
+  flex: 1 1 auto;
+  margin-bottom: 0;
+}
+.app-nav {
+  min-width: 0;
+}
+.app-theme-control {
+  flex: 0 0 auto;
+  padding: 9px 12px 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.18), rgba(255,255,255,0.04)),
+    var(--glass);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    0 18px 46px rgba(0,0,0,0.12);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+.app-theme-control .theme-control {
+  justify-self: auto;
 }
 
 .tab-stage {
@@ -1871,6 +1908,19 @@ button:disabled {
   .terminal-workspace {
     width: calc(100% - 28px);
     padding: 54px 0;
+  }
+  .app-view .terminal-workspace {
+    padding-top: 18px;
+  }
+  .app-top-controls {
+    position: static;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .app-theme-control {
+    width: fit-content;
+    padding: 8px 10px 8px 14px;
   }
   .nav {
     overflow-x: auto;
