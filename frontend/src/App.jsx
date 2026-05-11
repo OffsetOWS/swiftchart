@@ -1,17 +1,32 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Analytics, track } from "@vercel/analytics/react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
+import Auth from "./pages/Auth.jsx";
+import Landing from "./pages/Landing.jsx";
+import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { createPaperTrade, getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
+import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
 
 const HYPERLIQUID_REF_URL = "https://app.hyperliquid.xyz/join/OFFSET";
+const TELEGRAM_BOT_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || "https://t.me/SwiftChartBot";
+
+function trackEvent(name, properties = {}) {
+  track(name, {
+    app: "swiftchart",
+    ...properties,
+  });
+}
 
 export default function App() {
+  const isLandingPage = window.location.pathname === "/";
+  const isLaunchPage = window.location.pathname === "/launch";
+  const isAuthPage = window.location.pathname === "/auth" || window.location.pathname === "/login" || window.location.pathname === "/signup";
   const [page, setPage] = useState("dashboard");
-  const [sound, setSound] = useState(false);
-  const [nightMode, setNightMode] = useState(false);
+  const [nightMode, setNightMode] = useState(true);
   const [clock, setClock] = useState("");
   const [exchange, setExchange] = useState("all");
   const [timeframe, setTimeframe] = useState("4h");
@@ -55,6 +70,12 @@ export default function App() {
   }
 
   async function paperTrade(idea) {
+    trackEvent("clicked_connect_wallet", {
+      source: "paper_trade",
+      symbol: idea.symbol,
+      timeframe: idea.timeframe,
+      direction: idea.direction,
+    });
     window.open(HYPERLIQUID_REF_URL, "_blank", "noopener,noreferrer");
     const entry = (idea.entry_zone[0] + idea.entry_zone[1]) / 2;
     await createPaperTrade({
@@ -72,6 +93,16 @@ export default function App() {
     setNotice("Paper trade saved.");
   }
 
+  function openPage(nextPage) {
+    setPage(nextPage);
+    if (nextPage === "dashboard") {
+      trackEvent("opened_dashboard");
+    }
+    if (nextPage === "ideas" || nextPage === "markets") {
+      trackEvent("viewed_signal_page", { page: nextPage === "ideas" ? "trade_ideas" : "markets" });
+    }
+  }
+
   useEffect(() => {
     refreshTopIdeas();
   }, [exchange, timeframe]);
@@ -79,6 +110,16 @@ export default function App() {
   useEffect(() => {
     runAnalysis();
   }, []);
+
+  useEffect(() => {
+    trackEvent("page_visit", { page });
+    if (page === "dashboard") {
+      trackEvent("opened_dashboard", { source: "page_visit" });
+    }
+    if (page === "ideas" || page === "markets") {
+      trackEvent("viewed_signal_page", { page: page === "ideas" ? "trade_ideas" : "markets", source: "page_visit" });
+    }
+  }, [page]);
 
   useEffect(() => {
     function tick() {
@@ -107,66 +148,68 @@ export default function App() {
     ["settings", "Settings"],
   ];
 
+  if (isLandingPage) {
+    return (
+      <>
+        <Landing />
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isLaunchPage) {
+    return (
+      <>
+        <LaunchFlow />
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isAuthPage) {
+    return (
+      <>
+        <Auth />
+        <Analytics />
+      </>
+    );
+  }
+
   return (
+    <>
     <main className={nightMode ? "app-shell dark-mode" : "app-shell"}>
       <div className="grain" />
       <div className="cursor-aura" />
 
       <section className="landing-stage" aria-label="SwiftChart terminal introduction">
         <header className="reference-header">
-          <nav className="side-menu" aria-label="Site menu">
-            {["About us", "Contacts", "FAQ"].map((item) => (
-              <a key={item} href={`#${item.toLowerCase().replaceAll(" ", "-")}`}>
-                <span className="menu-dot" />
-                {item}
-              </a>
-            ))}
-          </nav>
-          <button className="center-logo" onClick={() => setPage("dashboard")} aria-label="SwiftChart home">
-            <span>S</span><span>C</span>
-          </button>
-          <div className="sound-control">
-            <span>Sound</span>
-            <button className={sound ? "sound-toggle on" : "sound-toggle"} onClick={() => setSound((value) => !value)} aria-pressed={sound}>
+          <div />
+          <div className="theme-control">
+            <span>{nightMode ? "Night" : "Day"}</span>
+            <button className={nightMode ? "theme-toggle on" : "theme-toggle"} onClick={() => setNightMode((value) => !value)} aria-label="Toggle night and day theme" aria-pressed={nightMode}>
               <i />
             </button>
           </div>
         </header>
 
         <div className="terminal-hero">
-          <div className="retro-terminal" aria-label="SwiftChart terminal preview">
-            <div className="terminal-screen">
-              <div className="screen-noise" />
-              <div className="screen-copy">
-                <b>SwiftChart</b>
-                <span>{symbol} / {timeframe} / {exchange}</span>
-              </div>
-              <div className="mini-terminal-chart">
-                <i /><i /><i /><i /><i /><i />
-              </div>
-              <div className="screen-grid">
-                <span>RANGE</span>
-                <span>SWEEP</span>
-                <span>NO MID</span>
-                <span>{topIdeas[0]?.symbol || "BTCUSDT"}</span>
-              </div>
-            </div>
-            <div className="terminal-body">
-              <span /><span /><span />
-              <div className="vent" />
-            </div>
+          <div className="hero-logo-shell" aria-label="SwiftChart logo">
+            <img src={swiftChartLogo} alt="SwiftChart" className="hero-logo-image" />
           </div>
-          <button className="switch-caption" onClick={() => setNightMode((value) => !value)} aria-pressed={nightMode}>
-            <svg viewBox="0 0 104 76" role="img">
-              <path d="M88 62 C18 52 10 6 52 4" />
-              <path d="M82 57 L91 63 L82 68" />
-            </svg>
-            <span>{nightMode ? "Switch Night 'N' Day" : "Switch Day 'N' Night"}</span>
-          </button>
         </div>
 
         <div className="stage-footer">
-          <p>// AI-powered market analysis across crypto</p>
+          <div className="footer-menu-wrap">
+            <nav className="side-menu footer-menu" aria-label="Site menu">
+              {["About us", "Contacts", "FAQ"].map((item) => (
+                <a key={item} href={`#${item.toLowerCase().replaceAll(" ", "-")}`}>
+                  <span className="menu-dot" />
+                  {item}
+                </a>
+              ))}
+            </nav>
+            <p>// AI-powered market analysis across crypto</p>
+          </div>
           <button onClick={() => document.getElementById("terminal-workspace")?.scrollIntoView({ behavior: "smooth" })}>Scroll Down ■</button>
           <p>{clock || "10 : 22 pm"}</p>
         </div>
@@ -181,7 +224,7 @@ export default function App() {
 
         <nav className="nav" aria-label="SwiftChart sections">
           {tabs.map(([key, label]) => (
-            <button key={key} className={page === key ? "active" : ""} onClick={() => setPage(key)}>
+            <button key={key} className={page === key ? "active" : ""} onClick={() => openPage(key)}>
               <span />
               {label}
             </button>
@@ -231,6 +274,15 @@ export default function App() {
               <span className="eyebrow">ALERT RELAY</span>
               <h2>Telegram waits for clean setups.</h2>
               <p>SwiftChart can notify subscribed Telegram users when the scanner finds valid trade ideas that clear the strategy threshold.</p>
+              <a
+                className="telegram-link"
+                href={TELEGRAM_BOT_URL}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => trackEvent("clicked_telegram_bot", { source: "alerts_page" })}
+              >
+                Open SwiftChart on Telegram
+              </a>
               <div className="mono-list">
                 <span>/subscribe</span><span>/alerts</span><span>/top</span><span>/checktrades</span>
               </div>
@@ -240,12 +292,14 @@ export default function App() {
             <section className="panel terminal-note" id="faq">
               <span className="eyebrow">CONTROL ROOM</span>
               <h2>Risk remains first.</h2>
-              <p>Default settings keep paper mode enabled, minimum R:R at 2.0, and live execution disabled unless explicitly configured outside the frontend.</p>
+              <p>SwiftChart keeps analysis, alerts, history, and risk context focused here while trade control stays on Telegram.</p>
             </section>
           )}
         </div>
       </section>
     </main>
+    <Analytics />
+    </>
   );
 }
 
