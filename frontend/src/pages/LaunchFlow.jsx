@@ -146,10 +146,10 @@ export default function LaunchFlow() {
           <span className="eyebrow">SwiftChart account</span>
           <h1 id="unlock-title">Unlock Full Access</h1>
           <p>Sign in to access live market bias, signal history, and future alerts.</p>
-          <button className="google-auth-button" type="button">
+          <a className="google-auth-button" href="/app">
             <Chrome size={18} aria-hidden="true" />
             <span>Continue with Google</span>
-          </button>
+          </a>
         </section>
       </section>
     </main>

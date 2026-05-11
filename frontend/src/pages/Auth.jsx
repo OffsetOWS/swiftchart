@@ -17,10 +17,10 @@ export default function Auth() {
           <p>Save your dashboard, track signals, and access future alerts.</p>
         </div>
 
-        <button className="google-auth-button" type="button">
+        <a className="google-auth-button" href="/app">
           <Chrome size={18} aria-hidden="true" />
           <span>Continue with Google</span>
-        </button>
+        </a>
 
         <ul className="auth-feature-list" aria-label="SwiftChart account features">
           {features.map((feature) => (

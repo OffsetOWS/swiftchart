@@ -1346,6 +1346,7 @@ button:disabled {
   gap: 10px;
   width: 100%;
   color: #f1f1ea;
+  text-decoration: none;
   border: 1px solid #111111;
   border-radius: 14px;
   background: #111111;
