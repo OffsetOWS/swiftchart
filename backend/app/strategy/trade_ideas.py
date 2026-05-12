@@ -601,7 +601,18 @@ def build_trade_ideas(
     price = float(df["close"].iloc[-1])
     atr = average_true_range(df)
     range_width = resistance.lower - support.upper
-    if range_width <= atr * 1.4:
+    structural_support_break = bool(
+        market_regime_data.components.get("structural_support_break")
+        or market_regime_data.components.get("breakdown_confirmed")
+    )
+    structural_resistance_reclaim = bool(
+        market_regime_data.components.get("structural_resistance_reclaim")
+        or market_regime_data.components.get("breakout_confirmed")
+    )
+    if range_width <= atr * 1.4 and not (
+        (regime in {"BREAKDOWN", "TRANSITION_TO_BEARISH"} and structural_support_break)
+        or (regime in {"BREAKOUT", "TRANSITION_TO_BULLISH"} and structural_resistance_reclaim)
+    ):
         return [], "NO TRADE: range is too compressed and choppy.", []
 
     position = range_position(price, support, resistance)
@@ -655,8 +666,8 @@ def build_trade_ideas(
     last = df.iloc[-1]
     bearish_momentum = bool(market_regime_data.components.get("bearish_ema_momentum")) or (mom_ok and six_candle_return < 0)
     bullish_momentum = bool(market_regime_data.components.get("bullish_ema_momentum")) or (mom_ok and six_candle_return > 0)
-    support_break = bool(market_regime_data.components.get("structural_support_break") or market_regime_data.components.get("breakdown_confirmed"))
-    resistance_reclaim = bool(market_regime_data.components.get("structural_resistance_reclaim") or market_regime_data.components.get("breakout_confirmed"))
+    support_break = structural_support_break
+    resistance_reclaim = structural_resistance_reclaim
     failed_reclaim = support is not None and float(last["high"]) >= support.lower - atr * 0.35 and price < support.lower
     bearish_retest = support is not None and float(last["high"]) >= support.lower - atr * 0.5 and price < support.upper
     resistance_rejection = resistance is not None and float(last["high"]) >= resistance.lower - atr * 0.35 and price < resistance.lower

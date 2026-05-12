@@ -36,7 +36,7 @@ class ShortCheckResult:
 def candle_limit_for_two_days(timeframe: str) -> int:
     minutes = TIMEFRAME_MINUTES.get(timeframe.lower(), 240)
     two_day_candles = max(12, int((48 * 60) / minutes))
-    return max(100, two_day_candles + 80)
+    return max(180, two_day_candles + 120)
 
 
 async def analyze_symbol(exchange: str, symbol: str, timeframe: str, risk: RiskSettings) -> ShortCheckResult:
