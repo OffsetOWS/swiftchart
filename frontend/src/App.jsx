@@ -206,7 +206,7 @@ export default function App() {
       <img src={auth.profile?.avatar_url || auth.user?.user_metadata?.avatar_url || auth.user?.user_metadata?.picture || swiftChartLogo} alt="" />
       <div>
         <span>{auth.profile?.username || "SwiftChart user"}</span>
-        <small>{auth.profileLoading ? "Syncing profile" : "Signed in"}</small>
+        <small>{auth.profileLoading ? "Syncing profile" : auth.profile?.profile_storage_ready === false ? "Session active" : "Signed in"}</small>
       </div>
       <button
         type="button"

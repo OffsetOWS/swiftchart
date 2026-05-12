@@ -23,8 +23,34 @@ function createUsername() {
   return `${usernameWords[array[0] % usernameWords.length]}${randomDigits()}`;
 }
 
+function isProfilesTableMissing(error) {
+  return error?.code === "PGRST205" || error?.message?.includes("public.profiles");
+}
+
 function getAvatar(user) {
   return user.user_metadata?.avatar_url || user.user_metadata?.picture || null;
+}
+
+function getFallbackUsername(user) {
+  const storageKey = `swiftchart_username_${user.id}`;
+  const savedUsername = window.localStorage.getItem(storageKey);
+  if (savedUsername) return savedUsername;
+
+  const username = createUsername();
+  window.localStorage.setItem(storageKey, username);
+  return username;
+}
+
+function createFallbackProfile(user, now, avatarUrl) {
+  return {
+    id: user.id,
+    email: user.email,
+    username: getFallbackUsername(user),
+    avatar_url: avatarUrl,
+    signup_date: user.created_at || now,
+    last_login: now,
+    profile_storage_ready: false,
+  };
 }
 
 export async function ensureUserProfile(session) {
@@ -40,7 +66,12 @@ export async function ensureUserProfile(session) {
     .eq("id", user.id)
     .maybeSingle();
 
-  if (selectError) throw selectError;
+  if (selectError) {
+    if (isProfilesTableMissing(selectError)) {
+      return createFallbackProfile(user, now, avatarUrl);
+    }
+    throw selectError;
+  }
 
   if (existingProfile) {
     const { data, error } = await supabase
@@ -73,6 +104,9 @@ export async function ensureUserProfile(session) {
       .single();
 
     if (!error) return data;
+    if (isProfilesTableMissing(error)) {
+      return createFallbackProfile(user, now, avatarUrl);
+    }
     if (error.code !== "23505") throw error;
   }
 
