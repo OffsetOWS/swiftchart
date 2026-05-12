@@ -4,7 +4,8 @@ import pandas as pd
 
 from app.models.schemas import MarketRegimeSnapshot
 from app.strategy.market_regime import detect_market_regime
-from app.strategy.trade_ideas import _regime_adjustment
+from app.models.schemas import RiskSettings, Zone
+from app.strategy.trade_ideas import _regime_adjustment, build_trade_ideas
 
 
 def candles_from_prices(prices: list[float]) -> pd.DataFrame:
@@ -70,6 +71,89 @@ def test_transition_regime_requires_confirmation_before_trading():
     assert adjusted == 47
     assert penalty == -35
     assert note and "only long setups" in note
+
+
+def test_confirmed_bearish_transition_can_score_short_candidate():
+    snapshot = MarketRegimeSnapshot(
+        score=-32,
+        label="Transition to Bearish",
+        regime_type="TRANSITION_TO_BEARISH",
+        confidence_score=68,
+        confidence_breakdown={"bearish": 68},
+        structure="LH/LL forming",
+        is_transition=True,
+        trade_decision="WAIT",
+        bias="Bearish transition",
+        long_bias="Longs disabled during bearish transition",
+        short_bias="Wait for bearish confirmation",
+        bias_reason="support break with bearish transition",
+        updated_at=datetime.now(UTC),
+        components={
+            "structural_support_break": True,
+            "breakdown_confirmed": True,
+            "bearish_ema_momentum": True,
+            "bearish_structure_active": False,
+            "bullish_structure_active": False,
+            "structure_reclaimed_bullish": False,
+            "structure_reclaimed_bearish": False,
+        },
+    )
+    adjusted, penalty, note = _regime_adjustment(
+        "Short",
+        74,
+        snapshot,
+        ["price closed below support", "bearish momentum confirmation"],
+    )
+
+    assert adjusted == 78
+    assert penalty == 4
+    assert note and "Transition short allowed" in note
+
+
+def test_transition_to_bearish_builds_short_after_failed_reclaim():
+    prices = [110 - idx * 0.18 for idx in range(80)] + [96, 94, 92, 91, 90]
+    df = candles_from_prices(prices)
+    snapshot = MarketRegimeSnapshot(
+        score=-42,
+        label="Transition to Bearish",
+        regime_type="TRANSITION_TO_BEARISH",
+        confidence_score=72,
+        confidence_breakdown={"bearish": 72},
+        structure="LH/LL forming",
+        is_transition=True,
+        trade_decision="WAIT",
+        bias="Bearish transition",
+        long_bias="Longs disabled during bearish transition",
+        short_bias="Wait for bearish confirmation",
+        bias_reason="support break with bearish transition",
+        updated_at=datetime.now(UTC),
+        components={
+            "structural_support_break": True,
+            "breakdown_confirmed": True,
+            "bearish_ema_momentum": True,
+            "bearish_structure_active": False,
+            "bullish_structure_active": False,
+            "structure_reclaimed_bullish": False,
+            "structure_reclaimed_bearish": False,
+        },
+    )
+    ideas, warning, reviews = build_trade_ideas(
+        "TESTUSDT",
+        "4h",
+        "hyperliquid",
+        df,
+        Zone(type="support", lower=91, upper=96, strength=0.9, touches=4, strength_score=90),
+        Zone(type="resistance", lower=108, upper=112, strength=0.7, touches=3, strength_score=70),
+        [],
+        RiskSettings(min_rr=0.5),
+        "TRANSITION_TO_BEARISH",
+        "HTF_BEARISH",
+        snapshot,
+    )
+
+    assert warning is None
+    assert any(idea.direction == "Short" for idea in ideas)
+    assert any(review.direction == "Short" and review.accepted for review in reviews)
 
 
 def test_bearish_bias_switch_on_support_break_lh_ll_and_momentum():

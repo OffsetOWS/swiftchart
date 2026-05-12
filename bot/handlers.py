@@ -63,7 +63,7 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
 
 
 async def scan_top_ideas(timeframe: str, exchange: str | None = None):
-    selected_exchange = exchange or "all"
+    selected_exchange = exchange or get_settings().default_exchange
     result = await cached_top_ideas(selected_exchange, timeframe)
     return result["ideas"], result.get("exchange", selected_exchange)
 
@@ -124,7 +124,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "Alerts enabled.\n\n"
         "SwiftChart will notify this chat when a new valid setup appears. "
-        "Only setups scoring 65/100 or higher are eligible.\n\n"
+        "Only setups scoring 75/100 or higher are eligible.\n\n"
         "Use /unsubscribe to stop alerts.\n\n"
         "Not financial advice. Manage your risk."
     )

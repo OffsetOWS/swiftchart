@@ -7,6 +7,7 @@ The VPS runs:
 - React/Vite frontend, built into `frontend/dist` and served by Nginx.
 - FastAPI backend on `127.0.0.1:8000`, managed by PM2.
 - Telegram bot in polling mode, managed by PM2.
+- Execution bot on `127.0.0.1:8100`, managed by PM2, defaulting to paper trading.
 - One shared SQLite database at `/opt/swiftchart/swiftchart.db`.
 
 ## Project Setup Detected
@@ -36,6 +37,15 @@ Framework: python-telegram-bot
 Install: python3 -m venv bot/.venv && bot/.venv/bin/pip install -r bot/requirements.txt
 Start: bot/.venv/bin/python -m bot.main
 Mode: polling
+```
+
+Execution bot:
+
+```text
+Framework: FastAPI
+Install: python3 -m venv execution_bot/.venv && execution_bot/.venv/bin/pip install -r execution_bot/requirements.txt
+Start: execution_bot/.venv/bin/uvicorn execution_bot.main:app --host 127.0.0.1 --port 8100
+Mode: paper by default
 ```
 
 Database:
@@ -122,7 +132,6 @@ VITE_API_BASE=
 APP_NAME=SwiftChart
 ENVIRONMENT=production
 DATABASE_URL=sqlite:////opt/swiftchart/swiftchart.db
-BINANCE_BASE_URL=https://api.binance.com
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 FRONTEND_ORIGINS=http://156.67.30.173,https://YOUR_DOMAIN
 LIVE_TRADING_ENABLED=false
@@ -141,9 +150,21 @@ ALERT_TIMEFRAME=4h
 ALERT_SCAN_INTERVAL_SECONDS=1800
 ALERTS_RUN_SECRET=CHANGE_THIS_RANDOM_SECRET
 BOT_STATE_PATH=/opt/swiftchart/.swiftchart_bot_state.json
-BINANCE_API_KEY=
-BINANCE_API_SECRET=
 HYPERLIQUID_API_KEY=
+EXECUTION_DATABASE_URL=sqlite:////opt/swiftchart/execution_bot.db
+EXECUTION_WEBHOOK_SECRET=CHANGE_THIS_RANDOM_SECRET
+EXECUTION_MODE=paper
+EXECUTION_LIVE_CONFIRM=false
+EXECUTION_EXCHANGE=mock
+STARTING_BALANCE=100
+TARGET_BALANCE=1000
+BASE_RISK_PERCENT=2
+MAX_RISK_PERCENT=5
+MAX_DAILY_LOSS_PERCENT=8
+MAX_WEEKLY_LOSS_PERCENT=15
+MAX_OPEN_TRADES=2
+MAX_LEVERAGE=5
+MIN_CONFIDENCE_TO_TRADE=75
 ```
 
 If you do not have a domain yet, keep `YOUR_DOMAIN` as a placeholder and use the IP address first.
@@ -167,7 +188,7 @@ cd /opt/swiftchart
 bash deploy.sh
 ```
 
-This command installs dependencies, builds the frontend, starts the API and bot with PM2, and configures Nginx.
+This command installs dependencies, builds the frontend, starts the API, Telegram bot, and execution bot with PM2, and configures Nginx.
 
 ## 8. Exact PM2 Command
 
@@ -216,6 +237,16 @@ server {
 
     location /health {
         proxy_pass http://127.0.0.1:8000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /execution/ {
+        rewrite ^/execution/(.*)$ /$1 break;
+        proxy_pass http://127.0.0.1:8100;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -303,6 +334,7 @@ Check logs:
 ```bash
 pm2 logs swiftchart-api
 pm2 logs swiftchart-bot
+pm2 logs swiftchart-executor
 tail -f /var/log/nginx/error.log
 ```
 
@@ -311,6 +343,7 @@ Restart commands:
 ```bash
 pm2 restart swiftchart-api
 pm2 restart swiftchart-bot
+pm2 restart swiftchart-executor
 systemctl restart nginx
 ```
 

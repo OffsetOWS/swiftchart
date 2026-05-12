@@ -7,8 +7,9 @@ from time import monotonic
 
 import pandas as pd
 
-from app.config import DEFAULT_SCAN_LIST, get_settings
+from app.config import get_settings
 from app.models.schemas import RiskSettings, TradeIdea
+from app.services.execution_signals import dispatch_trade_ideas_to_execution
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
@@ -58,38 +59,31 @@ def _risk(timeframe: str) -> RiskSettings:
     )
 
 
+def normalize_exchange(exchange: str | None) -> str:
+    requested = (exchange or get_settings().default_exchange).lower()
+    if requested == "all":
+        return "hyperliquid"
+    return requested
+
+
 async def discover_scan_markets(exchange: str) -> list[dict]:
-    exchanges = ["binance", "hyperliquid"] if exchange.lower() == "all" else [exchange.lower()]
+    selected_exchange = normalize_exchange(exchange)
     output: list[dict] = []
     seen: set[tuple[str, str]] = set()
-    for name in exchanges:
-        try:
-            markets = await get_markets_cached(name)
-        except Exception as exc:
-            logger.warning("Could not discover markets for %s: %s", name, exc)
-            markets = []
-        if name == "binance":
-            preferred = {symbol.upper() for symbol in DEFAULT_SCAN_LIST}
-            markets = [market for market in markets if market.get("symbol") in preferred]
-            if not markets:
-                markets = [
-                    {
-                        "symbol": symbol,
-                        "exchange": name,
-                        "volume": None,
-                        "active": True,
-                    }
-                    for symbol in DEFAULT_SCAN_LIST
-                ]
-        for market in markets:
-            symbol = str(market.get("symbol", "")).upper()
-            if not symbol or not market.get("active", True):
-                continue
-            key = (name, symbol)
-            if key in seen:
-                continue
-            seen.add(key)
-            output.append({"exchange": name, "symbol": symbol, "volume": market.get("volume"), "active": True})
+    try:
+        markets = await get_markets_cached(selected_exchange)
+    except Exception as exc:
+        logger.warning("Could not discover markets for %s: %s", selected_exchange, exc)
+        markets = []
+    for market in markets:
+        symbol = str(market.get("symbol", "")).upper()
+        if not symbol or not market.get("active", True):
+            continue
+        key = (selected_exchange, symbol)
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append({"exchange": selected_exchange, "symbol": symbol, "volume": market.get("volume"), "active": True})
     return output
 
 
@@ -163,8 +157,9 @@ async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSet
             return []
 
 
-async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool = False) -> dict:
-    key = (exchange.lower(), timeframe.lower())
+async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, force: bool = False) -> dict:
+    selected_exchange = normalize_exchange(exchange)
+    key = (selected_exchange, timeframe.lower())
     now = monotonic()
     cached = _scan_cache.get(key)
     if cached and not force and now - cached[0] < SCAN_TTL_SECONDS:
@@ -177,8 +172,8 @@ async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool 
             return cached[1]
 
         started = monotonic()
-        markets = await discover_scan_markets(exchange)
-        scan_markets = scan_window(exchange, markets)
+        markets = await discover_scan_markets(selected_exchange)
+        scan_markets = scan_window(selected_exchange, markets)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
@@ -236,10 +231,11 @@ async def run_scan(exchange: str = "all", timeframe: str = "4h", *, force: bool 
             reverse=True,
         )[:5]
         save_trade_ideas(ranked)
+        await dispatch_trade_ideas_to_execution(ranked)
         duration = round(monotonic() - started, 2)
         result = {
             "timeframe": timeframe,
-            "exchange": exchange,
+            "exchange": selected_exchange,
             "ideas": ranked,
             "errors": [],
             "message": None if len(ranked) >= 5 else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
@@ -286,7 +282,7 @@ async def _scan_loop() -> None:
     await asyncio.sleep(5)
     while True:
         try:
-            await run_scan(exchange="all", timeframe=get_settings().default_timeframe, force=True)
+            await run_scan(exchange="hyperliquid", timeframe=get_settings().default_timeframe, force=True)
         except Exception:
             logger.exception("Background scan failed")
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)

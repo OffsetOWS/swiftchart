@@ -32,7 +32,7 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [nightMode, setNightMode] = useState(true);
   const [clock, setClock] = useState("");
-  const [exchange, setExchange] = useState("all");
+  const [exchange, setExchange] = useState("hyperliquid");
   const [timeframe, setTimeframe] = useState("4h");
   const [symbol, setSymbol] = useState("SOLUSDT");
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });

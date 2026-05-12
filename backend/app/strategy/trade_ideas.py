@@ -78,6 +78,8 @@ def _score_setup(
         "TRENDING_DOWN": 18 if direction == "Short" else 6,
         "BREAKOUT": 18 if direction == "Long" else 4,
         "BREAKDOWN": 18 if direction == "Short" else 4,
+        "TRANSITION_TO_BULLISH": 16 if direction == "Long" else 3,
+        "TRANSITION_TO_BEARISH": 16 if direction == "Short" else 3,
     }.get(regime, 0)
     zone_points = min(20, int((zone.strength_score or zone.strength * 100) / 5))
     sweep_points = 0
@@ -114,6 +116,10 @@ def _reason(regime: str, direction: str, sweep: LiquiditySweep | None, htf_bias:
         pieces.append("Price is holding above resistance with continuation confirmation.")
     elif regime == "BREAKDOWN":
         pieces.append("Price is holding below support with continuation confirmation.")
+    elif regime == "TRANSITION_TO_BEARISH":
+        pieces.append("Market structure is transitioning bearish and short confirmation is being tested.")
+    elif regime == "TRANSITION_TO_BULLISH":
+        pieces.append("Market structure is transitioning bullish and long confirmation is being tested.")
 
     if sweep:
         pieces.append(
@@ -244,12 +250,18 @@ def _regime_adjustment(direction: str, score: float, market_regime: MarketRegime
                 f"only {transition_direction.lower()} setups can be reconsidered after confirmation."
             )
         required_transition_confirmations = 2
-        if market_regime.trade_decision == "WAIT" or len(confirmations) < required_transition_confirmations:
+        if len(confirmations) < required_transition_confirmations:
             penalty = -25
             return score + penalty, penalty, (
                 f"{direction} signal rejected because {market_regime.label} needs "
                 f"{required_transition_confirmations} confirmations before trading; found {len(confirmations)}."
             )
+        boost = 4
+        return min(100.0, score + boost), boost, (
+            f"Transition {direction.lower()} allowed with {len(confirmations)} bearish confirmations."
+            if direction == "Short"
+            else f"Transition {direction.lower()} allowed with {len(confirmations)} bullish confirmations."
+        )
 
     if alignment == "range-trade":
         return score, 0, None
@@ -301,6 +313,58 @@ def _log_signal_review(
         adjusted_score,
         confidence_adjustment,
         reason,
+    )
+
+
+def _log_rejected_short_candidate(
+    *,
+    symbol: str,
+    timeframe: str,
+    exchange: str,
+    reason: str,
+    missing_condition: str,
+    market_regime: MarketRegimeSnapshot,
+) -> None:
+    logger.info(
+        (
+            "Rejected short setup pair=%s timeframe=%s exchange=%s current_bias=%s "
+            "reason_rejected=%s missing_condition=%s bias_reason=%s flip_trigger=%s regime=%s"
+        ),
+        symbol,
+        timeframe,
+        exchange,
+        market_regime.bias,
+        reason,
+        missing_condition,
+        market_regime.bias_reason,
+        market_regime.bias_flip_trigger,
+        market_regime.regime_type,
+    )
+
+
+def _short_rejection_review(
+    *,
+    symbol: str,
+    timeframe: str,
+    exchange: str,
+    reason: str,
+    missing_condition: str,
+    market_regime: MarketRegimeSnapshot,
+) -> SignalReview:
+    return SignalReview(
+        symbol=symbol,
+        timeframe=timeframe,
+        exchange=exchange,
+        direction="Short",
+        accepted=False,
+        reason=f"{reason} Missing condition: {missing_condition}.",
+        base_score=None,
+        adjusted_score=None,
+        confidence_adjustment=0,
+        regime_score=market_regime.score,
+        regime_label=market_regime.label,
+        trend_alignment=_regime_alignment("Short", market_regime),
+        reversal_confirmations=[],
     )
 
 
@@ -502,7 +566,7 @@ def build_trade_ideas(
     htf_bias: str,
     market_regime_data: MarketRegimeSnapshot,
 ) -> tuple[list[TradeIdea], str | None, list[SignalReview]]:
-    if market_regime_data.trade_decision == "WAIT":
+    if market_regime_data.trade_decision == "WAIT" and market_regime_data.regime_type not in {"TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}:
         logger.info(
             "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=WAIT",
             symbol,
@@ -547,7 +611,7 @@ def build_trade_ideas(
     bearish_sweep = _latest_sweep(sweeps, "bearish")
     unconfirmed = _latest_sweep(sweeps, "bullish", False) or _latest_sweep(sweeps, "bearish", False)
 
-    if regime in {"CHOP", "NO_TRADE", "TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}:
+    if regime in {"CHOP", "NO_TRADE"}:
         if position is not None and 0.25 < position < 0.75:
             return [], "NO TRADE: price is currently mid-range.", []
         if unconfirmed and unconfirmed.confirmation_status != "confirmed":
@@ -565,6 +629,43 @@ def build_trade_ideas(
             signal_reviews.append(review)
         if idea is not None:
             ideas.append(idea)
+
+    def reject_short(reason: str, missing_condition: str) -> None:
+        _log_rejected_short_candidate(
+            symbol=symbol,
+            timeframe=timeframe,
+            exchange=exchange,
+            reason=reason,
+            missing_condition=missing_condition,
+            market_regime=market_regime_data,
+        )
+        signal_reviews.append(
+            _short_rejection_review(
+                symbol=symbol,
+                timeframe=timeframe,
+                exchange=exchange,
+                reason=reason,
+                missing_condition=missing_condition,
+                market_regime=market_regime_data,
+            )
+        )
+
+    close = df["close"].astype(float)
+    six_candle_return = float(close.pct_change(6).iloc[-1]) if len(close) > 6 else 0.0
+    last = df.iloc[-1]
+    bearish_momentum = bool(market_regime_data.components.get("bearish_ema_momentum")) or (mom_ok and six_candle_return < 0)
+    bullish_momentum = bool(market_regime_data.components.get("bullish_ema_momentum")) or (mom_ok and six_candle_return > 0)
+    support_break = bool(market_regime_data.components.get("structural_support_break") or market_regime_data.components.get("breakdown_confirmed"))
+    resistance_reclaim = bool(market_regime_data.components.get("structural_resistance_reclaim") or market_regime_data.components.get("breakout_confirmed"))
+    failed_reclaim = support is not None and float(last["high"]) >= support.lower - atr * 0.35 and price < support.lower
+    bearish_retest = support is not None and float(last["high"]) >= support.lower - atr * 0.5 and price < support.upper
+    resistance_rejection = resistance is not None and float(last["high"]) >= resistance.lower - atr * 0.35 and price < resistance.lower
+    bullish_retest = resistance is not None and float(last["low"]) <= resistance.upper + atr * 0.5 and price > resistance.lower
+    support_rejection = support is not None and float(last["low"]) <= support.upper + atr * 0.35 and price > support.upper
+    short_trigger_ready = any([resistance_rejection, failed_reclaim, bearish_retest, bearish_sweep is not None, support_break])
+    long_trigger_ready = any([support_rejection, bullish_retest, bullish_sweep is not None, resistance_reclaim])
+    short_confirmation_ready = bearish_momentum or vol_ok or support_break
+    long_confirmation_ready = bullish_momentum or vol_ok or resistance_reclaim
 
     if regime == "RANGE_BOUND":
         if position is not None and position <= 0.25:
@@ -622,7 +723,9 @@ def build_trade_ideas(
                 )
             )
 
-    if regime == "TRENDING_UP" and position is not None and position <= 0.4:
+    if regime in {"TRENDING_UP", "TRANSITION_TO_BULLISH"} and position is not None and (
+        position <= 0.4 or (regime == "TRANSITION_TO_BULLISH" and long_trigger_ready and long_confirmation_ready)
+    ):
         append(
             _build_idea(
                 symbol=symbol,
@@ -649,32 +752,47 @@ def build_trade_ideas(
             )
         )
 
-    if regime == "TRENDING_DOWN" and position is not None and position >= 0.6:
-        append(
-            _build_idea(
-                symbol=symbol,
-                timeframe=timeframe,
-                exchange=exchange,
-                direction="Short",
-                df=df,
-                regime=regime,
-                htf_bias=htf_bias,
-                entry_low=max(price, resistance.lower - atr * 0.45),
-                entry_high=min(resistance.upper, price + atr * 0.25),
-                stop=resistance.upper + stop_buffer,
-                tp1=price - atr * 2.0,
-                tp2=price - atr * 3.8,
-                zone=resistance,
-                sweep=bearish_sweep,
-                settings=settings,
-                vol_ok=vol_ok,
-                mom_ok=mom_ok,
-                distance_from_mid=distance_from_mid,
-                market_regime_data=market_regime_data,
-                support=support,
-                resistance=resistance,
+    if regime in {"TRENDING_DOWN", "TRANSITION_TO_BEARISH"} and position is not None:
+        if position >= 0.6 or (regime == "TRANSITION_TO_BEARISH" and short_trigger_ready and short_confirmation_ready):
+            entry_anchor_low = resistance.lower if resistance_rejection else price
+            entry_anchor_high = resistance.upper if resistance_rejection else price + atr * 0.25
+            if failed_reclaim or bearish_retest:
+                entry_anchor_low = max(price, support.lower - atr * 0.35)
+                entry_anchor_high = min(support.upper, price + atr * 0.45)
+            append(
+                _build_idea(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    exchange=exchange,
+                    direction="Short",
+                    df=df,
+                    regime=regime,
+                    htf_bias=htf_bias,
+                    entry_low=max(price, entry_anchor_low - atr * 0.45),
+                    entry_high=min(entry_anchor_high, price + atr * 0.45),
+                    stop=(resistance.upper if resistance_rejection else max(support.upper, price + atr * 0.8)) + stop_buffer,
+                    tp1=price - atr * 2.0,
+                    tp2=price - atr * 3.8,
+                    zone=resistance if resistance_rejection else support,
+                    sweep=bearish_sweep,
+                    settings=settings,
+                    vol_ok=vol_ok,
+                    mom_ok=mom_ok,
+                    distance_from_mid=distance_from_mid,
+                    market_regime_data=market_regime_data,
+                    support=support,
+                    resistance=resistance,
+                )
             )
-        )
+        else:
+            missing = []
+            if position < 0.6 and not short_trigger_ready:
+                missing.append("price not at resistance/retest edge")
+            if not short_trigger_ready:
+                missing.append("no rejection, failed reclaim, breakdown retest, support break, or bearish sweep")
+            if not short_confirmation_ready:
+                missing.append("no bearish momentum/volume/support-break confirmation")
+            reject_short("Bearish regime short candidate was not built.", ", ".join(missing) or "short trigger not ready")
 
     if regime == "BREAKOUT" and (vol_ok or mom_ok):
         append(
@@ -703,32 +821,38 @@ def build_trade_ideas(
             )
         )
 
-    if regime == "BREAKDOWN" and (vol_ok or mom_ok):
-        append(
-            _build_idea(
-                symbol=symbol,
-                timeframe=timeframe,
-                exchange=exchange,
-                direction="Short",
-                df=df,
-                regime=regime,
-                htf_bias=htf_bias,
-                entry_low=price,
-                entry_high=min(support.lower, price + atr * 0.4),
-                stop=support.upper + stop_buffer,
-                tp1=price - atr * 2.0,
-                tp2=price - atr * 3.8,
-                zone=support,
-                sweep=None,
-                settings=settings,
-                vol_ok=vol_ok,
-                mom_ok=mom_ok,
-                distance_from_mid=0.5,
-                market_regime_data=market_regime_data,
-                support=support,
-                resistance=resistance,
+    if regime == "BREAKDOWN":
+        if vol_ok or mom_ok or support_break:
+            append(
+                _build_idea(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    exchange=exchange,
+                    direction="Short",
+                    df=df,
+                    regime=regime,
+                    htf_bias=htf_bias,
+                    entry_low=price,
+                    entry_high=min(support.lower, price + atr * 0.4),
+                    stop=support.upper + stop_buffer,
+                    tp1=price - atr * 2.0,
+                    tp2=price - atr * 3.8,
+                    zone=support,
+                    sweep=None,
+                    settings=settings,
+                    vol_ok=vol_ok,
+                    mom_ok=mom_ok,
+                    distance_from_mid=0.5,
+                    market_regime_data=market_regime_data,
+                    support=support,
+                    resistance=resistance,
+                )
             )
-        )
+        else:
+            reject_short(
+                "Breakdown short candidate was not built.",
+                "no bearish momentum, volume confirmation, or structural support break",
+            )
 
     if not ideas:
         if unconfirmed and unconfirmed.confirmation_status != "confirmed":

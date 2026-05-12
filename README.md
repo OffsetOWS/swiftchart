@@ -101,11 +101,10 @@ Backend:
 APP_NAME=SwiftChart
 ENVIRONMENT=development
 DATABASE_URL=sqlite:///./swiftchart.db
-BINANCE_BASE_URL=https://api.binance.com
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 LIVE_TRADING_ENABLED=false
-DEFAULT_EXCHANGE=binance
+DEFAULT_EXCHANGE=hyperliquid
 DEFAULT_TIMEFRAME=4h
 DEFAULT_ACCOUNT_SIZE=10000
 DEFAULT_RISK_PER_TRADE=1
@@ -115,8 +114,6 @@ TRADE_HISTORY_EXPIRY_BARS=12
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_URL=
 TELEGRAM_WEBHOOK_SECRET=
-BINANCE_API_KEY=
-BINANCE_API_SECRET=
 HYPERLIQUID_API_KEY=
 ```
 
@@ -124,7 +121,7 @@ HYPERLIQUID_API_KEY=
 
 ```text
 GET  /api/markets
-GET  /api/candles?exchange=binance&symbol=SOLUSDT&timeframe=4h
+GET  /api/candles?exchange=hyperliquid&symbol=SOLUSDT&timeframe=4h
 GET  /api/analyze?symbol=SOLUSDT&timeframe=4h
 GET  /api/top-ideas?timeframe=4h
 POST /api/paper-trade
@@ -272,8 +269,6 @@ ALERT_TIMEFRAME=4h
 ALERT_SCAN_INTERVAL_SECONDS=1800
 ALERTS_RUN_SECRET=
 BOT_STATE_PATH=.swiftchart_bot_state.json
-BINANCE_API_KEY=
-BINANCE_API_SECRET=
 HYPERLIQUID_API_KEY=
 APP_NAME=SwiftChart
 DEFAULT_EXCHANGE=hyperliquid
@@ -282,11 +277,10 @@ DEFAULT_ACCOUNT_SIZE=10000
 DEFAULT_RISK_PER_TRADE=1
 DEFAULT_MIN_RR=2
 DEFAULT_MAX_OPEN_TRADES=3
-BINANCE_BASE_URL=https://api.binance.com
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 ```
 
-The current Binance and Hyperliquid candle connectors use public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
+The current Hyperliquid candle connector uses public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
 
 
 ### Telegram Trade Alerts
@@ -321,9 +315,10 @@ Use this with an external cron/wake service if the Render free service sleeps. R
 
 ### VPS Deployment
 
-SwiftChart now uses a VPS-first deployment workflow. The frontend is built with Vite and served by Nginx, the FastAPI backend runs behind Nginx on port 8000, and the Telegram bot runs with PM2 in polling mode.
+SwiftChart now uses a VPS-first deployment workflow. The frontend is built with Vite and served by Nginx, the FastAPI backend runs behind Nginx on port 8000, the Telegram bot runs with PM2 in polling mode, and the separate execution bot runs behind `/execution` in paper mode by default.
 
 Use [DEPLOYMENT.md](DEPLOYMENT.md) for the full Contabo Ubuntu VPS setup.
+Use [EXECUTION_BOT.md](EXECUTION_BOT.md) for the execution webhook, risk engine, and paper/live safety setup.
 
 The VPS workflow replaces Render for the Telegram bot. Render web services and `render.yaml` are no longer required.
 
@@ -407,9 +402,31 @@ Optional Vercel environment variable:
 
 ```text
 VITE_API_BASE=
+VITE_TELEGRAM_BOT_URL=https://t.me/SwiftChartBot
 ```
 
 Leave `VITE_API_BASE` empty on Vercel to use same-origin API routes such as `/api/analyze`. For local development, `frontend/.env.example` points to `http://localhost:8000`.
+
+### Vercel Analytics
+
+SwiftChart uses `@vercel/analytics` in the Vite frontend. The app includes the `<Analytics />` component at the root layout, so Vercel automatically tracks visitors, page views, referrers, countries, devices, and related web activity after deployment.
+
+Custom events are sent for:
+
+```text
+page_visit
+clicked_telegram_bot
+clicked_connect_wallet
+opened_dashboard
+viewed_signal_page
+```
+
+View analytics in the Vercel dashboard:
+
+1. Open the SwiftChart project in Vercel.
+2. Go to **Analytics**.
+3. Use **Web Analytics** for visitors, page views, referrers, countries, and devices.
+4. Use the events/custom events view to inspect SwiftChart interaction events.
 
 ## Backend Notes
 

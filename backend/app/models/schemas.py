@@ -186,7 +186,7 @@ class Market(BaseModel):
 class PaperTradeCreate(BaseModel):
     symbol: str
     timeframe: str
-    exchange: str = "binance"
+    exchange: str = "hyperliquid"
     direction: Direction
     entry_price: float
     stop_loss: float

@@ -20,8 +20,6 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
             <div className="field">
               <label>Exchange</label>
               <select value={exchange} onChange={(event) => setExchange(event.target.value)}>
-                <option value="all">All exchanges</option>
-                <option value="binance">Binance</option>
                 <option value="hyperliquid">Hyperliquid</option>
               </select>
             </div>

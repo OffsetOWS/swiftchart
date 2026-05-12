@@ -13,6 +13,13 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _selected_exchange(exchange: str | None) -> str:
+    normalized = (exchange or get_settings().default_exchange).lower()
+    if normalized == "all":
+        return "hyperliquid"
+    return normalized
+
+
 async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
     return await get_candles_cached(exchange, symbol, timeframe, limit)
 
@@ -45,42 +52,26 @@ async def global_regime_score(exchange: str, timeframe: str) -> float | None:
 
 
 @router.get("/markets", response_model=list[Market])
-async def markets(exchange: str = Query(default="binance")):
+async def markets(exchange: str = Query(default="hyperliquid")):
+    selected_exchange = _selected_exchange(exchange)
     try:
-        if exchange.lower() == "all":
-            output = []
-            for name in ("binance", "hyperliquid"):
-                try:
-                    output.extend(await get_markets_cached(name))
-                except Exception:
-                    continue
-            return output
-        return await get_markets_cached(exchange)
+        return await get_markets_cached(selected_exchange)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not fetch markets from {exchange}: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"Could not fetch markets from {selected_exchange}: {exc}") from exc
 
 
 @router.get("/candles", response_model=list[Candle])
 async def candles(
-    exchange: str = Query(default="binance"),
+    exchange: str = Query(default="hyperliquid"),
     symbol: str = Query(default="SOLUSDT"),
     timeframe: str = Query(default="4h"),
     limit: int = Query(default=240, ge=50, le=1000),
 ):
     if timeframe.lower() not in SUPPORTED_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
+    selected_exchange = _selected_exchange(exchange)
     try:
-        if exchange.lower() == "all":
-            last_error = None
-            for name in ("binance", "hyperliquid"):
-                try:
-                    df = await _safe_candles(name, symbol, timeframe, limit)
-                    if not df.empty:
-                        return df.to_dict("records")
-                except Exception as exc:
-                    last_error = exc
-            raise HTTPException(status_code=502, detail=f"Could not fetch candles from any exchange: {last_error}")
-        df = await _safe_candles(exchange, symbol, timeframe, limit)
+        df = await _safe_candles(selected_exchange, symbol, timeframe, limit)
         return df.to_dict("records")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch candles: {exc}") from exc
@@ -88,7 +79,7 @@ async def candles(
 
 @router.get("/analyze")
 async def analyze(
-    exchange: str = Query(default="binance"),
+    exchange: str = Query(default="hyperliquid"),
     symbol: str = Query(default="SOLUSDT"),
     timeframe: str = Query(default="4h"),
     account_size: float | None = None,
@@ -107,7 +98,7 @@ async def analyze(
         preferred_timeframe=timeframe,
     )
     try:
-        exchanges = ["binance", "hyperliquid"] if exchange.lower() == "all" else [exchange]
+        exchanges = [_selected_exchange(exchange)]
         last_error = None
         analysis = None
         for selected_exchange in exchanges:
@@ -149,16 +140,17 @@ async def analyze(
 
 @router.get("/top-ideas")
 async def top_ideas(
-    exchange: str = Query(default="all"),
+    exchange: str = Query(default="hyperliquid"),
     timeframe: str = Query(default="4h"),
     symbols: str | None = Query(default=None, description="Comma-separated symbols"),
 ):
     if timeframe.lower() not in SUPPORTED_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
+    selected_exchange = _selected_exchange(exchange)
     if symbols is None:
-        return await cached_top_ideas(exchange, timeframe)
+        return await cached_top_ideas(selected_exchange, timeframe)
 
-    selected_exchanges = ["binance", "hyperliquid"] if exchange.lower() == "all" else [exchange]
+    selected_exchanges = [selected_exchange]
     settings = get_settings()
     risk = RiskSettings(
         account_size=settings.default_account_size,

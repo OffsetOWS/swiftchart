@@ -3,7 +3,7 @@ import { Fragment } from "react";
 import { useEffect, useState } from "react";
 import { checkTradeHistory, getTradeHistory, getTradeStats } from "../lib/api.js";
 
-const EMPTY_FILTERS = { symbol: "", timeframe: "", exchange: "all", direction: "", status: "", result: "", date_from: "", date_to: "", sort: "desc" };
+const EMPTY_FILTERS = { symbol: "", timeframe: "", exchange: "hyperliquid", direction: "", status: "", result: "", date_from: "", date_to: "", sort: "desc" };
 
 function fmt(value) {
   if (value === undefined || value === null || value === "") return "-";
@@ -125,8 +125,6 @@ export default function TradeHistory() {
         <div className="history-filters">
           <input placeholder="Symbol" value={filters.symbol} onChange={(e) => setFilters({ ...filters, symbol: e.target.value.toUpperCase() })} />
           <select value={filters.exchange} onChange={(e) => setFilters({ ...filters, exchange: e.target.value })}>
-            <option value="all">All exchanges</option>
-            <option value="binance">Binance</option>
             <option value="hyperliquid">Hyperliquid</option>
           </select>
           <select value={filters.timeframe} onChange={(e) => setFilters({ ...filters, timeframe: e.target.value })}>
