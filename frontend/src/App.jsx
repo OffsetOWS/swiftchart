@@ -7,6 +7,7 @@ import TradeHistory from "./pages/TradeHistory.jsx";
 import Auth from "./pages/Auth.jsx";
 import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
+import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { createPaperTrade, getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
@@ -22,10 +23,12 @@ function trackEvent(name, properties = {}) {
 }
 
 export default function App() {
-  const isLandingPage = window.location.pathname === "/";
-  const isLaunchPage = window.location.pathname === "/launch";
-  const isAppPage = window.location.pathname === "/app";
-  const isAuthPage = window.location.pathname === "/auth" || window.location.pathname === "/login" || window.location.pathname === "/signup";
+  const auth = useAuth();
+  const [path, setPath] = useState(window.location.pathname);
+  const isLandingPage = path === "/";
+  const isLaunchPage = path === "/launch";
+  const isAppPage = path === "/app";
+  const isAuthPage = path === "/auth" || path === "/login" || path === "/signup";
   const [page, setPage] = useState("dashboard");
   const [nightMode, setNightMode] = useState(true);
   const [clock, setClock] = useState("");
@@ -39,6 +42,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadingTopIdeas, setLoadingTopIdeas] = useState(false);
   const [notice, setNotice] = useState("");
+
+  function navigate(nextPath, { replace = false } = {}) {
+    if (window.location.pathname !== nextPath) {
+      const method = replace ? "replaceState" : "pushState";
+      window.history[method]({}, "", nextPath);
+    }
+    setPath(nextPath);
+  }
 
   async function refreshTopIdeas() {
     setLoadingTopIdeas(true);
@@ -113,6 +124,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    function syncPath() {
+      setPath(window.location.pathname);
+    }
+    window.addEventListener("popstate", syncPath);
+    return () => window.removeEventListener("popstate", syncPath);
+  }, []);
+
+  useEffect(() => {
+    if (auth.loading) return;
+    if (isAppPage && !auth.isAuthenticated) {
+      navigate("/launch", { replace: true });
+    }
+    if (isAuthPage && auth.isAuthenticated) {
+      navigate("/app", { replace: true });
+    }
+    if (isLaunchPage && auth.isAuthenticated) {
+      navigate("/app", { replace: true });
+    }
+  }, [auth.loading, auth.isAuthenticated, isAppPage, isAuthPage, isLaunchPage]);
+
+  useEffect(() => {
     trackEvent("page_visit", { page });
     if (page === "dashboard") {
       trackEvent("opened_dashboard", { source: "page_visit" });
@@ -169,6 +201,25 @@ export default function App() {
     </div>
   );
 
+  const userMenu = auth.profile || auth.user ? (
+    <div className="user-menu" aria-label="SwiftChart profile">
+      <img src={auth.profile?.avatar_url || auth.user?.user_metadata?.avatar_url || auth.user?.user_metadata?.picture || swiftChartLogo} alt="" />
+      <div>
+        <span>{auth.profile?.username || "SwiftChart user"}</span>
+        <small>{auth.profileLoading ? "Syncing profile" : "Signed in"}</small>
+      </div>
+      <button
+        type="button"
+        onClick={async () => {
+          await auth.signOut();
+          navigate("/launch", { replace: true });
+        }}
+      >
+        Logout
+      </button>
+    </div>
+  ) : null;
+
   if (isLandingPage) {
     return (
       <>
@@ -191,6 +242,24 @@ export default function App() {
     return (
       <>
         <Auth />
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isAppPage && (auth.loading || auth.profileLoading)) {
+    return (
+      <>
+        <AuthLoading />
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isAppPage && !auth.isAuthenticated) {
+    return (
+      <>
+        <LaunchFlow />
         <Analytics />
       </>
     );
@@ -246,9 +315,11 @@ export default function App() {
           <div className="app-top-controls">
             {nav}
             <div className="app-theme-control">{themeControl}</div>
+            {userMenu}
           </div>
         ) : nav}
 
+        {auth.error ? <div className="risk-strip">{auth.error}</div> : null}
         {notice ? <div className="risk-strip">{notice}</div> : null}
 
         <div className="tab-stage" key={page}>
@@ -321,4 +392,28 @@ export default function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+function AuthLoading() {
+  return (
+    <main className="auth-shell">
+      <section className="auth-card auth-loading-card" aria-live="polite">
+        <div className="launch-mark" aria-hidden="true">
+          <img src={swiftChartLogo} alt="" />
+        </div>
+        <div className="auth-copy">
+          <span className="eyebrow">SwiftChart account</span>
+          <h1>Restoring session</h1>
+          <p>Loading your dashboard, profile, and saved SwiftChart access.</p>
+        </div>
+        <div className="launch-progress">
+          <span />
+        </div>
+      </section>
+    </main>
+  );
+}
+
+createRoot(document.getElementById("root")).render(
+  <AuthProvider>
+    <App />
+  </AuthProvider>
+);

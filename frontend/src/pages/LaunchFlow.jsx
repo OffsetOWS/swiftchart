@@ -1,5 +1,6 @@
 import { Check, Chrome, Circle, Dot, Lock, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useAuth } from "../lib/AuthContext.jsx";
 
 const loadingSteps = [
   "Connecting to market data",
@@ -23,6 +24,7 @@ const signals = [
 ];
 
 export default function LaunchFlow() {
+  const auth = useAuth();
   const [step, setStep] = useState(0);
   const [ready, setReady] = useState(false);
 
@@ -146,10 +148,11 @@ export default function LaunchFlow() {
           <span className="eyebrow">SwiftChart account</span>
           <h1 id="unlock-title">Unlock Full Access</h1>
           <p>Sign in to access live market bias, signal history, and future alerts.</p>
-          <a className="google-auth-button" href="/app">
+          <button className="google-auth-button" type="button" onClick={auth.signInWithGoogle} disabled={auth.loading || !auth.isSupabaseConfigured}>
             <Chrome size={18} aria-hidden="true" />
-            <span>Continue with Google</span>
-          </a>
+            <span>{auth.loading ? "Checking session" : "Continue with Google"}</span>
+          </button>
+          {auth.error ? <p className="auth-error" role="alert">{auth.error}</p> : null}
         </section>
       </section>
     </main>
