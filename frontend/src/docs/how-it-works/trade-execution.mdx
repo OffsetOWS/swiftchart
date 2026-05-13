@@ -1,0 +1,15 @@
+# Trade Execution
+
+SwiftChart keeps execution separate from analysis. This protects the system from turning every signal into an automatic trade.
+
+## Current behavior
+
+The dashboard can save paper trades and signal reviews. Execution hooks can be connected later, but live trading remains behind explicit controls.
+
+## Safety model
+
+Execution should require a valid signal, fresh timestamp, acceptable confidence, duplicate protection, and risk limits.
+
+## Future expansion
+
+The execution layer is designed for subscriptions, Telegram approvals, saved watchlists, and controlled automation.

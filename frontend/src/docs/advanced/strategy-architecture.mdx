@@ -1,0 +1,16 @@
+# Strategy Architecture
+
+SwiftChart is organized around layers. Each layer has one job, and a signal must survive all of them before it appears as a trade idea.
+
+## Layers
+
+- Market data normalization
+- Structure and liquidity detection
+- Regime and bias scoring
+- Setup construction
+- Risk filtering
+- Signal review and persistence
+
+## Design principle
+
+The engine prefers a clean no-trade output over a weak setup. This keeps the dashboard useful during regime changes.

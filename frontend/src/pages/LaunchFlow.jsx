@@ -11,7 +11,7 @@ const loadingSteps = [
 ];
 
 const navLinks = [
-  ["Docs", "#docs"],
+  ["Docs", "/docs"],
   ["X / Twitter", "https://x.com/swiftchart_"],
   ["Telegram", "https://t.me/SwiftChartBot"],
   ["Discord", "#discord"],

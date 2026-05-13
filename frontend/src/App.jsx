@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
 import Auth from "./pages/Auth.jsx";
+import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
@@ -29,6 +30,7 @@ export default function App() {
   const isLaunchPage = path === "/launch";
   const isAppPage = path === "/app";
   const isAuthPage = path === "/auth" || path === "/login" || path === "/signup";
+  const isDocsPage = path === "/docs" || path.startsWith("/docs/");
   const [page, setPage] = useState("dashboard");
   const [nightMode, setNightMode] = useState(true);
   const [clock, setClock] = useState("");
@@ -233,6 +235,15 @@ export default function App() {
     return (
       <>
         <LaunchFlow />
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isDocsPage) {
+    return (
+      <>
+        <Docs />
         <Analytics />
       </>
     );

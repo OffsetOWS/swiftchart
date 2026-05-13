@@ -1,0 +1,15 @@
+# Market Bias Detection
+
+SwiftChart bias detection reads structural breaks, swing behavior, EMA pressure, and momentum together. A single pullback is not enough to flip the global bias.
+
+## Bullish bias
+
+Bullish bias requires higher-high or higher-low behavior, reclaimed resistance, and positive momentum confirmation.
+
+## Bearish bias
+
+Bearish bias activates when price breaks recent structural support, forms lower-high and lower-low behavior, and confirms downside with EMA or momentum pressure.
+
+## Transitions
+
+Transition regimes allow SwiftChart to react faster without flipping on every small candle. The engine waits for multiple confirmations before accepting a trade in the new direction.

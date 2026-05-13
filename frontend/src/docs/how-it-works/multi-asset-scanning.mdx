@@ -1,0 +1,15 @@
+# Multi-Asset Scanning
+
+SwiftChart scans liquid Hyperliquid markets and ranks the cleanest opportunities. The scanner is designed to avoid spending attention on every coin equally.
+
+## Discovery
+
+Markets are discovered from Hyperliquid, normalized into SwiftChart symbols, and filtered for active trading.
+
+## Prefiltering
+
+Before full analysis, the scanner checks whether a market has enough movement, volume, and distance from mid-range.
+
+## Ranking
+
+Valid setups are ranked by setup score, risk/reward, zone quality, and signal strength.

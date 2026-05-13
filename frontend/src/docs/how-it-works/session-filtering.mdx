@@ -1,0 +1,17 @@
+# Session Filtering
+
+Session filtering helps avoid low-quality market windows. Some sessions have cleaner liquidity, stronger participation, and more reliable reactions.
+
+## Purpose
+
+SwiftChart can use session context to reduce signals during thin liquidity periods and prioritize setups when market participation improves.
+
+## Example filters
+
+- Avoid late-session chop after a large move
+- Prefer breakouts during high-participation windows
+- Reduce reversal trades during low-volume drift
+
+## Status
+
+Session filtering is structured for future expansion and can be added without changing the main bias engine.
