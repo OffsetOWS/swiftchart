@@ -4,7 +4,7 @@ import swiftChartLogo from "../assets/swiftchart-logo.png";
 
 const navLinks = [
   ["Docs", "#docs"],
-  ["X / Twitter", "#twitter"],
+  ["X / Twitter", "https://x.com/swiftchart_"],
   ["Telegram", "https://t.me/SwiftChartBot"],
   ["Discord", "#discord"],
 ];
