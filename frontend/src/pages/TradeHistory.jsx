@@ -1,9 +1,8 @@
 import { RefreshCcw } from "lucide-react";
-import { Fragment } from "react";
-import { useEffect, useState } from "react";
-import { checkTradeHistory, getTradeHistory, getTradeStats } from "../lib/api.js";
-
-const EMPTY_FILTERS = { symbol: "", timeframe: "", exchange: "hyperliquid", direction: "", status: "", result: "", date_from: "", date_to: "", sort: "desc" };
+import { useEffect, useMemo, useState } from "react";
+import { getCandles } from "../lib/api.js";
+import { listPaperTrades, updatePaperTradeStatus } from "../lib/paperTrades.js";
+import { useAuth } from "../lib/AuthContext.jsx";
 
 function fmt(value) {
   if (value === undefined || value === null || value === "") return "-";
@@ -17,56 +16,106 @@ function dt(value) {
 }
 
 function badgeClass(value) {
-  if (["TP1_HIT", "TP2_HIT", "WIN", "PARTIAL_WIN"].includes(value)) return "good";
-  if (["SL_HIT", "LOSS"].includes(value)) return "bad";
-  if (["AMBIGUOUS", "NO_ENTRY", "EXPIRED"].includes(value)) return "warn";
+  if (["tp_hit", "win"].includes(value)) return "good";
+  if (["sl_hit", "loss"].includes(value)) return "bad";
+  if (["closed"].includes(value)) return "warn";
   return "neutral";
 }
 
-function bestLabel(items, key) {
-  if (!items?.length) return "-";
-  const top = items[0];
-  return `${top[key]} (${top.win_rate}%)`;
+function timeframeForTrade(_trade) {
+  return _trade.timeframe || "4h";
 }
 
-export default function TradeHistory() {
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+function tradeStatusFromCandles(trade, candles) {
+  const takenAt = new Date(trade.created_at).getTime();
+  const relevant = candles.filter((candle) => new Date(candle.timestamp).getTime() >= takenAt);
+  if (!relevant.length || trade.status !== "open") return null;
+
+  const entry = Number(trade.entry_price);
+  const stop = Number(trade.stop_loss);
+  const target = Number(trade.take_profit);
+  const risk = Math.abs(entry - stop) || 1;
+  const isLong = trade.direction === "long";
+
+  for (const candle of relevant) {
+    const high = Number(candle.high);
+    const low = Number(candle.low);
+    const hitTarget = isLong ? high >= target : low <= target;
+    const hitStop = isLong ? low <= stop : high >= stop;
+
+    if (hitTarget && hitStop) {
+      return { status: "closed", result: "closed", pnl: 0 };
+    }
+    if (hitTarget) {
+      return { status: "tp_hit", result: "win", pnl: Number((Math.abs(target - entry) / risk).toFixed(2)) };
+    }
+    if (hitStop) {
+      return { status: "sl_hit", result: "loss", pnl: -1 };
+    }
+  }
+  return null;
+}
+
+export default function TradeHistory({ version = 0 }) {
+  const auth = useAuth();
   const [records, setRecords] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 });
   const [expanded, setExpanded] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function load(page = pagination.page) {
+  const stats = useMemo(() => {
+    const total = records.length;
+    const wins = records.filter((record) => record.result === "win").length;
+    const losses = records.filter((record) => record.result === "loss").length;
+    const open = records.filter((record) => record.status === "open").length;
+    const closed = wins + losses;
+    const winRate = closed ? Math.round((wins / closed) * 100) : 0;
+    const pnl = records.reduce((sum, record) => sum + (Number(record.pnl) || 0), 0);
+    return { total, wins, losses, open, winRate, pnl: Number(pnl.toFixed(2)) };
+  }, [records]);
+
+  async function load() {
+    if (!auth.user?.id) {
+      setRecords([]);
+      setMessage("Sign in to view your paper trade history.");
+      return;
+    }
     setLoading(true);
     setMessage("");
     try {
-      const [historyData, statsData] = await Promise.all([getTradeHistory({ ...filters, page, limit: pagination.limit }), getTradeStats()]);
-      const returnedRecords = Array.isArray(historyData) ? historyData : historyData.records;
-      setRecords(returnedRecords || []);
-      if (!Array.isArray(historyData)) {
-        setPagination({ page: historyData.page, limit: historyData.limit, total: historyData.total, pages: historyData.pages });
-        setMessage(historyData.total ? `Loaded ${historyData.total} saved analyses.` : "No saved analyses yet. Run an analysis first.");
-      } else {
-        setMessage(returnedRecords?.length ? `Loaded ${returnedRecords.length} saved analyses.` : "No saved analyses yet. Run an analysis first.");
-      }
-      setStats(statsData);
+      const trades = await listPaperTrades(auth.user.id);
+      setRecords(trades);
+      setMessage(trades.length ? `Loaded ${trades.length} paper trades.` : "No paper trades yet. Click Take Trade on a signal to save one here.");
     } catch (error) {
-      setMessage(`Could not load trade history: ${error.message}`);
+      setMessage(`Could not load paper trades: ${error.message}`);
     } finally {
       setLoading(false);
     }
   }
 
-  async function runCheck() {
+  async function refreshStatuses() {
+    if (!auth.user?.id) return;
     setLoading(true);
     setMessage("");
     try {
-      await checkTradeHistory();
-      await load();
+      const openTrades = records.filter((trade) => trade.status === "open");
+      const updates = [];
+      for (const trade of openTrades) {
+        const candles = await getCandles({ exchange: trade.exchange || "hyperliquid", symbol: trade.symbol, timeframe: timeframeForTrade(trade) });
+        const statusUpdate = tradeStatusFromCandles(trade, candles);
+        if (statusUpdate) {
+          updates.push(updatePaperTradeStatus(trade.id, statusUpdate));
+        }
+      }
+      if (updates.length) {
+        await Promise.all(updates);
+        await load();
+        setMessage(`Updated ${updates.length} paper trades.`);
+      } else {
+        setMessage("No open paper trades hit TP or SL yet.");
+      }
     } catch (error) {
-      setMessage(`Could not check trade outcomes: ${error.message}`);
+      setMessage(`Could not update paper trades: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -74,83 +123,38 @@ export default function TradeHistory() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [auth.user?.id, version]);
 
   return (
     <div className="history-page">
       <section className="panel hero-panel">
         <div className="panel-head">
           <div>
-            <span className="eyebrow">TRADE MEMORY</span>
+            <span className="eyebrow">PAPER TRADE MEMORY</span>
             <h2>Trade History</h2>
-            <p>Review saved SwiftChart ideas and check whether entries, take profits, or stops were confirmed by later candles.</p>
+            <p>Every signal you click with Take Trade is saved here as paper trading history. No real orders are placed.</p>
           </div>
-          <button className="primary" onClick={runCheck}><RefreshCcw size={16} /> Check outcomes</button>
+          <button className="primary" onClick={refreshStatuses} disabled={loading || !records.length}>
+            <RefreshCcw size={16} /> {loading ? "Checking..." : "Check TP / SL"}
+          </button>
         </div>
         <div className="stats history-stats">
-          <div className="stat"><span>Total analyzed setups</span><b>{stats?.total_ideas ?? 0}</b></div>
-          <div className="stat"><span>Win rate</span><b>{stats?.win_rate ?? 0}%</b></div>
-          <div className="stat"><span>TP hit rate</span><b>{stats?.tp_hit_rate ?? 0}%</b></div>
-          <div className="stat"><span>SL hit rate</span><b>{stats?.sl_hit_rate ?? 0}%</b></div>
-          <div className="stat"><span>Average R</span><b>{stats?.average_r_multiple ?? 0}</b></div>
-          <div className="stat"><span>Open setups</span><b>{stats?.open_count ?? 0}</b></div>
-        </div>
-        <div className="stats history-stats compact">
-          <div className="stat"><span>Best timeframe</span><b>{bestLabel(stats?.best_timeframe_performance, "timeframe")}</b></div>
-          <div className="stat"><span>Best coin</span><b>{bestLabel(stats?.best_symbol_performance, "symbol")}</b></div>
-          <div className="stat"><span>Best grade</span><b>{bestLabel(stats?.best_setup_grade_performance, "setup_grade")}</b></div>
-          <div className="stat"><span>Best direction</span><b>{bestLabel(stats?.direction_performance, "direction")}</b></div>
-          <div className="stat"><span>Best regime</span><b>{bestLabel(stats?.regime_performance, "regime_label")}</b></div>
-          <div className="stat"><span>Counter trend</span><b>{bestLabel(stats?.counter_trend_performance, "trend_alignment")}</b></div>
-        </div>
-        <div className="stats history-stats compact">
-          {(stats?.accepted_vs_rejected || []).map((item) => (
-            <div className="stat" key={item.status}>
-              <span>{item.status} signals</span>
-              <b>{item.count}</b>
-              <small>Avg adjusted {item.average_adjusted_score}</small>
-            </div>
-          ))}
+          <div className="stat"><span>Paper trades</span><b>{stats.total}</b></div>
+          <div className="stat"><span>Open</span><b>{stats.open}</b></div>
+          <div className="stat"><span>Wins</span><b>{stats.wins}</b></div>
+          <div className="stat"><span>Losses</span><b>{stats.losses}</b></div>
+          <div className="stat"><span>Win rate</span><b>{stats.winRate}%</b></div>
+          <div className="stat"><span>Total R</span><b>{stats.pnl}R</b></div>
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <span className="eyebrow">FILTERS</span>
-            <h2>Past Ideas</h2>
+            <span className="eyebrow">MANUAL PAPER TRADES</span>
+            <h2>Trades You Took</h2>
           </div>
-          <button className="secondary" onClick={() => setFilters(EMPTY_FILTERS)}>Clear</button>
-        </div>
-        <div className="history-filters">
-          <input placeholder="Symbol" value={filters.symbol} onChange={(e) => setFilters({ ...filters, symbol: e.target.value.toUpperCase() })} />
-          <select value={filters.exchange} onChange={(e) => setFilters({ ...filters, exchange: e.target.value })}>
-            <option value="hyperliquid">Hyperliquid</option>
-          </select>
-          <select value={filters.timeframe} onChange={(e) => setFilters({ ...filters, timeframe: e.target.value })}>
-            <option value="">Any timeframe</option>
-            {["30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"].map((tf) => <option key={tf}>{tf}</option>)}
-          </select>
-          <select value={filters.direction} onChange={(e) => setFilters({ ...filters, direction: e.target.value })}>
-            <option value="">Any direction</option>
-            <option value="LONG">LONG</option>
-            <option value="SHORT">SHORT</option>
-          </select>
-          <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-            <option value="">Any status</option>
-            {["PENDING", "ENTRY_TRIGGERED", "TP1_HIT", "TP2_HIT", "SL_HIT", "EXPIRED", "INVALIDATED", "AMBIGUOUS"].map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <select value={filters.result} onChange={(e) => setFilters({ ...filters, result: e.target.value })}>
-            <option value="">Any result</option>
-            {["WIN", "PARTIAL_WIN", "LOSS", "NO_ENTRY", "AMBIGUOUS", "OPEN"].map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <input type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
-          <input type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
-          <select value={filters.sort} onChange={(e) => setFilters({ ...filters, sort: e.target.value })}>
-            <option value="desc">Newest first</option>
-            <option value="asc">Oldest first</option>
-          </select>
-          <button className="primary" onClick={() => load(1)}>{loading ? "Loading..." : "Apply"}</button>
+          <button className="secondary" onClick={load} disabled={loading}>Refresh</button>
         </div>
 
         <div className="history-table-wrap">
@@ -158,54 +162,30 @@ export default function TradeHistory() {
           <table className="history-table">
             <thead>
               <tr>
-                <th>Date</th><th>Exchange</th><th>Symbol</th><th>TF</th><th>Dir</th><th>Regime</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>Score</th><th>Status</th><th>Result</th><th>R</th>
+                <th>Date taken</th><th>Pair</th><th>TF</th><th>Direction</th><th>Entry</th><th>Stop loss</th><th>Take profit</th><th>R:R</th><th>Confidence</th><th>Bias</th><th>Status</th><th>Result</th><th>PnL</th>
               </tr>
             </thead>
             <tbody>
               {records.map((record) => (
-                <Fragment key={record.id}>
-                  <tr onClick={() => setExpanded(expanded === record.id ? null : record.id)}>
-                    <td>{dt(record.created_at)}</td>
-                    <td>{record.exchange}</td>
-                    <td>{record.symbol}</td>
-                    <td>{record.timeframe}</td>
-                    <td>{record.direction}</td>
-                    <td>{record.regime_label || record.market_regime || "-"} {record.regime_score !== null && record.regime_score !== undefined ? `(${record.regime_score > 0 ? "+" : ""}${record.regime_score})` : ""}</td>
-                    <td>{fmt(record.entry_zone_low)} - {fmt(record.entry_zone_high)}</td>
-                    <td>{fmt(record.stop_loss)}</td>
-                    <td>{fmt(record.take_profit_1)}</td>
-                    <td>{fmt(record.take_profit_2)}</td>
-                    <td>{fmt(record.setup_score)}</td>
-                    <td><span className={`outcome-badge ${badgeClass(record.status)}`}>{record.status}</span></td>
-                    <td><span className={`outcome-badge ${badgeClass(record.result)}`}>{record.result}</span></td>
-                    <td>{fmt(record.pnl_r_multiple)}</td>
-                  </tr>
-                  {expanded === record.id ? (
-                    <tr className="detail-row">
-                      <td colSpan="14">
-                        <div className="history-detail">
-                          <p><b>Regime:</b> {record.regime_label || record.market_regime || "-"} ({fmt(record.regime_score)}) | <b>HTF:</b> {record.higher_timeframe_bias || "-"} | <b>Trade:</b> {record.trend_alignment || "-"}</p>
-                          <p><b>Regime adjustment:</b> {fmt(record.regime_confidence_adjustment)} | <b>Confirmations:</b> {record.reversal_confirmations || "[]"}</p>
-                          <p><b>Reason:</b> {record.reason}</p>
-                          <p><b>Regime explanation:</b> {record.regime_explanation || "-"}</p>
-                          <p><b>Invalidation:</b> {record.invalidation}</p>
-                          <p><b>Entry:</b> {dt(record.entry_triggered_at)} | <b>Closed:</b> {dt(record.closed_at)} | <b>Checked:</b> {dt(record.outcome_checked_at)}</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
+                <tr key={record.id} onClick={() => setExpanded(expanded === record.id ? null : record.id)}>
+                  <td>{dt(record.created_at)}</td>
+                  <td>{record.symbol}</td>
+                  <td>{record.timeframe || "-"}</td>
+                  <td>{record.direction.toUpperCase()}</td>
+                  <td>{fmt(record.entry_price)}</td>
+                  <td>{fmt(record.stop_loss)}</td>
+                  <td>{fmt(record.take_profit)}</td>
+                  <td>{fmt(record.risk_reward)}R</td>
+                  <td>{fmt(record.confidence)}%</td>
+                  <td>{record.market_bias || "-"}</td>
+                  <td><span className={`outcome-badge ${badgeClass(record.status)}`}>{record.status}</span></td>
+                  <td><span className={`outcome-badge ${badgeClass(record.result)}`}>{record.result}</span></td>
+                  <td>{record.pnl === null || record.pnl === undefined ? "-" : `${fmt(record.pnl)}R`}</td>
+                </tr>
               ))}
             </tbody>
           </table>
-          {records.length === 0 ? <div className="empty">No saved trade ideas match these filters.</div> : null}
-        </div>
-        <div className="history-pagination">
-          <span>{pagination.total} records · page {pagination.page || 1} of {pagination.pages || 1}</span>
-          <div>
-            <button className="secondary" disabled={loading || pagination.page <= 1} onClick={() => load(pagination.page - 1)}>Previous</button>
-            <button className="secondary" disabled={loading || pagination.page >= pagination.pages} onClick={() => load(pagination.page + 1)}>Next</button>
-          </div>
+          {records.length === 0 ? <div className="empty">No paper trades yet.</div> : null}
         </div>
       </section>
     </div>

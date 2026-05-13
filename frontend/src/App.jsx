@@ -9,11 +9,11 @@ import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
-import { createPaperTrade, getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
+import { getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
+import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
 
-const HYPERLIQUID_REF_URL = "https://app.hyperliquid.xyz/join/OFFSET";
 const TELEGRAM_BOT_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || "https://t.me/SwiftChartBot";
 
 function trackEvent(name, properties = {}) {
@@ -44,6 +44,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadingTopIdeas, setLoadingTopIdeas] = useState(false);
   const [notice, setNotice] = useState("");
+  const [takenSignalIds, setTakenSignalIds] = useState(new Set());
+  const [paperTradeLoadingSignalId, setPaperTradeLoadingSignalId] = useState("");
+  const [paperHistoryVersion, setPaperHistoryVersion] = useState(0);
 
   function navigate(nextPath, { replace = false } = {}) {
     if (window.location.pathname !== nextPath) {
@@ -84,27 +87,30 @@ export default function App() {
   }
 
   async function paperTrade(idea) {
-    trackEvent("clicked_connect_wallet", {
-      source: "paper_trade",
-      symbol: idea.symbol,
-      timeframe: idea.timeframe,
-      direction: idea.direction,
-    });
-    window.open(HYPERLIQUID_REF_URL, "_blank", "noopener,noreferrer");
-    const entry = (idea.entry_zone[0] + idea.entry_zone[1]) / 2;
-    await createPaperTrade({
-      symbol: idea.symbol,
-      timeframe: idea.timeframe,
-      exchange: idea.exchange,
-      direction: idea.direction,
-      entry_price: entry,
-      stop_loss: idea.stop_loss,
-      take_profit_1: idea.take_profit_1,
-      take_profit_2: idea.take_profit_2,
-      size: idea.position_size_units || 0,
-      notes: idea.reason,
-    });
-    setNotice("Paper trade saved.");
+    if (!auth.isAuthenticated || !auth.user) {
+      setNotice("Sign in to save this paper trade.");
+      navigate("/auth");
+      return;
+    }
+    const signalId = signalIdForIdea(idea);
+    if (takenSignalIds.has(signalId)) return;
+    setPaperTradeLoadingSignalId(signalId);
+    setNotice("");
+    try {
+      await createPaperTradeFromSignal(idea, auth.user.id);
+      setTakenSignalIds((current) => new Set([...current, signalId]));
+      setPaperHistoryVersion((value) => value + 1);
+      setNotice("Trade added to history");
+      trackEvent("paper_trade_taken", {
+        symbol: idea.symbol,
+        timeframe: idea.timeframe,
+        direction: idea.direction,
+      });
+    } catch (error) {
+      setNotice(error.message || "Could not save paper trade.");
+    } finally {
+      setPaperTradeLoadingSignalId("");
+    }
   }
 
   function openPage(nextPage) {
@@ -120,6 +126,32 @@ export default function App() {
   useEffect(() => {
     refreshTopIdeas();
   }, [exchange, timeframe]);
+
+  useEffect(() => {
+    if (!auth.user?.id) {
+      setTakenSignalIds(new Set());
+      return;
+    }
+    const signalIds = [...topIdeas, ...(analysis?.trade_ideas || [])].map(signalIdForIdea);
+    const uniqueSignalIds = [...new Set(signalIds)].filter(Boolean);
+    if (!uniqueSignalIds.length) {
+      setTakenSignalIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    listPaperTradesForSignals(auth.user.id, uniqueSignalIds)
+      .then((rows) => {
+        if (!cancelled) {
+          setTakenSignalIds(new Set(rows.map((row) => row.signal_id)));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setNotice(error.message || "Could not check taken trades.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.user?.id, topIdeas, analysis, paperHistoryVersion]);
 
   useEffect(() => {
     runAnalysis();
@@ -342,6 +374,10 @@ export default function App() {
               topIdeas={topIdeas}
               loadingTopIdeas={loadingTopIdeas}
               refreshTopIdeas={refreshTopIdeas}
+              onPaperTrade={paperTrade}
+              takenSignalIds={takenSignalIds}
+              paperTradeLoadingSignalId={paperTradeLoadingSignalId}
+              getSignalId={signalIdForIdea}
             />
           )}
           {page === "ideas" && (
@@ -353,6 +389,10 @@ export default function App() {
               topIdeas={topIdeas}
               loadingTopIdeas={loadingTopIdeas}
               refreshTopIdeas={refreshTopIdeas}
+              onPaperTrade={paperTrade}
+              takenSignalIds={takenSignalIds}
+              paperTradeLoadingSignalId={paperTradeLoadingSignalId}
+              getSignalId={signalIdForIdea}
               compact
             />
           )}
@@ -365,9 +405,12 @@ export default function App() {
               loading={loading}
               onAnalyze={runAnalysis}
               onPaperTrade={paperTrade}
+              takenSignalIds={takenSignalIds}
+              paperTradeLoadingSignalId={paperTradeLoadingSignalId}
+              getSignalId={signalIdForIdea}
             />
           )}
-          {page === "history" && <TradeHistory />}
+          {page === "history" && <TradeHistory version={paperHistoryVersion} />}
           {page === "alerts" && (
             <section className="panel terminal-note" id="contacts">
               <span className="eyebrow">ALERT RELAY</span>

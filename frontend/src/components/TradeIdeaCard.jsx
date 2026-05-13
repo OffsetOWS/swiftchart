@@ -5,7 +5,7 @@ function fmt(value) {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
 }
 
-export default function TradeIdeaCard({ idea, onPaperTrade }) {
+export default function TradeIdeaCard({ idea, onPaperTrade, tradeTaken = false, paperTradeLoading = false }) {
   const directionClass = idea.direction.toLowerCase();
   const score = idea.setup_score ?? idea.confidence_score;
   const regimeScore = idea.regime_score ?? null;
@@ -44,8 +44,8 @@ export default function TradeIdeaCard({ idea, onPaperTrade }) {
       ) : null}
       <p style={{ marginTop: 12 }}><ShieldAlert size={14} /> {idea.invalid_condition}</p>
       {onPaperTrade && (
-        <button className="primary" style={{ width: "100%", marginTop: 12 }} onClick={() => onPaperTrade(idea)}>
-          <Zap size={16} /> Paper trade
+        <button className="primary" style={{ width: "100%", marginTop: 12 }} onClick={() => onPaperTrade(idea)} disabled={tradeTaken || paperTradeLoading}>
+          <Zap size={16} /> {tradeTaken ? "Trade Taken" : paperTradeLoading ? "Saving..." : "Take Trade"}
         </button>
       )}
     </article>

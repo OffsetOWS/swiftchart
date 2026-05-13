@@ -1,7 +1,7 @@
 import { RefreshCcw } from "lucide-react";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 
-export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas, compact = false }) {
+export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas, onPaperTrade, takenSignalIds = new Set(), paperTradeLoadingSignalId = "", getSignalId, compact = false }) {
   const topIdea = topIdeas[0];
   const regimeLabel = topIdea?.regime_label || "Scanning";
   const regimeScore = topIdea?.regime_score;
@@ -57,7 +57,18 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
           <div className="idea-list">
             {loadingTopIdeas ? <div className="empty">Scanning markets...</div> : null}
             {!loadingTopIdeas && topIdeas.length === 0 ? <div className="empty">No clean setups found right now.</div> : null}
-            {topIdeas.map((idea) => <TradeIdeaCard key={`${idea.symbol}-${idea.direction}-${idea.rank_score}`} idea={idea} />)}
+            {topIdeas.map((idea) => {
+              const signalId = getSignalId ? getSignalId(idea) : "";
+              return (
+                <TradeIdeaCard
+                  key={`${idea.symbol}-${idea.direction}-${idea.rank_score}`}
+                  idea={idea}
+                  onPaperTrade={onPaperTrade}
+                  tradeTaken={takenSignalIds.has(signalId)}
+                  paperTradeLoading={paperTradeLoadingSignalId === signalId}
+                />
+              );
+            })}
           </div>
         </section>
 

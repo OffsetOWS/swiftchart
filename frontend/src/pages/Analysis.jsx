@@ -2,7 +2,7 @@ import { Search } from "lucide-react";
 import Chart from "../components/Chart.jsx";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 
-export default function Analysis({ state, setters, candles, analysis, loading, onAnalyze, onPaperTrade }) {
+export default function Analysis({ state, setters, candles, analysis, loading, onAnalyze, onPaperTrade, takenSignalIds = new Set(), paperTradeLoadingSignalId = "", getSignalId }) {
   const { symbol, exchange, timeframe, risk } = state;
   const { setSymbol, setExchange, setTimeframe, setRisk } = setters;
 
@@ -76,7 +76,18 @@ export default function Analysis({ state, setters, candles, analysis, loading, o
             </div>
             <div className="idea-list" style={{ marginTop: 14 }}>
               {analysis.trade_ideas.length === 0 ? <div className="empty">No valid setup. Avoid forcing mid-range entries.</div> : null}
-              {analysis.trade_ideas.map((idea) => <TradeIdeaCard key={`${idea.direction}-${idea.entry_zone[0]}`} idea={idea} onPaperTrade={onPaperTrade} />)}
+              {analysis.trade_ideas.map((idea) => {
+                const signalId = getSignalId ? getSignalId(idea) : "";
+                return (
+                  <TradeIdeaCard
+                    key={`${idea.direction}-${idea.entry_zone[0]}`}
+                    idea={idea}
+                    onPaperTrade={onPaperTrade}
+                    tradeTaken={takenSignalIds.has(signalId)}
+                    paperTradeLoading={paperTradeLoadingSignalId === signalId}
+                  />
+                );
+              })}
             </div>
           </>
         ) : <div className="empty">No analysis loaded yet.</div>}
