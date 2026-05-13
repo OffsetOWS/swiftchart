@@ -22,7 +22,7 @@ export default function Landing() {
 
         <nav aria-label="SwiftChart links">
           {navLinks.map(([label, href]) => (
-            <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel={href.startsWith("http") ? "noreferrer" : undefined}>
+            <a key={label} href={href}>
               {label}
             </a>
           ))}
@@ -46,7 +46,7 @@ export default function Landing() {
 
         <nav aria-label="SwiftChart mobile links">
           {navLinks.map(([label, href]) => (
-            <a key={label} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel={href.startsWith("http") ? "noreferrer" : undefined}>
+            <a key={label} href={href}>
               {label}
             </a>
           ))}
