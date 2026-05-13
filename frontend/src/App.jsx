@@ -180,7 +180,6 @@ export default function App() {
     ["ideas", "Trade Ideas"],
     ["history", "History"],
     ["alerts", "Alerts"],
-    ["settings", "Settings"],
   ];
 
   const nav = (
@@ -386,13 +385,6 @@ export default function App() {
               <div className="mono-list">
                 <span>/subscribe</span><span>/alerts</span><span>/top</span><span>/checktrades</span>
               </div>
-            </section>
-          )}
-          {page === "settings" && (
-            <section className="panel terminal-note" id="faq">
-              <span className="eyebrow">CONTROL ROOM</span>
-              <h2>Risk remains first.</h2>
-              <p>SwiftChart keeps analysis, alerts, history, and risk context focused here while trade control stays on Telegram.</p>
             </section>
           )}
         </div>
