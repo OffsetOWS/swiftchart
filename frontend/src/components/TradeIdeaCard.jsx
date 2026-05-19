@@ -20,7 +20,6 @@ export default function TradeIdeaCard({
   aiResult,
   aiError = "",
   aiLoading = false,
-  showTakeTradeButton = false,
 }) {
   const directionClass = idea.direction.toLowerCase();
   const score = idea.setup_score ?? idea.confidence_score;
@@ -65,20 +64,19 @@ export default function TradeIdeaCard({
         <p className="confirmation-list"><b>Downgraded:</b> {idea.downgraded_reasons.join(" ")}</p>
       ) : null}
       <p style={{ marginTop: 12 }}><ShieldAlert size={14} /> {idea.invalid_condition}</p>
-      {(onAiScan || onPaperTrade || showTakeTradeButton) ? (
+      {(onAiScan || onPaperTrade) ? (
         <div className="trade-card-actions">
           {onAiScan && (
             <button className="secondary-action ai-scan-button" type="button" onClick={() => onAiScan(idea)} disabled={aiLoading}>
               <BrainCircuit size={16} /> {aiLoading ? "Scanning with GenLayer AI..." : "Scan with AI"}
             </button>
           )}
-          {(onPaperTrade || showTakeTradeButton) && (
+          {onPaperTrade && (
             <button
               className="primary take-trade-button"
               type="button"
-              onClick={onPaperTrade ? () => onPaperTrade(idea) : undefined}
-              disabled={!onPaperTrade || tradeTaken || paperTradeLoading || idea.entry_status !== "READY"}
-              title={!onPaperTrade ? "Demo signal only" : undefined}
+              onClick={() => onPaperTrade(idea)}
+              disabled={tradeTaken || paperTradeLoading || idea.entry_status !== "READY"}
             >
               <Zap size={16} /> {tradeTaken ? "Trade Taken" : paperTradeLoading ? "Saving..." : idea.entry_status === "WAIT_FOR_RETEST" ? "Wait for Retest" : idea.entry_status === "REJECTED_EXHAUSTED" ? "Rejected" : "Take Trade"}
             </button>
