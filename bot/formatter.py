@@ -28,12 +28,56 @@ def signal_label(idea: TradeIdea | None) -> str:
     return f"Potential {idea.direction}"
 
 
+def source_label(idea: TradeIdea | None) -> str:
+    source = (idea.source or idea.exchange if idea else "").lower()
+    if source == "variational":
+        return "Variational"
+    if source == "hyperliquid":
+        return "Hyperliquid"
+    return source or "-"
+
+
 def regime_line(idea: TradeIdea | None, analysis: AnalysisResponse | None = None) -> str:
     regime = idea.regime_label if idea else analysis.market_regime_data.label if analysis and analysis.market_regime_data else None
-    score = idea.regime_score if idea else analysis.market_regime_data.score if analysis and analysis.market_regime_data else None
-    if regime and score is not None:
-        return f"{regime} ({score:+.0f})"
+    confidence = idea.regime_confidence_score if idea else analysis.market_regime_data.confidence_score if analysis and analysis.market_regime_data else None
+    regime_type = idea.regime_type if idea else analysis.market_regime_data.regime_type if analysis and analysis.market_regime_data else None
+    if regime and confidence is not None:
+        return f"{regime_type or regime} — {confidence:.0f}%"
     return str(regime or "-")
+
+
+def regime_context(idea: TradeIdea | None, analysis: AnalysisResponse | None = None) -> str:
+    data = analysis.market_regime_data if analysis else None
+    regime_type = idea.regime_type if idea else data.regime_type if data else None
+    confidence = idea.regime_confidence_score if idea else data.confidence_score if data else None
+    structure = idea.regime_structure if idea else data.structure if data else None
+    transition = idea.is_regime_transition if idea else data.is_transition if data else False
+    decision = idea.regime_trade_decision if idea else data.trade_decision if data else None
+    confidence_text = f"{confidence:.0f}%" if confidence is not None else "-"
+    return (
+        f"Regime Type: {regime_type or '-'}\n"
+        f"Regime Confidence: {confidence_text}\n"
+        f"Structure: {structure or '-'}\n"
+        f"Transitioning: {'Yes' if transition else 'No'}\n"
+        f"Decision: {decision or '-'}"
+    )
+
+
+def quality_context(idea: TradeIdea | None) -> str:
+    if idea is None:
+        return (
+            "Move Maturity: -\n"
+            "Exhaustion Risk: -\n"
+            "Entry Status: -\n"
+            "Rejected/Downgraded Reasons: -"
+        )
+    reasons = "; ".join(idea.downgraded_reasons) if idea.downgraded_reasons else "-"
+    return (
+        f"Move Maturity: {idea.move_maturity}\n"
+        f"Exhaustion Risk: {idea.exhaustion_risk}\n"
+        f"Entry Status: {idea.entry_status}\n"
+        f"Rejected/Downgraded Reasons: {reasons}"
+    )
 
 
 def format_analysis(analysis: AnalysisResponse) -> str:
@@ -46,6 +90,8 @@ def format_analysis(analysis: AnalysisResponse) -> str:
             "Setup Score: -\n"
             "Grade: No Trade\n"
             f"Market Regime: {regime_line(None, analysis)}\n"
+            f"{regime_context(None, analysis)}\n"
+            f"{quality_context(None)}\n"
             f"HTF Bias: {analysis.higher_timeframe_bias}\n"
             "Entry: -\n"
             "Stop Loss: -\n"
@@ -59,9 +105,12 @@ def format_analysis(analysis: AnalysisResponse) -> str:
     else:
         trade_block = (
             f"Signal: {signal_label(idea)}\n"
+            f"Source: {source_label(idea)}\n"
             f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
             f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
             f"Market Regime: {regime_line(idea)}\n"
+            f"{regime_context(idea)}\n"
+            f"{quality_context(idea)}\n"
             f"Trade Bias: {idea.trend_alignment or '-'} | Regime Adj: {idea.regime_confidence_adjustment:+.0f}\n"
             f"HTF Bias: {idea.higher_timeframe_bias}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
@@ -101,11 +150,15 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
         lines.append(
             "\n"
             f"{index}. {idea.symbol} — {idea.direction}\n"
+            f"Source: {source_label(idea)}\n"
             f"Score: {fmt(idea.setup_score or idea.confidence_score)}/100 | Grade: {idea.setup_grade or 'Valid Setup'}\n"
             f"Regime: {regime_line(idea)} | Trade: {idea.trend_alignment or '-'} | HTF: {idea.higher_timeframe_bias}\n"
+            f"Move: {idea.move_maturity} | Exhaustion: {idea.exhaustion_risk} | Status: {idea.entry_status}\n"
+            f"Transitioning: {'Yes' if idea.is_regime_transition else 'No'} | Structure: {idea.regime_structure or '-'}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"SL: {fmt(idea.stop_loss)} | TP1: {fmt(idea.take_profit_1)} | TP2: {fmt(idea.take_profit_2)}\n"
             f"R:R: {fmt(idea.risk_reward_ratio)} | Confidence: {fmt(idea.confidence_score)}%\n"
+            f"Rejected/Downgraded Reasons: {'; '.join(idea.downgraded_reasons) if idea.downgraded_reasons else '-'}\n"
             f"Reason: {idea.reason}"
         )
     lines.append(f"\n{RISK_WARNING}")
@@ -116,9 +169,12 @@ def format_trade_alert(idea: TradeIdea) -> str:
     return (
         f"SwiftChart Trade Alert: {idea.symbol} — {idea.timeframe.upper()}\n\n"
         f"Signal: Potential {idea.direction}\n"
+        f"Source: {source_label(idea)}\n"
         f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
         f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
         f"Market Regime: {regime_line(idea)}\n"
+        f"{regime_context(idea)}\n"
+        f"{quality_context(idea)}\n"
         f"Trade Bias: {idea.trend_alignment or '-'} | Regime Adj: {idea.regime_confidence_adjustment:+.0f}\n"
         f"HTF Bias: {idea.higher_timeframe_bias}\n\n"
         f"Entry: {fmt_zone(idea.entry_zone)}\n"

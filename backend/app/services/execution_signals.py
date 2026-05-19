@@ -8,6 +8,7 @@ import httpx
 
 from app.config import get_settings
 from app.models.schemas import TradeIdea
+from app.services.alert_dedupe import mark_alert_sent, should_skip_alert
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,11 @@ def trade_idea_to_execution_signal(idea: TradeIdea) -> dict:
         "reason": idea.reason[:1000],
         "signal_id": execution_signal_id(idea),
         "exchange": idea.exchange,
+        "source": idea.source or idea.exchange,
+        "move_maturity": idea.move_maturity,
+        "exhaustion_risk": idea.exhaustion_risk,
+        "entry_status": idea.entry_status,
+        "downgraded_reasons": idea.downgraded_reasons,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -57,6 +63,17 @@ async def dispatch_trade_ideas_to_execution(ideas: list[TradeIdea]) -> None:
 
     async with httpx.AsyncClient(timeout=20) as client:
         for idea in ideas:
+            if should_skip_alert(idea, namespace="execution"):
+                continue
+            if idea.entry_status != "READY":
+                logger.info(
+                    "Execution signal skipped symbol=%s timeframe=%s status=%s exhaustion=%s",
+                    idea.symbol,
+                    idea.timeframe,
+                    idea.entry_status,
+                    idea.exhaustion_risk,
+                )
+                continue
             payload = trade_idea_to_execution_signal(idea)
             signal_id = payload["signal_id"]
             if signal_id in _sent_signal_ids:
@@ -67,6 +84,7 @@ async def dispatch_trade_ideas_to_execution(ideas: list[TradeIdea]) -> None:
                 decision = response.json()
                 if decision.get("accepted"):
                     _sent_signal_ids.add(signal_id)
+                    mark_alert_sent(idea, namespace="execution")
                 logger.info(
                     "Execution signal dispatched symbol=%s side=%s accepted=%s reason=%s",
                     idea.symbol,

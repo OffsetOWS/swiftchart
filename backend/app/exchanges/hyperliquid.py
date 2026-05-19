@@ -5,7 +5,7 @@ import httpx
 import pandas as pd
 
 from app.config import get_settings
-from app.exchanges.base import ExchangeClient
+from app.exchanges.base import ExchangeClient, MarketDataUnavailable
 
 
 TIMEFRAME_TO_HL = {
@@ -28,14 +28,37 @@ class HyperliquidClient(ExchangeClient):
 
     async def _post_info(self, payload: dict) -> dict | list:
         async with httpx.AsyncClient(timeout=20) as client:
+            last_error: Exception | None = None
             for attempt in range(3):
-                response = await client.post(f"{self.base_url}/info", json=payload)
-                if response.status_code != 429:
+                try:
+                    response = await client.post(f"{self.base_url}/info", json=payload)
+                    if response.status_code in {429} or response.status_code >= 500:
+                        last_error = httpx.HTTPStatusError(
+                            f"Hyperliquid returned status {response.status_code}",
+                            request=response.request,
+                            response=response,
+                        )
+                        if attempt < 2:
+                            await asyncio.sleep(0.6 * (attempt + 1))
+                            continue
                     response.raise_for_status()
                     return response.json()
-                if attempt < 2:
-                    await asyncio.sleep(0.6 * (attempt + 1))
-            response.raise_for_status()
+                except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        await asyncio.sleep(0.6 * (attempt + 1))
+                        continue
+                    break
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    if exc.response.status_code in {429} or exc.response.status_code >= 500:
+                        if attempt < 2:
+                            await asyncio.sleep(0.6 * (attempt + 1))
+                            continue
+                        break
+                    raise
+            if last_error:
+                raise MarketDataUnavailable("Hyperliquid market data is temporarily unavailable. Please try again shortly.") from last_error
         return []
 
     async def get_markets(self) -> list[dict]:

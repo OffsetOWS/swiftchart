@@ -1,7 +1,84 @@
 import { RefreshCcw } from "lucide-react";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 
-export default function Dashboard({ exchange, setExchange, timeframe, setTimeframe, topIdeas, loadingTopIdeas, refreshTopIdeas, onPaperTrade, takenSignalIds = new Set(), paperTradeLoadingSignalId = "", getSignalId, compact = false }) {
+const DEMO_GENLAYER_APPROVE_SIGNAL = {
+  symbol: "BTCUSDT",
+  timeframe: "4h",
+  exchange: "demo",
+  source: "GenLayer approve test",
+  direction: "Long",
+  side: "LONG",
+  setup_score: 84,
+  confidence_score: 84,
+  setup_grade: "Demo",
+  market_regime: "Demo only",
+  regime_label: "Demo GenLayer Test Signal",
+  higher_timeframe_bias: "HTF_BULLISH",
+  trend_alignment: "demo-check",
+  regime_confidence_adjustment: 0,
+  move_maturity: "Early",
+  entry_status: "READY",
+  exhaustion_risk: "Low",
+  entry_zone: [68000, 68200],
+  stop_loss: 66500,
+  take_profit_1: 74000,
+  take_profit_2: 76000,
+  risk_reward_ratio: 4,
+  rr: 4,
+  reason: "Demo GenLayer Test Signal. This card exists only to test the optional GenLayer AI Check when live clean setups are unavailable.",
+  invalid_condition: "Demo only. Not a real SwiftChart trade signal.",
+  rank_score: 0,
+  reversal_confirmations: [],
+  downgraded_reasons: [],
+};
+
+const DEMO_GENLAYER_REJECT_SIGNAL = {
+  ...DEMO_GENLAYER_APPROVE_SIGNAL,
+  source: "GenLayer reject test",
+  setup_score: 40,
+  confidence_score: 40,
+  setup_grade: "Demo Reject",
+  regime_label: "Demo GenLayer Reject Test Signal",
+  entry_zone: [66000, 66100],
+  stop_loss: 65500,
+  take_profit_1: 66500,
+  take_profit_2: 66800,
+  risk_reward_ratio: 1,
+  rr: 1,
+  reason: "Demo GenLayer Reject Test Signal. This card exists only to test the REJECT path for the optional GenLayer AI Check.",
+};
+
+const DEMO_GENLAYER_SIGNALS = [
+  {
+    label: "Demo GenLayer Test Signal",
+    fallbackId: "demo-genlayer-approve-test-signal",
+    signal: DEMO_GENLAYER_APPROVE_SIGNAL,
+  },
+  {
+    label: "Demo GenLayer Reject Test Signal",
+    fallbackId: "demo-genlayer-reject-test-signal",
+    signal: DEMO_GENLAYER_REJECT_SIGNAL,
+  },
+];
+
+export default function Dashboard({
+  exchange,
+  setExchange,
+  timeframe,
+  setTimeframe,
+  topIdeas,
+  loadingTopIdeas,
+  refreshTopIdeas,
+  onPaperTrade,
+  takenSignalIds = new Set(),
+  paperTradeLoadingSignalId = "",
+  getSignalId,
+  onAiScan,
+  aiResults = {},
+  aiErrors = {},
+  aiLoadingSignalId = "",
+  compact = false,
+}) {
   const topIdea = topIdeas[0];
   const regimeLabel = topIdea?.regime_label || "Scanning";
   const regimeScore = topIdea?.regime_score;
@@ -20,7 +97,9 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
             <div className="field">
               <label>Exchange</label>
               <select value={exchange} onChange={(event) => setExchange(event.target.value)}>
+                <option value="all">All</option>
                 <option value="hyperliquid">Hyperliquid</option>
+                <option value="variational">Variational</option>
               </select>
             </div>
             <div className="field">
@@ -55,6 +134,26 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
             <span className="badge">{timeframe}</span>
           </div>
           <div className="idea-list">
+            {DEMO_GENLAYER_SIGNALS.map(({ label, fallbackId, signal }) => (
+              <div className="demo-signal-shell" key={fallbackId}>
+                <div className="demo-signal-label">{label}</div>
+                {(() => {
+                  const demoSignalId = getSignalId ? getSignalId(signal) : fallbackId;
+                  return (
+                    <TradeIdeaCard
+                      idea={signal}
+                      onPaperTrade={onPaperTrade}
+                      tradeTaken={takenSignalIds.has(demoSignalId)}
+                      paperTradeLoading={paperTradeLoadingSignalId === demoSignalId}
+                      onAiScan={onAiScan}
+                      aiResult={aiResults[demoSignalId]}
+                      aiError={aiErrors[demoSignalId]}
+                      aiLoading={aiLoadingSignalId === demoSignalId}
+                    />
+                  );
+                })()}
+              </div>
+            ))}
             {loadingTopIdeas ? <div className="empty">Scanning markets...</div> : null}
             {!loadingTopIdeas && topIdeas.length === 0 ? <div className="empty">No clean setups found right now.</div> : null}
             {topIdeas.map((idea) => {
@@ -66,6 +165,10 @@ export default function Dashboard({ exchange, setExchange, timeframe, setTimefra
                   onPaperTrade={onPaperTrade}
                   tradeTaken={takenSignalIds.has(signalId)}
                   paperTradeLoading={paperTradeLoadingSignalId === signalId}
+                  onAiScan={onAiScan}
+                  aiResult={aiResults[signalId]}
+                  aiError={aiErrors[signalId]}
+                  aiLoading={aiLoadingSignalId === signalId}
                 />
               );
             })}

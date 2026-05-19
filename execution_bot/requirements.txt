@@ -1,0 +1,8 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+httpx==0.28.1
+python-telegram-bot==21.10
+hyperliquid-python-sdk==0.23.0
+pytest==8.3.4

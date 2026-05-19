@@ -103,6 +103,7 @@ def init_db() -> None:
             "ALTER TABLE trade_ideas ADD COLUMN regime_confidence_adjustment REAL",
             "ALTER TABLE trade_ideas ADD COLUMN reversal_confirmations TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN regime_explanation TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN signal_candle_time TEXT",
         ):
             try:
                 connection.execute(statement)
@@ -145,6 +146,29 @@ def init_db() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS genlayer_ai_scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                exchange TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                source TEXT NOT NULL,
+                signal_json TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                risk_level TEXT NOT NULL,
+                validator_reasoning TEXT NOT NULL,
+                validator_votes_json TEXT NOT NULL,
+                recommended_position_size REAL NOT NULL,
+                warning_flags_json TEXT NOT NULL,
+                paper_execution_status TEXT NOT NULL DEFAULT 'NOT_EXECUTED',
+                final_trade_outcome TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_created_at ON trade_ideas(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_symbol ON trade_ideas(symbol)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_status ON trade_ideas(status)")
@@ -152,4 +176,6 @@ def init_db() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_dedupe ON trade_ideas(symbol, timeframe, exchange, direction, entry_zone_low, entry_zone_high, stop_loss, take_profit_1, take_profit_2, created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_created_at ON signal_reviews(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_regime ON signal_reviews(regime_label)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_created_at ON genlayer_ai_scans(created_at)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_signal ON genlayer_ai_scans(symbol, timeframe, exchange, direction, created_at)")
     _INITIALIZED = True

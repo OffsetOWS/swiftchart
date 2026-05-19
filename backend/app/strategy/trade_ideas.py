@@ -19,6 +19,31 @@ MIN_SETUP_SCORE = 65
 logger = logging.getLogger(__name__)
 
 
+def _rsi(close: pd.Series, period: int = 14) -> float:
+    if len(close) < period + 1:
+        return 50.0
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0, float("nan"))
+    value = 100 - (100 / (1 + rs.iloc[-1]))
+    if pd.isna(value):
+        return 50.0
+    return float(value)
+
+
+def _rolling_vwap(df: pd.DataFrame, window: int = 48) -> float:
+    recent = df.tail(min(window, len(df))).copy()
+    if recent.empty:
+        return 0.0
+    typical = (recent["high"].astype(float) + recent["low"].astype(float) + recent["close"].astype(float)) / 3
+    volume = recent["volume"].astype(float).clip(lower=0)
+    total_volume = float(volume.sum())
+    if total_volume <= 0:
+        return float(recent["close"].astype(float).ewm(span=min(20, len(recent)), adjust=False).mean().iloc[-1])
+    return float((typical * volume).sum() / total_volume)
+
+
 def _rr(entry: float, stop: float, target: float, direction: str) -> float:
     risk = abs(entry - stop)
     reward = target - entry if direction == "Long" else entry - target
@@ -103,6 +128,161 @@ def _score_setup(
         "rr": rr_points,
         "momentum": momentum_points,
         "distance": distance_points,
+    }
+
+
+def _last_sweep_timestamp(df: pd.DataFrame, sweep: LiquiditySweep | None) -> int | None:
+    if sweep is None or "timestamp" not in df:
+        return None
+    matches = df.index[df["timestamp"] == sweep.candle_time].tolist()
+    return int(matches[-1]) if matches else None
+
+
+def _signal_quality_control(
+    *,
+    direction: str,
+    df: pd.DataFrame,
+    score: float,
+    regime: str,
+    entry_low: float,
+    entry_high: float,
+    atr: float,
+    bullish_sweep: LiquiditySweep | None,
+    bearish_sweep: LiquiditySweep | None,
+) -> dict[str, object]:
+    if len(df) < 20 or atr <= 0:
+        return {
+            "score": score,
+            "maturity": "Early",
+            "risk": "Low",
+            "status": "READY",
+            "reasons": [],
+            "adjustment": 0.0,
+        }
+
+    close = df["close"].astype(float)
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    open_ = df["open"].astype(float)
+    price = float(close.iloc[-1])
+    entry_mid = (entry_low + entry_high) / 2
+    lookback = min(36, len(df))
+    recent_high = float(high.tail(lookback).max())
+    recent_low = float(low.tail(lookback).min())
+    extension = max(price - recent_low, price - entry_mid, 0.0) if direction == "Long" else max(recent_high - price, entry_mid - price, 0.0)
+    extension_atr = extension / atr
+    rsi = _rsi(close)
+    vwap = _rolling_vwap(df)
+    ema20 = float(close.ewm(span=min(20, len(close)), adjust=False).mean().iloc[-1])
+    equilibrium = (vwap + ema20) / 2 if vwap else ema20
+
+    tail = df.tail(min(8, len(df))).copy()
+    ranges = high.tail(len(tail)) - low.tail(len(tail))
+    bodies = (close.tail(len(tail)) - open_.tail(len(tail))).abs()
+    recent_ranges = ranges.tail(3)
+    previous_ranges = ranges.iloc[-6:-3] if len(ranges) >= 6 else ranges.head(3)
+    recent_bodies = bodies.tail(3)
+    previous_bodies = bodies.iloc[-6:-3] if len(bodies) >= 6 else bodies.head(3)
+    candle_ranges_shrinking = float(recent_ranges.mean()) < float(previous_ranges.mean()) * 0.82 if len(previous_ranges) >= 2 else False
+    bodies_shrinking = float(recent_bodies.mean()) < float(previous_bodies.mean()) * 0.82 if len(previous_bodies) >= 2 else False
+
+    if direction == "Short":
+        directional_candles = close.tail(4) < open_.tail(4)
+        follow_through_weakening = float(low.iloc[-1]) >= float(low.tail(4).min()) or float(close.diff().tail(3).mean()) >= -atr * 0.18
+        basing_after_impulse = extension_atr >= 2.4 and float(close.tail(4).max() - close.tail(4).min()) <= atr * 0.85
+        momentum_decay = bool((candle_ranges_shrinking or bodies_shrinking) and (follow_through_weakening or directional_candles.sum() <= 1 or basing_after_impulse))
+        far_from_equilibrium = price < equilibrium - atr * 2
+        rsi_exhausted = rsi < 28
+        trap_sweep = bullish_sweep is not None and bullish_sweep.confirmation_status == "confirmed"
+        sweep_index = _last_sweep_timestamp(df, bullish_sweep)
+    else:
+        directional_candles = close.tail(4) > open_.tail(4)
+        follow_through_weakening = float(high.iloc[-1]) <= float(high.tail(4).max()) or float(close.diff().tail(3).mean()) <= atr * 0.18
+        topping_after_impulse = extension_atr >= 2.4 and float(close.tail(4).max() - close.tail(4).min()) <= atr * 0.85
+        momentum_decay = bool((candle_ranges_shrinking or bodies_shrinking) and (follow_through_weakening or directional_candles.sum() <= 1 or topping_after_impulse))
+        far_from_equilibrium = price > equilibrium + atr * 2
+        rsi_exhausted = rsi > 72
+        trap_sweep = bearish_sweep is not None and bearish_sweep.confirmation_status == "confirmed"
+        sweep_index = _last_sweep_timestamp(df, bearish_sweep)
+
+    if sweep_index is not None and len(df) - sweep_index > 10:
+        trap_sweep = False
+
+    reasons: list[str] = []
+    penalty = 0.0
+    cap: float | None = None
+    status = "READY"
+
+    if extension_atr > 3.5:
+        penalty += 30
+        cap = min(cap or 100.0, 65.0)
+        reasons.append(f"{direction} downgraded: move is exhausted at {extension_atr:.1f}x ATR.")
+    elif extension_atr > 3.0:
+        penalty += 20
+        cap = min(cap or 100.0, 75.0)
+        reasons.append(f"{direction} downgraded: move is already extended vs ATR.")
+    elif extension_atr > 2.5:
+        penalty += 12
+        cap = min(cap or 100.0, 80.0)
+        reasons.append(f"{direction} downgraded: move is maturing vs ATR.")
+
+    if momentum_decay:
+        penalty += 15
+        cap = min(cap or 100.0, 75.0)
+        reasons.append(f"{direction} downgraded: {'bullish' if direction == 'Long' else 'bearish'} momentum is decaying.")
+
+    if far_from_equilibrium:
+        penalty += 15
+        cap = min(cap or 100.0, 75.0)
+        reasons.append(
+            f"{direction} downgraded: price is far {'above' if direction == 'Long' else 'below'} VWAP/equilibrium."
+        )
+
+    if rsi_exhausted:
+        penalty += 15
+        cap = min(cap or 100.0, 75.0)
+        reasons.append(f"{direction} downgraded: RSI shows {'upside' if direction == 'Long' else 'downside'} exhaustion.")
+
+    if trap_sweep:
+        penalty += 25
+        cap = min(cap or 100.0, 60.0)
+        reasons.append(
+            f"{direction} rejected/downgraded: possible {'upside liquidity sweep and rejection' if direction == 'Long' else 'downside liquidity sweep and reclaim'}."
+        )
+
+    strong_extension = extension_atr > 3.0
+    extreme_extension = extension_atr > 3.5
+    if (regime in {"BREAKOUT", "BREAKDOWN", "TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"} and strong_extension) or (strong_extension and (momentum_decay or far_from_equilibrium)):
+        status = "WAIT_FOR_RETEST"
+    if trap_sweep or (extreme_extension and rsi_exhausted):
+        status = "REJECTED_EXHAUSTED"
+
+    adjusted = max(0.0, score - penalty)
+    if cap is not None:
+        adjusted = min(adjusted, cap)
+
+    if status == "READY" and adjusted < MIN_SETUP_SCORE:
+        status = "REJECTED_EXHAUSTED" if reasons else "READY"
+
+    if extension_atr > 3.5 or (extension_atr > 3.0 and (rsi_exhausted or momentum_decay or far_from_equilibrium)):
+        maturity = "Exhausted"
+    elif extension_atr > 2.5 or momentum_decay or far_from_equilibrium or rsi_exhausted:
+        maturity = "Extended"
+    elif extension_atr > 1.4:
+        maturity = "Mid-Trend"
+    else:
+        maturity = "Early"
+
+    risk_score = sum([extension_atr > 2.5, momentum_decay, far_from_equilibrium, rsi_exhausted, trap_sweep])
+    risk = "High" if status == "REJECTED_EXHAUSTED" or risk_score >= 3 else "Medium" if risk_score >= 1 else "Low"
+
+    return {
+        "score": adjusted,
+        "maturity": maturity,
+        "risk": risk,
+        "status": status,
+        "reasons": reasons,
+        "adjustment": round(adjusted - score, 1),
     }
 
 
@@ -391,6 +571,8 @@ def _build_idea(
     market_regime_data: MarketRegimeSnapshot,
     support: Zone | None,
     resistance: Zone | None,
+    bullish_sweep: LiquiditySweep | None,
+    bearish_sweep: LiquiditySweep | None,
 ) -> tuple[TradeIdea | None, SignalReview | None]:
     entry = (entry_low + entry_high) / 2
     rr = _rr(entry, stop, tp2, direction)
@@ -449,8 +631,31 @@ def _build_idea(
     adjusted_score, confidence_adjustment, regime_note = _regime_adjustment(direction, score, market_regime_data, confirmations)
     trend_alignment = _regime_alignment(direction, market_regime_data)
     rejected_reason = regime_note if regime_note and "rejected" in regime_note.lower() else None
+    quality = _signal_quality_control(
+        direction=direction,
+        df=df,
+        score=adjusted_score,
+        regime=regime,
+        entry_low=entry_low,
+        entry_high=entry_high,
+        atr=average_true_range(df),
+        bullish_sweep=bullish_sweep,
+        bearish_sweep=bearish_sweep,
+    )
+    quality_score = float(quality["score"])
+    quality_adjustment = float(quality["adjustment"])
+    quality_reasons = list(quality["reasons"])
+    entry_status = str(quality["status"])
+    if quality_reasons:
+        confidence_adjustment += quality_adjustment
+        adjusted_score = quality_score
+    if rejected_reason is None and entry_status == "REJECTED_EXHAUSTED":
+        rejected_reason = "Signal rejected because exhaustion filters show the move is already too mature. " + " ".join(quality_reasons)
     if rejected_reason is None and adjusted_score < MIN_SETUP_SCORE:
-        rejected_reason = "Signal rejected because setup score is below 65 after regime adjustment."
+        if quality_reasons:
+            rejected_reason = "Signal rejected because setup score is below 65 after exhaustion quality control. " + " ".join(quality_reasons)
+        else:
+            rejected_reason = "Signal rejected because setup score is below 65 after regime adjustment."
     if rejected_reason:
         _log_signal_review(
             symbol=symbol,
@@ -486,12 +691,15 @@ def _build_idea(
     reason = _reason(regime, direction, sweep, htf_bias, str(parts["alignment"]))
     if regime_note:
         reason = f"{reason} {regime_note}"
+    if quality_reasons:
+        reason = f"{reason} {' '.join(quality_reasons)} Entry Status: {entry_status}."
     reason = f"{reason} Market Regime: {market_regime_data.label} ({market_regime_data.score:+.0f}); trade is {trend_alignment}; confidence adjustment {confidence_adjustment:+.0f}."
 
     idea = TradeIdea(
         symbol=symbol,
         timeframe=timeframe,
         exchange=exchange,
+        source=exchange,
         direction=direction,
         market_regime=regime,
         higher_timeframe_bias=htf_bias,
@@ -506,7 +714,7 @@ def _build_idea(
         confidence_score=round(adjusted_score, 1),
         invalid_condition=invalid,
         warning="Not financial advice. Manage risk.",
-        rank_score=round(score * 1.4 + rr * 6 + (sweep.sweep_quality_score or 0 if sweep else 0) * 0.15 + (zone.strength_score or 0) * 0.1, 2),
+        rank_score=round(adjusted_score * 1.4 + rr * 6 + (sweep.sweep_quality_score or 0 if sweep else 0) * 0.15 + (zone.strength_score or 0) * 0.1, 2),
         position_size_units=size,
         risk_amount=risk_amount,
         regime_score=market_regime_data.score,
@@ -522,6 +730,11 @@ def _build_idea(
         regime_confidence_adjustment=round(confidence_adjustment, 1),
         reversal_confirmations=confirmations,
         regime_explanation=market_regime_data.explanation,
+        move_maturity=str(quality["maturity"]),
+        exhaustion_risk=str(quality["risk"]),
+        entry_status=entry_status,
+        downgraded_reasons=quality_reasons,
+        signal_candle_time=df["timestamp"].iloc[-1],
     )
     review = SignalReview(
         symbol=symbol,
@@ -529,7 +742,7 @@ def _build_idea(
         exchange=exchange,
         direction=direction,
         accepted=True,
-        reason="Signal accepted after market-regime bias adjustment.",
+        reason="Signal accepted after market-regime and exhaustion quality control.",
         base_score=round(score, 1),
         adjusted_score=round(adjusted_score, 1),
         confidence_adjustment=round(confidence_adjustment, 1),
@@ -704,6 +917,8 @@ def build_trade_ideas(
                     market_regime_data=market_regime_data,
                     support=support,
                     resistance=resistance,
+                    bullish_sweep=bullish_sweep,
+                    bearish_sweep=bearish_sweep,
                 )
             )
         elif position is not None and position >= 0.75:
@@ -731,6 +946,8 @@ def build_trade_ideas(
                     market_regime_data=market_regime_data,
                     support=support,
                     resistance=resistance,
+                    bullish_sweep=bullish_sweep,
+                    bearish_sweep=bearish_sweep,
                 )
             )
 
@@ -760,6 +977,8 @@ def build_trade_ideas(
                 market_regime_data=market_regime_data,
                 support=support,
                 resistance=resistance,
+                bullish_sweep=bullish_sweep,
+                bearish_sweep=bearish_sweep,
             )
         )
 
@@ -793,6 +1012,8 @@ def build_trade_ideas(
                     market_regime_data=market_regime_data,
                     support=support,
                     resistance=resistance,
+                    bullish_sweep=bullish_sweep,
+                    bearish_sweep=bearish_sweep,
                 )
             )
         else:
@@ -829,6 +1050,8 @@ def build_trade_ideas(
                 market_regime_data=market_regime_data,
                 support=support,
                 resistance=resistance,
+                bullish_sweep=bullish_sweep,
+                bearish_sweep=bearish_sweep,
             )
         )
 
@@ -857,6 +1080,8 @@ def build_trade_ideas(
                     market_regime_data=market_regime_data,
                     support=support,
                     resistance=resistance,
+                    bullish_sweep=bullish_sweep,
+                    bearish_sweep=bearish_sweep,
                 )
             )
         else:

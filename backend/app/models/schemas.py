@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,12 @@ MarketRegimeType = Literal[
 ]
 MarketRegimeLabel = str
 TrendAlignment = Literal["with-trend", "counter-trend", "range-trade"]
+MoveMaturity = Literal["Early", "Mid-Trend", "Extended", "Exhausted"]
+ExhaustionRisk = Literal["Low", "Medium", "High"]
+EntryStatus = Literal["READY", "WAIT_FOR_RETEST", "REJECTED_EXHAUSTED"]
+GenLayerDecision = Literal["APPROVE", "REJECT", "WAIT", "REDUCE_SIZE"]
+GenLayerRiskLevel = Literal["Low", "Medium", "High"]
+GenLayerPaperExecutionStatus = Literal["NOT_EXECUTED", "PAPER_EXECUTED"]
 
 
 class Candle(BaseModel):
@@ -92,6 +98,7 @@ class TradeIdea(BaseModel):
     symbol: str
     timeframe: str
     exchange: str
+    source: str | None = None
     direction: Direction
     market_regime: MarketCondition | None = None
     higher_timeframe_bias: Literal["HTF_BULLISH", "HTF_BEARISH", "HTF_NEUTRAL"] = "HTF_NEUTRAL"
@@ -122,6 +129,56 @@ class TradeIdea(BaseModel):
     regime_confidence_adjustment: float = 0
     reversal_confirmations: list[str] = Field(default_factory=list)
     regime_explanation: str | None = None
+    move_maturity: MoveMaturity = "Early"
+    exhaustion_risk: ExhaustionRisk = "Low"
+    entry_status: EntryStatus = "READY"
+    downgraded_reasons: list[str] = Field(default_factory=list)
+    signal_candle_time: datetime | None = None
+
+
+class GenLayerSignalPayload(BaseModel):
+    symbol: str
+    side: Literal["BUY", "SELL"]
+    timeframe: str
+    entry: float
+    entry_zone: tuple[float, float]
+    stop_loss: float
+    take_profits: list[float]
+    risk_to_reward: float
+    setup_score: float | None = None
+    market_regime: str | None = None
+    htf_bias: str | None = None
+    volatility_info: dict[str, Any] = Field(default_factory=dict)
+    reason: str
+    invalidation_condition: str
+    source: str
+    exchange: str
+
+
+class GenLayerValidationRequest(BaseModel):
+    signal: TradeIdea
+
+
+class GenLayerValidatorVote(BaseModel):
+    validator: str
+    vote: Literal["approve", "reject", "wait", "cautious"]
+    confidence: float
+    reason: str
+
+
+class GenLayerValidationResult(BaseModel):
+    id: int | None = None
+    signal: GenLayerSignalPayload
+    decision: GenLayerDecision
+    confidence_score: float
+    risk_level: GenLayerRiskLevel
+    validator_votes: list[GenLayerValidatorVote]
+    reasoning: str
+    recommended_position_size: float
+    warning_flags: list[str] = Field(default_factory=list)
+    paper_execution_status: GenLayerPaperExecutionStatus = "NOT_EXECUTED"
+    final_trade_outcome: str | None = None
+    created_at: datetime | None = None
 
 
 class MarketRegimeSnapshot(BaseModel):
@@ -234,6 +291,7 @@ class TradeHistoryRecord(BaseModel):
     regime_confidence_adjustment: float | None = None
     reversal_confirmations: str | None = None
     regime_explanation: str | None = None
+    signal_candle_time: datetime | None = None
 
 
 class TradeStats(BaseModel):

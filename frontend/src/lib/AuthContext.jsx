@@ -3,6 +3,7 @@ import { ensureUserProfile } from "./profile.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
 
 const AuthContext = createContext(null);
+const SUPABASE_CONFIG_ERROR = "Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.";
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}/app`;
@@ -36,7 +37,6 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
       setLoading(false);
-      setError("Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
       return undefined;
     }
 
@@ -74,7 +74,7 @@ export function AuthProvider({ children }) {
 
   async function signInWithGoogle() {
     if (!isSupabaseConfigured || !supabase) {
-      setError("Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      setError(SUPABASE_CONFIG_ERROR);
       return;
     }
 
@@ -115,6 +115,7 @@ export function AuthProvider({ children }) {
       loading,
       profileLoading,
       error,
+      configError: isSupabaseConfigured ? "" : SUPABASE_CONFIG_ERROR,
       isAuthenticated: Boolean(session),
       isSupabaseConfigured,
       signInWithGoogle,

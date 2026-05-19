@@ -9,6 +9,7 @@ import pandas as pd
 
 from app.config import get_settings
 from app.models.schemas import SignalReview, TradeIdea
+from app.services.alert_dedupe import mark_alert_sent, should_skip_alert
 from app.services.market_data import get_candles_cached
 from app.utils.database import get_connection
 
@@ -81,6 +82,8 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
     with get_connection() as connection:
         for idea in ideas:
             try:
+                if should_skip_alert(idea, namespace="history"):
+                    continue
                 duplicate_id = _recent_duplicate_id(connection, idea)
                 if duplicate_id is not None:
                     logger.info("Skipped duplicate trade idea id=%s symbol=%s timeframe=%s exchange=%s", duplicate_id, idea.symbol, idea.timeframe, idea.exchange)
@@ -93,9 +96,9 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         entry_zone_low, entry_zone_high, stop_loss, take_profit_1,
                         take_profit_2, risk_reward, confidence, reason, invalidation,
                         regime_score, regime_label, trend_alignment, regime_confidence_adjustment,
-                        reversal_confirmations, regime_explanation
+                        reversal_confirmations, regime_explanation, signal_candle_time
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         idea.symbol.upper(),
@@ -121,6 +124,7 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         idea.regime_confidence_adjustment,
                         json.dumps(idea.reversal_confirmations),
                         idea.regime_explanation,
+                        idea.signal_candle_time.isoformat() if idea.signal_candle_time else None,
                     ),
                 )
                 trade_id = int(cursor.lastrowid)
@@ -150,6 +154,7 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                     ),
                 )
                 ids.append(trade_id)
+                mark_alert_sent(idea, namespace="history")
                 logger.info("Saved trade idea id=%s symbol=%s timeframe=%s exchange=%s direction=%s", trade_id, idea.symbol, idea.timeframe, idea.exchange, idea.direction)
             except Exception:
                 logger.exception("Failed to save trade idea symbol=%s timeframe=%s exchange=%s", idea.symbol, idea.timeframe, idea.exchange)

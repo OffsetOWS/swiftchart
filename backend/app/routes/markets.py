@@ -2,9 +2,12 @@ from fastapi import APIRouter, HTTPException, Query
 import logging
 
 from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
+from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
+from app.services.alert_dedupe import fresh_alerts
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.scanner import cached_top_ideas
+from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.trade_ideas import analyze_dataframe
@@ -15,8 +18,6 @@ logger = logging.getLogger(__name__)
 
 def _selected_exchange(exchange: str | None) -> str:
     normalized = (exchange or get_settings().default_exchange).lower()
-    if normalized == "all":
-        return "hyperliquid"
     return normalized
 
 
@@ -55,9 +56,17 @@ async def global_regime_score(exchange: str, timeframe: str) -> float | None:
 async def markets(exchange: str = Query(default="hyperliquid")):
     selected_exchange = _selected_exchange(exchange)
     try:
+        if selected_exchange == "all":
+            markets = []
+            for current_exchange in scan_selected_exchanges("all"):
+                markets.extend(await get_markets_cached(current_exchange))
+            return markets
         return await get_markets_cached(selected_exchange)
+    except MarketDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not fetch markets from {selected_exchange}: {exc}") from exc
+        logger.exception("Could not fetch markets from %s", selected_exchange)
+        raise HTTPException(status_code=502, detail=f"Could not fetch markets from {selected_exchange}. Please try again shortly.") from exc
 
 
 @router.get("/candles", response_model=list[Candle])
@@ -73,8 +82,11 @@ async def candles(
     try:
         df = await _safe_candles(selected_exchange, symbol, timeframe, limit)
         return df.to_dict("records")
+    except MarketDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not fetch candles: {exc}") from exc
+        logger.exception("Could not fetch candles for %s %s on %s", symbol, timeframe, selected_exchange)
+        raise HTTPException(status_code=502, detail="Could not fetch candles. Please try again shortly.") from exc
 
 
 @router.get("/analyze")
@@ -98,7 +110,7 @@ async def analyze(
         preferred_timeframe=timeframe,
     )
     try:
-        exchanges = [_selected_exchange(exchange)]
+        exchanges = scan_selected_exchanges(_selected_exchange(exchange))
         last_error = None
         analysis = None
         for selected_exchange in exchanges:
@@ -127,7 +139,9 @@ async def analyze(
                 last_error = exc
                 continue
         if analysis is None:
-            raise HTTPException(status_code=422, detail=str(last_error or "Could not analyze symbol."))
+            if isinstance(last_error, MarketDataUnavailable):
+                raise HTTPException(status_code=503, detail=str(last_error))
+            raise HTTPException(status_code=422, detail="Could not analyze symbol with the available market data.")
         saved_ids = save_trade_ideas(analysis.trade_ideas)
         saved_reviews = save_signal_reviews(analysis.rejected_signals)
         logger.info("Analysis generated %s ideas, rejected %s, and saved %s ideas/%s reviews for %s %s on %s", len(analysis.trade_ideas), len(analysis.rejected_signals), len(saved_ids), saved_reviews, symbol, timeframe, analysis.exchange)
@@ -135,7 +149,8 @@ async def analyze(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not analyze symbol: {exc}") from exc
+        logger.exception("Could not analyze %s %s on %s", symbol, timeframe, exchange)
+        raise HTTPException(status_code=502, detail="Could not analyze symbol. Please try again shortly.") from exc
 
 
 @router.get("/top-ideas")
@@ -148,9 +163,13 @@ async def top_ideas(
         raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
     selected_exchange = _selected_exchange(exchange)
     if symbols is None:
-        return await cached_top_ideas(selected_exchange, timeframe)
+        result = await cached_top_ideas(selected_exchange, timeframe)
+        return {
+            **result,
+            "ideas": fresh_alerts(result.get("ideas", []), namespace="dashboard", mark=True),
+        }
 
-    selected_exchanges = [selected_exchange]
+    selected_exchanges = scan_selected_exchanges(selected_exchange)
     settings = get_settings()
     risk = RiskSettings(
         account_size=settings.default_account_size,
@@ -187,6 +206,7 @@ async def top_ideas(
             except Exception as exc:
                 errors.append({"exchange": selected_exchange, "symbol": symbol, "error": str(exc)})
     ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]
+    ranked = fresh_alerts(ranked, namespace="dashboard", mark=True)
     saved_ids = save_trade_ideas(ranked)
     logger.info("Top ideas generated %s ranked ideas and saved %s for exchange=%s timeframe=%s", len(ranked), len(saved_ids), exchange, timeframe)
     return {

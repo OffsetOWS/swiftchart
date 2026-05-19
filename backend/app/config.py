@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "sqlite:///./swiftchart.db"
     hyperliquid_base_url: str = "https://api.hyperliquid.xyz"
+    variational_api_base_url: str = "https://omni-client-api.prod.ap-northeast-1.variational.io"
+    variational_api_key: str = ""
+    variational_enabled: bool = False
+    variational_candles_path: str = "/candles"
     frontend_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     live_trading_enabled: bool = False
     default_exchange: str = "hyperliquid"
@@ -21,6 +25,13 @@ class Settings(BaseSettings):
     execution_autotrade_enabled: bool = False
     execution_signal_webhook_url: str = ""
     execution_webhook_secret: str = ""
+    genlayer_enabled: bool = True
+    genlayer_mode: str = "mock"
+    genlayer_api_base_url: str = ""
+    genlayer_api_key: str = ""
+    genlayer_validator_services: str = ""
+    genlayer_llm_provider: str = ""
+    genlayer_intelligent_contract_address: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

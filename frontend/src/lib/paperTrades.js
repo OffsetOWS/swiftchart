@@ -26,7 +26,7 @@ function paperTradeSetupError(error) {
 export function signalIdForIdea(idea) {
   const entry = Array.isArray(idea.entry_zone) ? idea.entry_zone.join("-") : "";
   return [
-    idea.exchange || "hyperliquid",
+    idea.source || idea.exchange || "hyperliquid",
     idea.symbol,
     idea.timeframe,
     idea.direction,

@@ -657,7 +657,8 @@ p {
 .segmented button,
 .icon-btn,
 .primary,
-.secondary {
+.secondary,
+.secondary-action {
   min-height: 38px;
   border: 1px solid var(--line);
   color: var(--ink);
@@ -678,7 +679,8 @@ p {
 }
 .dark-mode .segmented button,
 .dark-mode .icon-btn,
-.dark-mode .secondary {
+.dark-mode .secondary,
+.dark-mode .secondary-action {
   background: rgba(238,238,234,0.07);
 }
 .segmented button.active,
@@ -696,7 +698,8 @@ p {
 .segmented button:hover,
 .icon-btn:hover,
 .primary:hover,
-.secondary:hover {
+.secondary:hover,
+.secondary-action:hover {
   transform: translateY(-2px);
   border-color: var(--line-dark);
 }
@@ -707,7 +710,8 @@ p {
   place-items: center;
 }
 .primary,
-.secondary {
+.secondary,
+.secondary-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -716,6 +720,7 @@ p {
   font-weight: 900;
 }
 .secondary { background: transparent; }
+.secondary-action { background: transparent; }
 
 .terminal-chart-preview {
   position: relative;
@@ -809,6 +814,19 @@ p {
 }
 .idea-card.long { border-left: 4px solid var(--green); }
 .idea-card.short { border-left: 4px solid var(--red); }
+.demo-signal-shell {
+  padding: 12px;
+  border: 1px dashed rgba(111, 208, 212, 0.5);
+  background: rgba(111, 208, 212, 0.07);
+}
+.demo-signal-label {
+  margin-bottom: 10px;
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
 .idea-top {
   display: flex;
   align-items: flex-start;
@@ -888,6 +906,56 @@ p {
   padding: 10px 12px;
   border: 1px solid var(--line);
   background: rgba(245,245,238,0.14);
+}
+.trade-card-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.trade-card-actions .secondary-action,
+.trade-card-actions .primary {
+  width: 100%;
+}
+.ai-scan-button,
+.take-trade-button {
+  min-width: 0;
+}
+.ai-consensus {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(111, 208, 212, 0.08);
+}
+.ai-consensus-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.ai-consensus-head span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ai-consensus-head b {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+.ai-consensus.decision-approve { border-color: rgba(20, 92, 56, 0.4); }
+.ai-consensus.decision-reject { border-color: rgba(125, 40, 37, 0.42); }
+.ai-consensus.decision-wait,
+.ai-consensus.decision-reduce_size { border-color: rgba(128, 99, 21, 0.42); }
+.ai-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 10px;
+}
+.ai-warning {
+  margin-top: 8px;
+  color: var(--amber);
 }
 
 .analysis-grid {

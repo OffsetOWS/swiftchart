@@ -1,15 +1,31 @@
 const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? "" : "http://localhost:8000");
 
-async function request(path, options) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || "Request failed");
+function friendlyErrorMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) return "Request failed. Please try again.";
+  if (/api\.hyperliquid\.xyz|Internal Server Error|Server error '500'|HTTPStatusError/i.test(text)) {
+    return "Hyperliquid market data is temporarily unavailable. Please try again shortly.";
   }
-  return response.json();
+  if (/Failed to fetch|NetworkError|Load failed/i.test(text)) {
+    return "Could not reach SwiftChart market data. Please check the backend and try again.";
+  }
+  return text;
+}
+
+async function request(path, options) {
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(friendlyErrorMessage(error.detail || response.statusText || "Request failed"));
+    }
+    return response.json();
+  } catch (error) {
+    throw new Error(friendlyErrorMessage(error.message));
+  }
 }
 
 export function getCandles({ exchange, symbol, timeframe }) {

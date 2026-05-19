@@ -10,6 +10,7 @@ import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
+import { scanWithGenLayer } from "./lib/genlayer.js";
 import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
@@ -34,7 +35,7 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [nightMode, setNightMode] = useState(true);
   const [clock, setClock] = useState("");
-  const [exchange, setExchange] = useState("hyperliquid");
+  const [exchange, setExchange] = useState("all");
   const [timeframe, setTimeframe] = useState("4h");
   const [symbol, setSymbol] = useState("SOLUSDT");
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });
@@ -47,6 +48,9 @@ export default function App() {
   const [takenSignalIds, setTakenSignalIds] = useState(new Set());
   const [paperTradeLoadingSignalId, setPaperTradeLoadingSignalId] = useState("");
   const [paperHistoryVersion, setPaperHistoryVersion] = useState(0);
+  const [aiResults, setAiResults] = useState({});
+  const [aiErrors, setAiErrors] = useState({});
+  const [aiLoadingSignalId, setAiLoadingSignalId] = useState("");
 
   function navigate(nextPath, { replace = false } = {}) {
     if (window.location.pathname !== nextPath) {
@@ -113,6 +117,27 @@ export default function App() {
     }
   }
 
+  async function scanWithAi(idea) {
+    const signalId = signalIdForIdea(idea);
+    setAiLoadingSignalId(signalId);
+    setNotice("");
+    setAiErrors((current) => ({ ...current, [signalId]: "" }));
+    try {
+      const result = await scanWithGenLayer(idea);
+      setAiResults((current) => ({ ...current, [signalId]: result }));
+      trackEvent("genlayer_ai_scan", {
+        symbol: idea.symbol,
+        timeframe: idea.timeframe,
+        direction: idea.direction,
+        decision: result.decision,
+      });
+    } catch (error) {
+      setAiErrors((current) => ({ ...current, [signalId]: "GenLayer scan failed. Try again." }));
+    } finally {
+      setAiLoadingSignalId("");
+    }
+  }
+
   function openPage(nextPage) {
     setPage(nextPage);
     if (nextPage === "dashboard") {
@@ -167,7 +192,7 @@ export default function App() {
 
   useEffect(() => {
     if (auth.loading) return;
-    if (isAppPage && !auth.isAuthenticated) {
+    if (isAppPage && !auth.isAuthenticated && auth.isSupabaseConfigured) {
       navigate("/launch", { replace: true });
     }
     if (isAuthPage && auth.isAuthenticated) {
@@ -298,7 +323,7 @@ export default function App() {
     );
   }
 
-  if (isAppPage && !auth.isAuthenticated) {
+  if (isAppPage && !auth.isAuthenticated && auth.isSupabaseConfigured) {
     return (
       <>
         <LaunchFlow />
@@ -378,6 +403,10 @@ export default function App() {
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
               getSignalId={signalIdForIdea}
+              onAiScan={scanWithAi}
+              aiResults={aiResults}
+              aiErrors={aiErrors}
+              aiLoadingSignalId={aiLoadingSignalId}
             />
           )}
           {page === "ideas" && (
@@ -393,6 +422,10 @@ export default function App() {
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
               getSignalId={signalIdForIdea}
+              onAiScan={scanWithAi}
+              aiResults={aiResults}
+              aiErrors={aiErrors}
+              aiLoadingSignalId={aiLoadingSignalId}
               compact
             />
           )}
@@ -408,6 +441,10 @@ export default function App() {
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
               getSignalId={signalIdForIdea}
+              onAiScan={scanWithAi}
+              aiResults={aiResults}
+              aiErrors={aiErrors}
+              aiLoadingSignalId={aiLoadingSignalId}
             />
           )}
           {page === "history" && <TradeHistory version={paperHistoryVersion} />}

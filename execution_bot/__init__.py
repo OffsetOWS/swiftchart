@@ -1,0 +1,1 @@
+"""SwiftChart execution bot package."""

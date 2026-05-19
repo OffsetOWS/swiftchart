@@ -102,9 +102,13 @@ APP_NAME=SwiftChart
 ENVIRONMENT=development
 DATABASE_URL=sqlite:///./swiftchart.db
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
+VARIATIONAL_ENABLED=false
+VARIATIONAL_API_BASE_URL=https://omni-client-api.prod.ap-northeast-1.variational.io
+VARIATIONAL_API_KEY=
+VARIATIONAL_CANDLES_PATH=/candles
 FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 LIVE_TRADING_ENABLED=false
-DEFAULT_EXCHANGE=hyperliquid
+DEFAULT_EXCHANGE=all
 DEFAULT_TIMEFRAME=4h
 DEFAULT_ACCOUNT_SIZE=10000
 DEFAULT_RISK_PER_TRADE=1
@@ -264,7 +268,7 @@ TELEGRAM_WEBHOOK_URL=
 TELEGRAM_WEBHOOK_SECRET=
 TELEGRAM_ALERT_CHAT_IDS=
 ALERTS_ENABLED=true
-ALERT_EXCHANGE=hyperliquid
+ALERT_EXCHANGE=all
 ALERT_TIMEFRAME=4h
 ALERT_SCAN_INTERVAL_SECONDS=1800
 ALERTS_RUN_SECRET=
@@ -278,9 +282,21 @@ DEFAULT_RISK_PER_TRADE=1
 DEFAULT_MIN_RR=2
 DEFAULT_MAX_OPEN_TRADES=3
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
+VARIATIONAL_ENABLED=false
+VARIATIONAL_API_BASE_URL=https://omni-client-api.prod.ap-northeast-1.variational.io
+VARIATIONAL_API_KEY=
+VARIATIONAL_CANDLES_PATH=/candles
 ```
 
-The current Hyperliquid candle connector uses public OHLCV endpoints. API key variables are included for future authenticated extensions, but live trading remains disabled.
+The current Hyperliquid candle connector uses public OHLCV endpoints. Variational market discovery uses the documented public `/metadata/stats` endpoint. Configure `VARIATIONAL_CANDLES_PATH` to the candle/OHLCV route available for your Variational API account; the public docs currently document market stats but not OHLCV candles.
+
+Local Variational scan smoke test:
+
+```bash
+VARIATIONAL_ENABLED=true \
+VARIATIONAL_CANDLES_PATH=/YOUR_VARIATIONAL_CANDLE_ROUTE \
+PYTHONPATH=backend bot/.venv/bin/python -c "import asyncio; from app.services.scanner import run_scan; print(asyncio.run(run_scan(exchange='all', timeframe='4h', force=True)))"
+```
 
 
 ### Telegram Trade Alerts

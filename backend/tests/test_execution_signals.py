@@ -29,6 +29,9 @@ def test_trade_idea_to_execution_signal_maps_long_to_buy():
     assert payload["confidence"] == 82
     assert payload["timeframe"] == "4h"
     assert payload["exchange"] == "hyperliquid"
+    assert payload["entry_status"] == "READY"
+    assert payload["move_maturity"] == "Early"
+    assert payload["exhaustion_risk"] == "Low"
     assert payload["signal_id"].startswith("swiftchart-")
 
 

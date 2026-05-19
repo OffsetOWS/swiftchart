@@ -22,6 +22,10 @@ python3 -m venv bot/.venv
 bot/.venv/bin/pip install --upgrade pip
 bot/.venv/bin/pip install -r bot/requirements.txt
 
+python3 -m venv execution_bot/.venv
+execution_bot/.venv/bin/pip install --upgrade pip
+execution_bot/.venv/bin/pip install -r execution_bot/requirements.txt
+
 echo "Installing frontend dependencies..."
 cd "$APP_DIR/frontend"
 npm install
@@ -62,6 +66,16 @@ server {
 
     location /health {
         proxy_pass http://127.0.0.1:8000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /execution/ {
+        rewrite ^/execution/(.*)\$ /\$1 break;
+        proxy_pass http://127.0.0.1:8100;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;

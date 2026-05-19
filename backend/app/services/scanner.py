@@ -61,9 +61,17 @@ def _risk(timeframe: str) -> RiskSettings:
 
 def normalize_exchange(exchange: str | None) -> str:
     requested = (exchange or get_settings().default_exchange).lower()
-    if requested == "all":
-        return "hyperliquid"
     return requested
+
+
+def selected_exchanges(exchange: str | None) -> list[str]:
+    normalized = normalize_exchange(exchange)
+    if normalized != "all":
+        return [normalized]
+    exchanges = ["hyperliquid"]
+    if get_settings().variational_enabled:
+        exchanges.append("variational")
+    return exchanges
 
 
 async def discover_scan_markets(exchange: str) -> list[dict]:
@@ -85,6 +93,15 @@ async def discover_scan_markets(exchange: str) -> list[dict]:
         seen.add(key)
         output.append({"exchange": selected_exchange, "symbol": symbol, "volume": market.get("volume"), "active": True})
     return output
+
+
+async def discover_all_scan_markets(exchange: str) -> list[dict]:
+    markets = []
+    for selected_exchange in selected_exchanges(exchange):
+        discovered = await discover_scan_markets(selected_exchange)
+        logger.info("%s markets found: %s", selected_exchange.title(), len(discovered))
+        markets.extend(discovered)
+    return markets
 
 
 def scan_window(exchange: str, markets: list[dict]) -> list[dict]:
@@ -172,8 +189,13 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             return cached[1]
 
         started = monotonic()
-        markets = await discover_scan_markets(selected_exchange)
-        scan_markets = scan_window(selected_exchange, markets)
+        markets = await discover_all_scan_markets(selected_exchange)
+        scan_markets = []
+        for current_exchange in selected_exchanges(selected_exchange):
+            exchange_markets = [market for market in markets if market["exchange"] == current_exchange]
+            selected_window = scan_window(current_exchange, exchange_markets)
+            logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
+            scan_markets.extend(selected_window)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
@@ -248,6 +270,14 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 "duration_seconds": duration,
                 "global_regime_score": global_score,
                 "breadth_above_ma_pct": breadth_above_ma_pct,
+                "by_exchange": {
+                    current_exchange: {
+                        "markets": len([market for market in markets if market["exchange"] == current_exchange]),
+                        "scan_window": len([market for market in scan_markets if market["exchange"] == current_exchange]),
+                        "valid_setups": len([idea for idea in ranked if idea.exchange == current_exchange]),
+                    }
+                    for current_exchange in selected_exchanges(selected_exchange)
+                },
             },
         }
         _scan_cache[key] = (monotonic(), result)
@@ -282,7 +312,7 @@ async def _scan_loop() -> None:
     await asyncio.sleep(5)
     while True:
         try:
-            await run_scan(exchange="hyperliquid", timeframe=get_settings().default_timeframe, force=True)
+            await run_scan(exchange="all", timeframe=get_settings().default_timeframe, force=True)
         except Exception:
             logger.exception("Background scan failed")
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)

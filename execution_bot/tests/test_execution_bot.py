@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from execution_bot.config import ExecutionSettings
+from execution_bot.indicators import atr
+from execution_bot.market_filter import evaluate_market
+from execution_bot.models import Candle, MarketSnapshot, SignalDecision, SignalIn
+from execution_bot.risk import build_execution_plan, risk_percent_for_signal, take_profit_levels
+from execution_bot.service import preflight_signal
+from execution_bot.service import _planning_balance
+from execution_bot.storage import init_db
+from execution_bot.telegram_bot import format_trade_alert
+
+
+@pytest.fixture()
+def settings(tmp_path, monkeypatch):
+    db_path = tmp_path / "execution.db"
+    monkeypatch.setenv("EXECUTION_DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("EXECUTION_EXCHANGE", "mock")
+    from execution_bot.config import get_execution_settings
+
+    get_execution_settings.cache_clear()
+    import execution_bot.storage as storage
+
+    storage._INITIALIZED = False
+    init_db()
+    return get_execution_settings()
+
+
+def sample_candles(count: int = 80) -> list[Candle]:
+    candles: list[Candle] = []
+    price = 100.0
+    now = datetime.now(timezone.utc)
+    for index in range(count):
+        price += 0.35
+        candles.append(
+            Candle(
+                timestamp=now - timedelta(minutes=(count - index) * 15),
+                open=price - 0.25,
+                high=price + 0.8,
+                low=price - 0.9,
+                close=price,
+                volume=1000 + index * 10,
+            )
+        )
+    return candles
+
+
+def test_signal_validation_rejects_low_confidence(settings):
+    signal = SignalIn(pair="BTC", side="BUY", entry=94500, confidence=50, timeframe="15m")
+    accepted, reason = preflight_signal(signal)
+    assert accepted is False
+    assert "below minimum" in reason
+
+
+def test_signal_validation_rejects_expired(settings):
+    signal = SignalIn(
+        pair="BTC",
+        side="BUY",
+        entry=94500,
+        confidence=90,
+        timeframe="15m",
+        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    accepted, reason = preflight_signal(signal)
+    assert accepted is False
+    assert "expired" in reason
+
+
+def test_small_runtime_balance_does_not_trigger_daily_loss_limit(settings, monkeypatch):
+    from execution_bot.storage import set_account_balance
+
+    set_account_balance(11)
+    signal = SignalIn(pair="BTC", side="BUY", entry=94500, confidence=90, timeframe="15m")
+
+    accepted, reason = preflight_signal(signal)
+
+    assert accepted is True
+    assert reason == "Preflight passed."
+
+
+def test_zero_synced_balance_uses_starting_balance_for_planning(settings):
+    from execution_bot.storage import set_account_balance
+
+    set_account_balance(0)
+
+    assert _planning_balance() == settings.starting_balance
+
+
+def test_zero_balance_sync_does_not_overwrite_positive_runtime_balance(settings):
+    from execution_bot.storage import account_balance, set_account_balance
+
+    set_account_balance(11)
+    set_account_balance(0)
+
+    assert account_balance() == 11
+
+
+def test_risk_reduces_after_three_losses(settings):
+    assert risk_percent_for_signal(96, 0, settings) == 5
+    assert risk_percent_for_signal(96, 3, settings) == 2.5
+
+
+def test_stop_loss_uses_wider_structure_stop(settings):
+    candles = sample_candles()
+    signal = SignalIn(pair="BTC", side="BUY", entry=candles[-1].close, confidence=90, timeframe="15m")
+    atr_value = atr(candles, 14)
+    plan = build_execution_plan(signal, candles, 100, 0, 0, atr_value, atr_value / signal.entry * 100, "trending", settings)
+    assert plan.stop_loss < signal.entry
+    assert plan.stop_distance == pytest.approx(signal.entry - plan.stop_loss)
+
+
+def test_leverage_caps_and_reduces_position(settings):
+    custom = ExecutionSettings(max_leverage=1, max_exposure_per_coin_percent=20, execution_database_url=settings.execution_database_url)
+    candles = sample_candles()
+    signal = SignalIn(pair="BTC", side="BUY", entry=100, confidence=99, timeframe="15m")
+    plan = build_execution_plan(signal, candles, 100, 0, 0, 1, 1, "trending", custom)
+    assert plan.leverage <= 1
+    assert plan.notional_value <= 20
+    assert plan.risk_amount <= 5
+
+
+def test_conservative_risk_cap_stays_at_half_percent(settings):
+    custom = ExecutionSettings(
+        base_risk_percent=0.5,
+        max_risk_percent=0.5,
+        max_leverage=3,
+        execution_database_url=settings.execution_database_url,
+    )
+
+    assert risk_percent_for_signal(99, 0, custom) == 0.5
+    assert custom.max_leverage == 3
+
+
+def test_tiny_account_can_allow_ten_dollar_hyperliquid_notional(settings):
+    custom = ExecutionSettings(
+        starting_balance=11,
+        max_exposure_per_coin_percent=100,
+        max_leverage=3,
+        execution_database_url=settings.execution_database_url,
+    )
+
+    assert custom.starting_balance * (custom.max_exposure_per_coin_percent / 100) >= custom.min_order_notional
+
+
+def test_hyperliquid_address_is_not_used_as_signing_secret(settings):
+    custom = ExecutionSettings(
+        hyperliquid_api_key="0x9c6500000000000000000000000000000000f070",
+        hyperliquid_api_secret="",
+        hyperliquid_private_key="",
+        execution_database_url=settings.execution_database_url,
+    )
+
+    assert custom.effective_hyperliquid_signing_secret == ""
+
+
+def test_take_profit_levels_are_r_based():
+    signal = SignalIn(pair="BTC", side="SELL", entry=100, confidence=90, timeframe="15m")
+    targets = take_profit_levels(signal, 10)
+    assert [target["target"] for target in targets] == [90, 80, 70]
+    assert [target["close_percent"] for target in targets] == [40, 30, 30]
+
+
+def test_market_filter_allows_low_adx_chop_as_context(settings):
+    flat = [
+        Candle(open=100, high=100.1, low=99.9, close=100, volume=1000, timestamp=datetime.now(timezone.utc) - timedelta(minutes=i))
+        for i in range(40)
+    ]
+    result = evaluate_market(MarketSnapshot(candles=flat, bid=99.99, ask=100.01), settings)
+    assert result.allowed is True
+    assert result.condition in {"choppy", "compression"}
+
+
+def test_market_filter_ignores_current_incomplete_candle_volume(settings):
+    candles = sample_candles(80)
+    candles.append(
+        Candle(
+            timestamp=datetime.now(timezone.utc),
+            open=candles[-1].close,
+            high=candles[-1].close + 0.1,
+            low=candles[-1].close - 0.1,
+            close=candles[-1].close,
+            volume=1,
+        )
+    )
+
+    result = evaluate_market(MarketSnapshot(candles=candles, bid=candles[-1].close * 0.9995, ask=candles[-1].close * 1.0005), settings)
+
+    assert result.allowed is True
+    assert result.volume_ratio > settings.min_volume_ratio
+    assert "Volume is too weak." not in result.reasons
+
+
+def test_rejected_signals_format_telegram_alert(settings):
+    signal = SignalIn(pair="BTC", side="BUY", entry=100, confidence=50, timeframe="15m")
+    decision = SignalDecision(accepted=False, reason="Rejected", signal=signal)
+
+    assert "SwiftChart Signal Rejected" in format_trade_alert(decision)
+    assert "Reason: Rejected" in format_trade_alert(decision)

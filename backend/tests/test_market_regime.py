@@ -3,9 +3,11 @@ from datetime import UTC, datetime, timedelta
 import pandas as pd
 
 from app.models.schemas import MarketRegimeSnapshot
+from app.models.schemas import LiquiditySweep
 from app.strategy.market_regime import detect_market_regime
 from app.models.schemas import RiskSettings, Zone
-from app.strategy.trade_ideas import _regime_adjustment, build_trade_ideas
+from app.strategy.support_resistance import average_true_range
+from app.strategy.trade_ideas import _regime_adjustment, _signal_quality_control, build_trade_ideas
 
 
 def candles_from_prices(prices: list[float]) -> pd.DataFrame:
@@ -110,7 +112,7 @@ def test_confirmed_bearish_transition_can_score_short_candidate():
     assert note and "Transition short allowed" in note
 
 
-def test_transition_to_bearish_builds_short_after_failed_reclaim():
+def test_transition_to_bearish_rejects_short_after_exhausted_dump():
     prices = [110 - idx * 0.18 for idx in range(80)] + [96, 94, 92, 91, 90]
     df = candles_from_prices(prices)
     snapshot = MarketRegimeSnapshot(
@@ -151,9 +153,9 @@ def test_transition_to_bearish_builds_short_after_failed_reclaim():
         snapshot,
     )
 
-    assert warning is None
-    assert any(idea.direction == "Short" for idea in ideas)
-    assert any(review.direction == "Short" and review.accepted for review in reviews)
+    assert warning
+    assert ideas == []
+    assert any(review.direction == "Short" and not review.accepted and "exhaustion filters" in review.reason for review in reviews)
 
 
 def test_bearish_bias_switch_on_support_break_lh_ll_and_momentum():
@@ -239,3 +241,57 @@ def test_reclaimed_high_quality_long_can_trade_against_bearish_structure():
     assert adjusted == 73
     assert penalty == -15
     assert note and "Counter-trend long allowed" in note
+
+
+def test_short_after_large_dump_is_rejected_as_exhausted():
+    prices = [104 - idx * 0.03 for idx in range(60)] + [101, 96, 91, 85, 79, 74, 71, 70.5, 70.2, 70.1]
+    df = candles_from_prices(prices)
+    atr = average_true_range(df)
+
+    quality = _signal_quality_control(
+        direction="Short",
+        df=df,
+        score=92,
+        regime="BREAKDOWN",
+        entry_low=float(df["close"].iloc[-1]),
+        entry_high=float(df["close"].iloc[-1]) + atr * 0.4,
+        atr=atr,
+        bullish_sweep=None,
+        bearish_sweep=None,
+    )
+
+    assert quality["status"] == "REJECTED_EXHAUSTED"
+    assert quality["risk"] == "High"
+    assert quality["maturity"] == "Exhausted"
+    assert quality["score"] <= 65
+    assert any("ATR" in reason or "RSI" in reason for reason in quality["reasons"])
+
+
+def test_downside_liquidity_sweep_reclaim_blocks_short_chase():
+    df = candles_from_prices([100 + idx * 0.02 for idx in range(80)])
+    atr = average_true_range(df)
+    sweep = LiquiditySweep(
+        direction="bullish",
+        swept_level=99,
+        candle_time=df["timestamp"].iloc[-2],
+        reclaim_price=101,
+        strength=0.8,
+        confirmation_status="confirmed",
+        sweep_quality_score=80,
+    )
+
+    quality = _signal_quality_control(
+        direction="Short",
+        df=df,
+        score=88,
+        regime="TRENDING_DOWN",
+        entry_low=float(df["close"].iloc[-1]),
+        entry_high=float(df["close"].iloc[-1]) + atr * 0.4,
+        atr=atr,
+        bullish_sweep=sweep,
+        bearish_sweep=None,
+    )
+
+    assert quality["status"] == "REJECTED_EXHAUSTED"
+    assert quality["score"] <= 60
+    assert any("liquidity sweep" in reason for reason in quality["reasons"])

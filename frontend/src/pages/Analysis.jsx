@@ -2,7 +2,22 @@ import { Search } from "lucide-react";
 import Chart from "../components/Chart.jsx";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 
-export default function Analysis({ state, setters, candles, analysis, loading, onAnalyze, onPaperTrade, takenSignalIds = new Set(), paperTradeLoadingSignalId = "", getSignalId }) {
+export default function Analysis({
+  state,
+  setters,
+  candles,
+  analysis,
+  loading,
+  onAnalyze,
+  onPaperTrade,
+  takenSignalIds = new Set(),
+  paperTradeLoadingSignalId = "",
+  getSignalId,
+  onAiScan,
+  aiResults = {},
+  aiErrors = {},
+  aiLoadingSignalId = "",
+}) {
   const { symbol, exchange, timeframe, risk } = state;
   const { setSymbol, setExchange, setTimeframe, setRisk } = setters;
 
@@ -19,6 +34,7 @@ export default function Analysis({ state, setters, candles, analysis, loading, o
           <label>Exchange</label>
           <select value={exchange} onChange={(event) => setExchange(event.target.value)}>
             <option value="hyperliquid">Hyperliquid</option>
+            <option value="variational">Variational</option>
           </select>
         </div>
         <div className="field">
@@ -85,6 +101,10 @@ export default function Analysis({ state, setters, candles, analysis, loading, o
                     onPaperTrade={onPaperTrade}
                     tradeTaken={takenSignalIds.has(signalId)}
                     paperTradeLoading={paperTradeLoadingSignalId === signalId}
+                    onAiScan={onAiScan}
+                    aiResult={aiResults[signalId]}
+                    aiError={aiErrors[signalId]}
+                    aiLoading={aiLoadingSignalId === signalId}
                   />
                 );
               })}

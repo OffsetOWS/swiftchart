@@ -25,7 +25,7 @@ export default function Auth() {
           <span>{auth.loading ? "Checking session" : "Continue with Google"}</span>
         </button>
 
-        {auth.error ? <p className="auth-error" role="alert">{auth.error}</p> : null}
+        {auth.error || auth.configError ? <p className="auth-error" role="alert">{auth.error || auth.configError}</p> : null}
 
         <ul className="auth-feature-list" aria-label="SwiftChart account features">
           {features.map((feature) => (
