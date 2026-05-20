@@ -1,4 +1,14 @@
-const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? "" : "http://localhost:8000");
+const configuredApiBase = import.meta.env.VITE_API_BASE || "";
+const isLocalApiBase = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(configuredApiBase);
+const isLocalApp =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+
+const API_BASE = configuredApiBase && (!isLocalApiBase || isLocalApp)
+  ? configuredApiBase
+  : isLocalApp
+    ? "http://127.0.0.1:8000"
+    : "";
 
 function friendlyErrorMessage(message) {
   const text = String(message || "").trim();
