@@ -1,17 +1,7 @@
-import { createClient } from "genlayer-js";
-import { localnet, studionet, testnetAsimov, testnetBradbury } from "genlayer-js/chains";
-
 const GENLAYER_CONTRACT_ENDPOINT = import.meta.env.VITE_GENLAYER_CONTRACT_ENDPOINT || "";
 const GENLAYER_CONTRACT_ADDRESS = import.meta.env.VITE_GENLAYER_CONTRACT_ADDRESS || "";
 const GENLAYER_CONTRACT_METHOD = "validate_signal";
 const GENLAYER_NETWORK = import.meta.env.VITE_GENLAYER_NETWORK || "studionet";
-
-const CHAINS = {
-  localnet,
-  studionet,
-  testnetAsimov,
-  testnetBradbury,
-};
 
 function setupScoreFor(signal) {
   const value = signal.setupScore ?? signal.setup_score ?? signal.confidence_score ?? 0;
@@ -41,7 +31,14 @@ async function callStudioContract(input) {
   if (!GENLAYER_CONTRACT_ADDRESS) {
     throw new Error("GenLayer contract address is not configured.");
   }
-  const chain = CHAINS[GENLAYER_NETWORK] || studionet;
+  const [{ createClient }, chains] = await Promise.all([
+    import("genlayer-js"),
+    import("genlayer-js/chains"),
+  ]);
+  const chain = chains[GENLAYER_NETWORK] || chains.studionet;
+  if (!chain) {
+    throw new Error(`Unsupported GenLayer network: ${GENLAYER_NETWORK}`);
+  }
   const client = createClient({ chain });
   const result = await client.readContract({
     address: GENLAYER_CONTRACT_ADDRESS,
