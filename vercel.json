@@ -12,11 +12,11 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.py"
+      "destination": "http://156.67.30.173/api/$1"
     },
     {
       "source": "/health",
-      "destination": "/api/index.py"
+      "destination": "http://156.67.30.173/health"
     },
     {
       "source": "/(.*)",
