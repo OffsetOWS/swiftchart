@@ -4,7 +4,7 @@ import logging
 from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
 from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
-from app.services.alert_dedupe import fresh_alerts
+from app.services.alert_dedupe import setup_fingerprint
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
@@ -27,6 +27,18 @@ async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
 
 async def _market_scan_symbols(exchange: str) -> list[str]:
     return DEFAULT_SCAN_LIST
+
+
+def _unique_display_ideas(ideas: list) -> list:
+    seen = set()
+    unique = []
+    for idea in ideas:
+        key = setup_fingerprint(idea)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(idea)
+    return unique
 
 
 def higher_timeframes_for(timeframe: str) -> list[str]:
@@ -166,7 +178,7 @@ async def top_ideas(
         result = await cached_top_ideas(selected_exchange, timeframe)
         return {
             **result,
-            "ideas": fresh_alerts(result.get("ideas", []), namespace="dashboard", mark=True),
+            "ideas": _unique_display_ideas(result.get("ideas", [])),
         }
 
     selected_exchanges = scan_selected_exchanges(selected_exchange)
@@ -205,8 +217,7 @@ async def top_ideas(
                     save_signal_reviews(analysis.rejected_signals)
             except Exception as exc:
                 errors.append({"exchange": selected_exchange, "symbol": symbol, "error": str(exc)})
-    ranked = sorted(ideas, key=lambda idea: idea.rank_score, reverse=True)[:5]
-    ranked = fresh_alerts(ranked, namespace="dashboard", mark=True)
+    ranked = _unique_display_ideas(sorted(ideas, key=lambda idea: idea.rank_score, reverse=True))[:5]
     saved_ids = save_trade_ideas(ranked)
     logger.info("Top ideas generated %s ranked ideas and saved %s for exchange=%s timeframe=%s", len(ranked), len(saved_ids), exchange, timeframe)
     return {
