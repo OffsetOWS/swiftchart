@@ -74,6 +74,24 @@ def selected_exchanges(exchange: str | None) -> list[str]:
     return exchanges
 
 
+def max_markets_for_timeframe(timeframe: str) -> int:
+    normalized = timeframe.lower()
+    if normalized in {"30m", "1h"}:
+        return 24
+    if normalized == "2h":
+        return 32
+    return MAX_MARKETS_PER_SCAN
+
+
+def max_candidates_for_timeframe(timeframe: str) -> int:
+    normalized = timeframe.lower()
+    if normalized in {"30m", "1h"}:
+        return 32
+    if normalized == "2h":
+        return 48
+    return 80
+
+
 async def discover_scan_markets(exchange: str) -> list[dict]:
     selected_exchange = normalize_exchange(exchange)
     output: list[dict] = []
@@ -104,16 +122,16 @@ async def discover_all_scan_markets(exchange: str) -> list[dict]:
     return markets
 
 
-def scan_window(exchange: str, markets: list[dict]) -> list[dict]:
-    if len(markets) <= MAX_MARKETS_PER_SCAN:
+def scan_window(exchange: str, markets: list[dict], limit: int = MAX_MARKETS_PER_SCAN) -> list[dict]:
+    if len(markets) <= limit:
         return markets
     key = exchange.lower()
     start = _scan_offsets.get(key, 0) % len(markets)
-    end = start + MAX_MARKETS_PER_SCAN
+    end = start + limit
     selected = markets[start:end]
-    if len(selected) < MAX_MARKETS_PER_SCAN:
-        selected.extend(markets[: MAX_MARKETS_PER_SCAN - len(selected)])
-    _scan_offsets[key] = (start + MAX_MARKETS_PER_SCAN) % len(markets)
+    if len(selected) < limit:
+        selected.extend(markets[: limit - len(selected)])
+    _scan_offsets[key] = (start + limit) % len(markets)
     return selected
 
 
@@ -189,17 +207,19 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             return cached[1]
 
         started = monotonic()
+        market_limit = max_markets_for_timeframe(timeframe)
+        candidate_limit = max_candidates_for_timeframe(timeframe)
         markets = await discover_all_scan_markets(selected_exchange)
         scan_markets = []
         for current_exchange in selected_exchanges(selected_exchange):
             exchange_markets = [market for market in markets if market["exchange"] == current_exchange]
-            selected_window = scan_window(current_exchange, exchange_markets)
+            selected_window = scan_window(current_exchange, exchange_markets, market_limit)
             logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
             scan_markets.extend(selected_window)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
-        candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:80]
+        candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:candidate_limit]
         breadth_values = []
         global_scores = []
         for candidate in candidates:

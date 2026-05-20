@@ -16,6 +16,9 @@ function friendlyErrorMessage(message) {
   if (/api\.hyperliquid\.xyz|Internal Server Error|Server error '500'|HTTPStatusError/i.test(text)) {
     return "Hyperliquid market data is temporarily unavailable. Please try again shortly.";
   }
+  if (/FUNCTION_INVOCATION_TIMEOUT|Gateway Timeout|504/i.test(text)) {
+    return "SwiftChart scanner took too long to finish. Please try again in a moment.";
+  }
   if (/Failed to fetch|NetworkError|Load failed/i.test(text)) {
     return "Could not reach SwiftChart market data. Please check the backend and try again.";
   }
@@ -29,8 +32,15 @@ async function request(path, options) {
       ...options,
     });
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(friendlyErrorMessage(error.detail || response.statusText || "Request failed"));
+      const detail = await response.text().then((text) => {
+        if (!text) return response.statusText;
+        try {
+          return JSON.parse(text).detail || text;
+        } catch {
+          return text;
+        }
+      });
+      throw new Error(friendlyErrorMessage(detail || response.statusText || `Request failed (${response.status})`));
     }
     return response.json();
   } catch (error) {
