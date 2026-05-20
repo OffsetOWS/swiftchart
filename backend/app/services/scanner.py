@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from time import monotonic
+from time import monotonic, time
 
 import pandas as pd
 
@@ -122,11 +122,14 @@ async def discover_all_scan_markets(exchange: str) -> list[dict]:
     return markets
 
 
-def scan_window(exchange: str, markets: list[dict], limit: int = MAX_MARKETS_PER_SCAN) -> list[dict]:
+def scan_window(exchange: str, markets: list[dict], limit: int = MAX_MARKETS_PER_SCAN, *, timeframe: str = "4h") -> list[dict]:
     if len(markets) <= limit:
         return markets
-    key = exchange.lower()
-    start = _scan_offsets.get(key, 0) % len(markets)
+    key = f"{exchange.lower()}:{timeframe.lower()}"
+    slot = int(time() // SCAN_INTERVAL_SECONDS)
+    timeframe_seed = sum(ord(char) for char in timeframe.lower())
+    default_start = ((slot + timeframe_seed) * limit) % len(markets)
+    start = _scan_offsets.get(key, default_start) % len(markets)
     end = start + limit
     selected = markets[start:end]
     if len(selected) < limit:
@@ -213,7 +216,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         scan_markets = []
         for current_exchange in selected_exchanges(selected_exchange):
             exchange_markets = [market for market in markets if market["exchange"] == current_exchange]
-            selected_window = scan_window(current_exchange, exchange_markets, market_limit)
+            selected_window = scan_window(current_exchange, exchange_markets, market_limit, timeframe=timeframe)
             logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
             scan_markets.extend(selected_window)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
