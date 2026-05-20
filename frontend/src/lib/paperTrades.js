@@ -1,10 +1,4 @@
-import { isSupabaseConfigured, supabase } from "./supabase.js";
-
-function ensureSupabase() {
-  if (!isSupabaseConfigured || !supabase) {
-    throw new Error("Supabase is not configured yet.");
-  }
-}
+import { createPaperTrade, getPaperTrades } from "./api.js";
 
 function numberOrNull(value) {
   if (value === undefined || value === null || value === "") return null;
@@ -12,15 +6,40 @@ function numberOrNull(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function isMissingTable(error) {
-  return error?.code === "42P01" || error?.code === "PGRST205" || String(error?.message || "").includes("paper_trades");
+function notesForIdea(idea, userId) {
+  return JSON.stringify({
+    user_id: userId,
+    signal_id: signalIdForIdea(idea),
+    risk_reward: numberOrNull(idea.risk_reward_ratio),
+    confidence: numberOrNull(idea.confidence_score ?? idea.setup_score),
+    market_bias: idea.regime_bias || idea.regime_label || idea.market_regime || idea.trend_alignment || null,
+    setup_score: numberOrNull(idea.setup_score),
+    reason: idea.reason || null,
+  });
 }
 
-function paperTradeSetupError(error) {
-  if (isMissingTable(error)) {
-    return new Error("Supabase paper_trades table is not set up yet. Run supabase/paper_trades.sql in the Supabase SQL Editor.");
+function parseNotes(notes) {
+  if (!notes) return {};
+  try {
+    return JSON.parse(notes);
+  } catch {
+    return {};
   }
-  return new Error(error?.message || "Paper trade request failed.");
+}
+
+function normalizeTrade(row) {
+  const notes = parseNotes(row.notes);
+  return {
+    ...row,
+    signal_id: notes.signal_id || null,
+    entry_price: row.entry_price,
+    take_profit: row.take_profit_1,
+    risk_reward: notes.risk_reward ?? null,
+    confidence: notes.confidence ?? notes.setup_score ?? null,
+    market_bias: notes.market_bias ?? null,
+    result: row.result || (row.status === "closed" ? "closed" : "open"),
+    pnl: row.pnl ?? null,
+  };
 }
 
 export function signalIdForIdea(idea) {
@@ -44,81 +63,36 @@ export function ideaToPaperTrade(idea, userId) {
   const entryZone = Array.isArray(idea.entry_zone) ? idea.entry_zone : [idea.entry_price, idea.entry_price];
   const entry = (Number(entryZone[0]) + Number(entryZone[1])) / 2;
   return {
-    user_id: userId,
-    signal_id: signalIdForIdea(idea),
     symbol: idea.symbol,
     exchange: idea.exchange || "hyperliquid",
-    timeframe: idea.timeframe || null,
-    direction: String(idea.direction || "").toLowerCase(),
+    timeframe: idea.timeframe || "4h",
+    direction: idea.direction,
     entry_price: numberOrNull(entry),
     stop_loss: numberOrNull(idea.stop_loss),
-    take_profit: numberOrNull(idea.take_profit_1),
+    take_profit_1: numberOrNull(idea.take_profit_1),
     take_profit_2: numberOrNull(idea.take_profit_2),
-    risk_reward: numberOrNull(idea.risk_reward_ratio),
-    confidence: numberOrNull(idea.confidence_score ?? idea.setup_score),
-    market_bias: idea.regime_bias || idea.regime_label || idea.market_regime || idea.trend_alignment || null,
-    status: "open",
-    pnl: null,
-    result: "open",
-    source: "signal",
-    paper_trade: true,
+    size: numberOrNull(idea.position_size_units) || 0,
+    notes: notesForIdea(idea, userId),
   };
 }
 
 export async function createPaperTradeFromSignal(idea, userId) {
-  ensureSupabase();
   const payload = ideaToPaperTrade(idea, userId);
-  const { data, error } = await supabase.from("paper_trades").insert(payload).select("*").single();
-  if (error) {
-    if (error.code === "23505") {
-      return getPaperTradeBySignal(userId, payload.signal_id);
-    }
-    throw paperTradeSetupError(error);
-  }
-  return data;
+  return normalizeTrade(await createPaperTrade(payload));
 }
 
-export async function getPaperTradeBySignal(userId, signalId) {
-  ensureSupabase();
-  const { data, error } = await supabase
-    .from("paper_trades")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("signal_id", signalId)
-    .maybeSingle();
-  if (error) throw paperTradeSetupError(error);
-  return data;
+export async function listPaperTrades(_userId) {
+  const trades = await getPaperTrades();
+  return (trades || []).map(normalizeTrade);
 }
 
-export async function listPaperTrades(userId) {
-  ensureSupabase();
-  const { data, error } = await supabase
-    .from("paper_trades")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-  if (error) throw paperTradeSetupError(error);
-  return data || [];
-}
-
-export async function listPaperTradesForSignals(userId, signalIds) {
-  ensureSupabase();
+export async function listPaperTradesForSignals(_userId, signalIds) {
   if (!signalIds.length) return [];
-  const { data, error } = await supabase
-    .from("paper_trades")
-    .select("id, signal_id, status")
-    .eq("user_id", userId)
-    .in("signal_id", signalIds);
-  if (error) {
-    if (isMissingTable(error)) return [];
-    throw paperTradeSetupError(error);
-  }
-  return data || [];
+  const wanted = new Set(signalIds);
+  const trades = await listPaperTrades(_userId);
+  return trades.filter((trade) => trade.signal_id && wanted.has(trade.signal_id));
 }
 
-export async function updatePaperTradeStatus(tradeId, updates) {
-  ensureSupabase();
-  const { data, error } = await supabase.from("paper_trades").update(updates).eq("id", tradeId).select("*").single();
-  if (error) throw paperTradeSetupError(error);
-  return data;
+export async function updatePaperTradeStatus() {
+  throw new Error("Paper trade status updates are handled by the backend trade history checker.");
 }
