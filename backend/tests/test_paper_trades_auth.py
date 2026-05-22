@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.main import app
+from app.utils.auth import verify_supabase_jwt
 
 
 def b64url(payload: bytes) -> str:
@@ -76,3 +77,39 @@ def test_paper_trade_create_is_user_scoped_and_deduped(monkeypatch, tmp_path):
     assert second.status_code == 200
     assert second.json()["already_taken"] is True
     assert len(listed.json()) == 1
+
+
+def test_supabase_auth_api_fallback(monkeypatch):
+    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+    get_settings.cache_clear()
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"id": "user-456", "email": "user@example.com"}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, headers):
+            assert url == "https://example.supabase.co/auth/v1/user"
+            assert headers["apikey"] == "anon-key"
+            assert headers["Authorization"] == "Bearer access-token"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.utils.auth.httpx.Client", FakeClient)
+
+    user = verify_supabase_jwt("access-token")
+
+    assert user.id == "user-456"
+    assert user.email == "user@example.com"

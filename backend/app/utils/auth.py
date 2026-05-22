@@ -4,10 +4,12 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from fastapi import Depends, Header, HTTPException
 
 from app.config import get_settings
@@ -34,7 +36,7 @@ def _json_b64url(value: str) -> dict[str, Any]:
 def verify_supabase_jwt(token: str) -> CurrentUser:
     secret = get_settings().supabase_jwt_secret
     if not secret:
-        raise HTTPException(status_code=503, detail="Supabase JWT verification is not configured.")
+        return verify_supabase_token_with_auth_api(token)
     parts = token.split(".")
     if len(parts) != 3:
         raise HTTPException(status_code=401, detail="Invalid auth token.")
@@ -53,6 +55,43 @@ def verify_supabase_jwt(token: str) -> CurrentUser:
     if int(payload.get("exp") or 0) <= int(time.time()):
         raise HTTPException(status_code=401, detail="Auth token expired.")
     user_id = str(payload.get("sub") or "")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Auth token is missing a user id.")
+    email = payload.get("email")
+    return CurrentUser(id=user_id, email=str(email) if email else None)
+
+
+def _supabase_auth_config() -> tuple[str, str]:
+    settings = get_settings()
+    supabase_url = settings.supabase_url or os.getenv("VITE_SUPABASE_URL", "")
+    supabase_anon_key = settings.supabase_anon_key or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+    if not supabase_url:
+        raise HTTPException(status_code=503, detail="Supabase auth verification is not configured.")
+    return supabase_url.rstrip("/"), supabase_anon_key
+
+
+def verify_supabase_token_with_auth_api(token: str) -> CurrentUser:
+    supabase_url, supabase_anon_key = _supabase_auth_config()
+    headers = {"Authorization": f"Bearer {token}"}
+    if supabase_anon_key:
+        headers["apikey"] = supabase_anon_key
+    try:
+        with httpx.Client(timeout=8) as client:
+            response = client.get(
+                f"{supabase_url}/auth/v1/user",
+                headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Supabase auth verification is temporarily unavailable.") from exc
+    if response.status_code in {401, 403}:
+        raise HTTPException(status_code=401, detail="Invalid auth token.")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=503, detail="Supabase auth verification failed.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="Supabase auth returned an invalid response.") from exc
+    user_id = str(payload.get("id") or "")
     if not user_id:
         raise HTTPException(status_code=401, detail="Auth token is missing a user id.")
     email = payload.get("email")
