@@ -113,3 +113,45 @@ def test_supabase_auth_api_fallback(monkeypatch):
 
     assert user.id == "user-456"
     assert user.email == "user@example.com"
+
+
+def test_supabase_auth_api_fallback_uses_token_issuer(monkeypatch):
+    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+    get_settings.cache_clear()
+    token = ".".join(
+        [
+            b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8")),
+            b64url(json.dumps({"iss": "https://project.supabase.co/auth/v1"}).encode("utf-8")),
+            "signature",
+        ]
+    )
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"id": "user-789"}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, headers):
+            assert url == "https://project.supabase.co/auth/v1/user"
+            assert "apikey" not in headers
+            assert headers["Authorization"] == f"Bearer {token}"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.utils.auth.httpx.Client", FakeClient)
+
+    user = verify_supabase_jwt(token)
+
+    assert user.id == "user-789"

@@ -61,9 +61,20 @@ def verify_supabase_jwt(token: str) -> CurrentUser:
     return CurrentUser(id=user_id, email=str(email) if email else None)
 
 
-def _supabase_auth_config() -> tuple[str, str]:
+def _supabase_url_from_token(token: str) -> str:
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise HTTPException(status_code=401, detail="Invalid auth token.")
+    payload = _json_b64url(parts[1])
+    issuer = str(payload.get("iss") or "").rstrip("/")
+    if not issuer.endswith("/auth/v1"):
+        raise HTTPException(status_code=503, detail="Supabase auth verification is not configured.")
+    return issuer.removesuffix("/auth/v1")
+
+
+def _supabase_auth_config(token: str) -> tuple[str, str]:
     settings = get_settings()
-    supabase_url = settings.supabase_url or os.getenv("VITE_SUPABASE_URL", "")
+    supabase_url = settings.supabase_url or os.getenv("VITE_SUPABASE_URL", "") or _supabase_url_from_token(token)
     supabase_anon_key = settings.supabase_anon_key or os.getenv("VITE_SUPABASE_ANON_KEY", "")
     if not supabase_url:
         raise HTTPException(status_code=503, detail="Supabase auth verification is not configured.")
@@ -71,7 +82,7 @@ def _supabase_auth_config() -> tuple[str, str]:
 
 
 def verify_supabase_token_with_auth_api(token: str) -> CurrentUser:
-    supabase_url, supabase_anon_key = _supabase_auth_config()
+    supabase_url, supabase_anon_key = _supabase_auth_config(token)
     headers = {"Authorization": f"Bearer {token}"}
     if supabase_anon_key:
         headers["apikey"] = supabase_anon_key
