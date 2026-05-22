@@ -155,3 +155,34 @@ def test_supabase_auth_api_fallback_uses_token_issuer(monkeypatch):
     user = verify_supabase_jwt(token)
 
     assert user.id == "user-789"
+
+
+def test_supabase_auth_api_fallback_normalizes_url(monkeypatch):
+    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.setenv("SUPABASE_URL", "project.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+    get_settings.cache_clear()
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"id": "user-999"}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, headers):
+            assert url == "https://project.supabase.co/auth/v1/user"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.utils.auth.httpx.Client", FakeClient)
+
+    assert verify_supabase_jwt("access-token").id == "user-999"

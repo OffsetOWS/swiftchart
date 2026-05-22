@@ -72,9 +72,16 @@ def _supabase_url_from_token(token: str) -> str:
     return issuer.removesuffix("/auth/v1")
 
 
+def _normalize_supabase_url(value: str) -> str:
+    cleaned = value.strip().rstrip("/")
+    if cleaned and not cleaned.startswith(("http://", "https://")):
+        cleaned = f"https://{cleaned}"
+    return cleaned
+
+
 def _supabase_auth_config(token: str) -> tuple[str, str]:
     settings = get_settings()
-    supabase_url = settings.supabase_url or os.getenv("VITE_SUPABASE_URL", "") or _supabase_url_from_token(token)
+    supabase_url = _normalize_supabase_url(settings.supabase_url or os.getenv("VITE_SUPABASE_URL", "") or _supabase_url_from_token(token))
     supabase_anon_key = settings.supabase_anon_key or os.getenv("VITE_SUPABASE_ANON_KEY", "")
     if not supabase_url:
         raise HTTPException(status_code=503, detail="Supabase auth verification is not configured.")
