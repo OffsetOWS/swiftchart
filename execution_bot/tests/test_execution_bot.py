@@ -9,9 +9,11 @@ from execution_bot.indicators import atr
 from execution_bot.market_filter import evaluate_market
 from execution_bot.models import Candle, MarketSnapshot, SignalDecision, SignalIn
 from execution_bot.risk import build_execution_plan, risk_percent_for_signal, take_profit_levels
+from execution_bot.safety import validate_market_prechecks, validate_plan_prechecks
+from execution_bot.security import signature_for
 from execution_bot.service import preflight_signal
 from execution_bot.service import _planning_balance
-from execution_bot.storage import init_db
+from execution_bot.storage import claim_webhook_nonce, init_db
 from execution_bot.telegram_bot import format_trade_alert
 
 
@@ -192,6 +194,35 @@ def test_market_filter_ignores_current_incomplete_candle_volume(settings):
     assert result.allowed is True
     assert result.volume_ratio > settings.min_volume_ratio
     assert "Volume is too weak." not in result.reasons
+
+
+def test_execution_signature_and_nonce_replay_protection(settings):
+    body = b'{"pair":"BTCUSDT"}'
+    signature = signature_for("x" * 32, "1710000000", "nonce-1", body)
+
+    assert signature == signature_for("x" * 32, "1710000000", "nonce-1", body)
+    assert signature != signature_for("x" * 32, "1710000000", "nonce-2", body)
+    assert claim_webhook_nonce("nonce-1", 1710000000, 900) is True
+    assert claim_webhook_nonce("nonce-1", 1710000000, 900) is False
+
+
+def test_execution_prechecks_reject_low_volume_and_unlisted_symbol(settings):
+    signal = SignalIn(pair="DOGE", side="BUY", entry=100, confidence=90, timeframe="15m")
+    snapshot = MarketSnapshot(candles=sample_candles(), bid=99.95, ask=100.05, mark_price=100, perp_volume_24h=50_000)
+
+    reasons = validate_market_prechecks(signal, "DOGEUSDT", snapshot, settings)
+
+    assert any("EXECUTION_SYMBOL_ALLOWLIST" in reason for reason in reasons)
+    assert any("volume" in reason.lower() for reason in reasons)
+
+
+def test_execution_plan_prechecks_reject_excessive_risk(settings):
+    candles = sample_candles()
+    signal = SignalIn(pair="BTC", side="BUY", entry=100, confidence=99, timeframe="15m")
+    plan = build_execution_plan(signal, candles, 100, 0, 0, 1, 1, "trending", settings)
+    strict = settings.model_copy(update={"max_risk_per_trade_percent": 0.1})
+
+    assert any("Risk" in reason for reason in validate_plan_prechecks(plan, strict))
 
 
 def test_rejected_signals_format_telegram_alert(settings):

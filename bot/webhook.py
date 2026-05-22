@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import sys
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,12 +17,14 @@ from telegram import Update
 from telegram.ext import Application
 
 from app.services.scanner import start_background_scanner
+from app.utils.secure_logging import install_secure_logging
 from bot.alerts import alert_loop, run_alert_scan
 from bot.main import build_application
 
 logger = logging.getLogger(__name__)
 telegram_app: Application | None = None
 alert_task: asyncio.Task | None = None
+_alert_run_requests: dict[str, deque[float]] = defaultdict(deque)
 
 
 def webhook_url() -> str | None:
@@ -42,6 +46,7 @@ async def lifespan(_: FastAPI):
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
+    install_secure_logging()
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     telegram_app = build_application()
@@ -98,17 +103,31 @@ def check_alert_secret(secret: str | None, x_swiftchart_alert_secret: str | None
         raise HTTPException(status_code=403, detail="Invalid alert secret.")
 
 
+def check_alert_rate_limit(request: Request) -> None:
+    limit = int(os.getenv("ALERTS_RUN_RATE_LIMIT_PER_MINUTE", "6"))
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client = forwarded.split(",", 1)[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    now = time.monotonic()
+    bucket = _alert_run_requests[client]
+    while bucket and now - bucket[0] > 60:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+    bucket.append(now)
+
+
 @app.get("/alerts/run")
-async def run_alerts(secret: str | None = None, x_swiftchart_alert_secret: str | None = Header(default=None)):
+async def run_alerts(request: Request, secret: str | None = None, x_swiftchart_alert_secret: str | None = Header(default=None)):
     check_alert_secret(secret, x_swiftchart_alert_secret)
+    check_alert_rate_limit(request)
     if telegram_app is None:
         raise HTTPException(status_code=503, detail="Telegram app is not ready.")
     return await run_alert_scan(telegram_app.bot)
 
 
 @app.post("/alerts/run")
-async def run_alerts_post(secret: str | None = None, x_swiftchart_alert_secret: str | None = Header(default=None)):
-    return await run_alerts(secret=secret, x_swiftchart_alert_secret=x_swiftchart_alert_secret)
+async def run_alerts_post(request: Request, secret: str | None = None, x_swiftchart_alert_secret: str | None = Header(default=None)):
+    return await run_alerts(request=request, secret=secret, x_swiftchart_alert_secret=x_swiftchart_alert_secret)
 
 
 @app.post("/telegram/webhook")

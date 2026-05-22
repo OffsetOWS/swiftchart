@@ -12,10 +12,12 @@ import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
 import { scanWithGenLayer } from "./lib/genlayer.js";
 import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
+import { freshnessForIdea, liquidityForIdea } from "./lib/signalQuality.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
 
 const TELEGRAM_BOT_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || "https://t.me/SwiftChartBot";
+const HYPERLIQUID_REFERRAL_URL = import.meta.env.VITE_HYPERLIQUID_REFERRAL_URL || "";
 
 function trackEvent(name, properties = {}) {
   track(name, {
@@ -45,6 +47,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadingTopIdeas, setLoadingTopIdeas] = useState(false);
   const [notice, setNotice] = useState("");
+  const [noticeType, setNoticeType] = useState("info");
   const [takenSignalIds, setTakenSignalIds] = useState(new Set());
   const [paperTradeLoadingSignalId, setPaperTradeLoadingSignalId] = useState("");
   const [paperHistoryVersion, setPaperHistoryVersion] = useState(0);
@@ -63,10 +66,12 @@ export default function App() {
   async function refreshTopIdeas() {
     setLoadingTopIdeas(true);
     setNotice("");
+    setNoticeType("info");
     try {
       const data = await getTopIdeas({ exchange, timeframe });
       setTopIdeas(data.ideas || []);
     } catch (error) {
+      setNoticeType("error");
       setNotice(error.message);
     } finally {
       setLoadingTopIdeas(false);
@@ -76,6 +81,7 @@ export default function App() {
   async function runAnalysis() {
     setLoading(true);
     setNotice("");
+    setNoticeType("info");
     try {
       const [candleData, analysisData] = await Promise.all([
         getCandles({ exchange, symbol, timeframe }),
@@ -84,6 +90,7 @@ export default function App() {
       setCandles(candleData);
       setAnalysis(analysisData);
     } catch (error) {
+      setNoticeType("error");
       setNotice(error.message);
     } finally {
       setLoading(false);
@@ -92,25 +99,54 @@ export default function App() {
 
   async function paperTrade(idea) {
     if (!auth.isAuthenticated || !auth.user) {
+      setNoticeType("error");
       setNotice("Sign in to save this paper trade.");
       navigate("/auth");
       return;
     }
     const signalId = signalIdForIdea(idea);
     if (takenSignalIds.has(signalId)) return;
+    const freshness = freshnessForIdea(idea);
+    const liquidity = liquidityForIdea(idea);
+    if (freshness.stale) {
+      setNoticeType("error");
+      setNotice(`This signal is ${freshness.label.toLowerCase()}. Refresh the market before taking it.`);
+      return;
+    }
+    if (liquidity.blocking) {
+      setNoticeType("error");
+      setNotice("This signal has low liquidity. SwiftChart blocked it from being saved.");
+      return;
+    }
+    if (!Array.isArray(idea.entry_zone) || idea.entry_zone.length < 2 || !idea.stop_loss || !idea.take_profit_1 || !idea.take_profit_2) {
+      setNoticeType("error");
+      setNotice("This signal is missing trade data. Refresh and try again.");
+      return;
+    }
     setPaperTradeLoadingSignalId(signalId);
     setNotice("");
+    setNoticeType("info");
+    setTakenSignalIds((current) => new Set([...current, signalId]));
     try {
-      await createPaperTradeFromSignal(idea, auth.user.id);
-      setTakenSignalIds((current) => new Set([...current, signalId]));
+      const savedTrade = await createPaperTradeFromSignal(idea, auth.user.id, auth.session?.access_token);
       setPaperHistoryVersion((value) => value + 1);
-      setNotice("Trade added to history");
+      setNoticeType(savedTrade.already_taken ? "info" : "success");
+      setNotice(savedTrade.already_taken ? "Trade was already in your history." : "Trade saved to history.");
+      if (HYPERLIQUID_REFERRAL_URL && /^https:\/\/(app\.)?hyperliquid\.xyz\//i.test(HYPERLIQUID_REFERRAL_URL)) {
+        window.open(HYPERLIQUID_REFERRAL_URL, "_blank", "noopener,noreferrer");
+      }
       trackEvent("paper_trade_taken", {
         symbol: idea.symbol,
         timeframe: idea.timeframe,
         direction: idea.direction,
       });
     } catch (error) {
+      setTakenSignalIds((current) => {
+        const next = new Set(current);
+        next.delete(signalId);
+        return next;
+      });
+      setNoticeType("error");
       setNotice(error.message || "Could not save paper trade.");
     } finally {
       setPaperTradeLoadingSignalId("");
@@ -121,6 +157,7 @@ export default function App() {
     const signalId = signalIdForIdea(idea);
     setAiLoadingSignalId(signalId);
     setNotice("");
+    setNoticeType("info");
     setAiErrors((current) => ({ ...current, [signalId]: "" }));
     try {
       const result = await scanWithGenLayer(idea);
@@ -164,7 +201,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    listPaperTradesForSignals(auth.user.id, uniqueSignalIds)
+    listPaperTradesForSignals(auth.user.id, uniqueSignalIds, auth.session?.access_token)
       .then((rows) => {
         if (!cancelled) {
           setTakenSignalIds(new Set(rows.map((row) => row.signal_id)));
@@ -176,7 +213,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [auth.user?.id, topIdeas, analysis, paperHistoryVersion]);
+  }, [auth.user?.id, auth.session?.access_token, topIdeas, analysis, paperHistoryVersion]);
 
   useEffect(() => {
     runAnalysis();
@@ -386,8 +423,8 @@ export default function App() {
           </div>
         ) : nav}
 
-        {auth.error ? <div className="risk-strip">{auth.error}</div> : null}
-        {notice ? <div className="risk-strip">{notice}</div> : null}
+        {auth.error ? <div className="risk-strip error">{auth.error}</div> : null}
+        {notice ? <div className={`risk-strip ${noticeType}`} role="status">{notice}</div> : null}
 
         <div className="tab-stage" key={page}>
           {page === "dashboard" && (

@@ -93,6 +93,7 @@ Frontend:
 
 ```text
 VITE_API_BASE=http://localhost:8000
+VITE_HYPERLIQUID_REFERRAL_URL=
 ```
 
 Backend:
@@ -102,6 +103,11 @@ APP_NAME=SwiftChart
 ENVIRONMENT=development
 DATABASE_URL=sqlite:///./swiftchart.db
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
+SUPABASE_JWT_SECRET=
+WEBHOOK_SIGNING_SECRET=
+WEBHOOK_NONCE_TTL_SECONDS=900
+WEBHOOK_CLOCK_SKEW_SECONDS=300
+INTERNAL_API_SECRET=
 VARIATIONAL_ENABLED=false
 VARIATIONAL_API_BASE_URL=https://omni-client-api.prod.ap-northeast-1.variational.io
 VARIATIONAL_API_KEY=
@@ -114,6 +120,7 @@ DEFAULT_ACCOUNT_SIZE=10000
 DEFAULT_RISK_PER_TRADE=1
 DEFAULT_MIN_RR=2
 DEFAULT_MAX_OPEN_TRADES=3
+MIN_PERP_VOLUME_24H=100000
 TRADE_HISTORY_EXPIRY_BARS=12
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_URL=
@@ -145,7 +152,7 @@ Top Ideas uses a two-stage pipeline:
 1. Fast prefilter for volume, volatility, range position, and obvious chop.
 2. Full strategy scoring only on markets that pass the prefilter.
 
-The scanner discovers Hyperliquid markets dynamically, combines them with Binance when `exchange=all`, scans large market universes in rotating batches to avoid API rate limits, skips failed or incomplete markets safely, and logs scan metrics such as total markets, scan window size, filtered markets, analyzed markets, valid setups, and duration.
+The scanner discovers Hyperliquid markets dynamically, combines supported exchanges when `exchange=all`, excludes perp markets below `MIN_PERP_VOLUME_24H`, scans large market universes in rotating batches to avoid API rate limits, skips failed or incomplete markets safely, and logs scan metrics such as total markets, scan window size, filtered markets, analyzed markets, valid setups, and duration.
 
 Fast cached scan:
 
@@ -272,6 +279,7 @@ ALERT_EXCHANGE=all
 ALERT_TIMEFRAME=4h
 ALERT_SCAN_INTERVAL_SECONDS=1800
 ALERTS_RUN_SECRET=
+ALERTS_RUN_RATE_LIMIT_PER_MINUTE=6
 BOT_STATE_PATH=.swiftchart_bot_state.json
 HYPERLIQUID_API_KEY=
 APP_NAME=SwiftChart
@@ -281,6 +289,9 @@ DEFAULT_ACCOUNT_SIZE=10000
 DEFAULT_RISK_PER_TRADE=1
 DEFAULT_MIN_RR=2
 DEFAULT_MAX_OPEN_TRADES=3
+MIN_PERP_VOLUME_24H=100000
+API_RATE_LIMIT_PER_MINUTE=120
+SCANNER_RATE_LIMIT_PER_MINUTE=20
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 VARIATIONAL_ENABLED=false
 VARIATIONAL_API_BASE_URL=https://omni-client-api.prod.ap-northeast-1.variational.io
@@ -317,6 +328,7 @@ ALERT_EXCHANGE=hyperliquid
 ALERT_TIMEFRAME=4h
 ALERT_SCAN_INTERVAL_SECONDS=1800
 ALERTS_RUN_SECRET=choose_a_long_random_string
+ALERTS_RUN_RATE_LIMIT_PER_MINUTE=6
 ```
 
 You can also pin alert recipients with `TELEGRAM_ALERT_CHAT_IDS`, a comma-separated list of Telegram chat IDs. This is useful on free hosts where local state can reset.

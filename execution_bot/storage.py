@@ -113,9 +113,20 @@ def init_db() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS execution_webhook_nonces (
+                nonce TEXT PRIMARY KEY,
+                timestamp INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         connection.execute("INSERT OR IGNORE INTO execution_state (key, value) VALUES ('status', 'active')")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_execution_trades_status ON execution_trades(status)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_execution_signals_created_at ON execution_signals(created_at)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_execution_events_created_at ON execution_events(created_at)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_execution_webhook_nonces_created_at ON execution_webhook_nonces(created_at)")
         _ensure_trade_columns(connection)
     _INITIALIZED = True
 
@@ -322,6 +333,30 @@ def log_event(event_type: str, details: dict[str, Any] | str | None = None, trad
             "INSERT INTO execution_events (trade_id, event_type, details) VALUES (?, ?, ?)",
             (trade_id, event_type, payload),
         )
+
+
+def claim_webhook_nonce(nonce: str, timestamp: int, ttl_seconds: int) -> bool:
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with get_connection() as connection:
+            connection.execute("DELETE FROM execution_webhook_nonces WHERE created_at < ?", (cutoff,))
+            connection.execute(
+                "INSERT INTO execution_webhook_nonces (nonce, timestamp) VALUES (?, ?)",
+                (nonce, int(timestamp)),
+            )
+    except sqlite3.IntegrityError:
+        return False
+    return True
+
+
+def recent_event_count(event_type: str, window_seconds: int) -> int:
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).isoformat()
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) AS count FROM execution_events WHERE event_type = ? AND created_at >= ?",
+            (event_type, cutoff),
+        ).fetchone()
+    return int(row["count"] or 0)
 
 
 def record_trade(signal_key: str, plan: ExecutionPlan, order_id: str | None = None) -> int:

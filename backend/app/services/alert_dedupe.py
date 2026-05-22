@@ -84,7 +84,7 @@ def _rounded_price(value: float) -> str:
     return f"{round(float(value), precision):.{precision}f}"
 
 
-def setup_fingerprint(idea: TradeIdea) -> str:
+def _setup_shape_fingerprint(idea: TradeIdea) -> str:
     entry_low, entry_high = idea.entry_zone
     return "|".join(
         [
@@ -95,6 +95,11 @@ def setup_fingerprint(idea: TradeIdea) -> str:
             _rounded_price(idea.take_profit_1),
         ]
     )
+
+
+def setup_fingerprint(idea: TradeIdea) -> str:
+    candle_time = _iso(_latest_candle_time(idea)) or ""
+    return "|".join([_setup_shape_fingerprint(idea), candle_time])
 
 
 def alert_cooldown_minutes(timeframe: str) -> int:
@@ -128,6 +133,7 @@ def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: dateti
     bucket = _namespace(data, namespace)
     key = alert_dedupe_key(idea)
     fingerprint = setup_fingerprint(idea)
+    shape_fingerprint = _setup_shape_fingerprint(idea)
     latest_candle_time = _latest_candle_time(idea)
     record = bucket["keys"].get(key)
     current_time = now or datetime.now(UTC)
@@ -136,7 +142,7 @@ def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: dateti
         last_alert_time = _parse_dt(record.get("last_alert_time"))
         last_candle_time = _parse_dt(record.get("latest_candle_time"))
         same_candle = latest_candle_time is not None and last_candle_time == latest_candle_time
-        same_setup = record.get("fingerprint") == fingerprint
+        same_setup = record.get("fingerprint") == fingerprint or record.get("shape_fingerprint") == shape_fingerprint
         cooldown = timedelta(minutes=alert_cooldown_minutes(idea.timeframe))
         cooldown_active = bool(last_alert_time and cooldown.total_seconds() > 0 and current_time - last_alert_time < cooldown)
         previous_closed = str(record.get("status", "active")).upper() in {"CLOSED", "INVALIDATED", "TP_HIT", "SL_HIT"}
@@ -159,6 +165,7 @@ def mark_alert_sent(idea: TradeIdea, *, namespace: str = "alerts", status: str =
     bucket = _namespace(data, namespace)
     key = alert_dedupe_key(idea)
     fingerprint = setup_fingerprint(idea)
+    shape_fingerprint = _setup_shape_fingerprint(idea)
     current_time = now or datetime.now(UTC)
     bucket["keys"][key] = {
         "source": _source(idea),
@@ -166,6 +173,7 @@ def mark_alert_sent(idea: TradeIdea, *, namespace: str = "alerts", status: str =
         "timeframe": idea.timeframe.lower(),
         "direction": idea.direction.upper(),
         "fingerprint": fingerprint,
+        "shape_fingerprint": shape_fingerprint,
         "last_alert_time": _iso(current_time),
         "latest_candle_time": _iso(_latest_candle_time(idea)),
         "status": status,

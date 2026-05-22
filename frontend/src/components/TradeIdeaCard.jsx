@@ -1,4 +1,5 @@
-import { Activity, BrainCircuit, ShieldAlert, Zap } from "lucide-react";
+import { Activity, BrainCircuit, CheckCircle2, Clock3, Gauge, ShieldAlert, TrendingUp, Waves, Zap } from "lucide-react";
+import { confidenceLabelForIdea, freshnessForIdea, liquidityForIdea, regimeViewForIdea, statusForIdea } from "../lib/signalQuality.js";
 
 function fmt(value) {
   if (value === undefined || value === null) return "-";
@@ -21,41 +22,87 @@ export default function TradeIdeaCard({
   aiError = "",
   aiLoading = false,
 }) {
-  const directionClass = idea.direction.toLowerCase();
+  const directionClass = String(idea.direction || "").toLowerCase();
   const score = idea.setup_score ?? idea.confidence_score;
-  const regimeScore = idea.regime_score ?? null;
+  const entryStatus = String(idea.entry_status || "READY").trim().toUpperCase();
+  const freshness = freshnessForIdea(idea);
+  const liquidity = liquidityForIdea(idea);
+  const regime = regimeViewForIdea(idea);
+  const signalStatus = statusForIdea(idea);
+  const confidenceLabel = confidenceLabelForIdea(idea);
+  const blockedStatus = ["WAIT_FOR_RETEST", "REJECTED_EXHAUSTED", "REJECTED"].includes(entryStatus);
+  const canTakeTrade = !blockedStatus && !freshness.stale && !liquidity.blocking;
+  const whyThisSetup = idea.reason || "Clean setup with defined entry, stop, and targets.";
+  const trendLabel = idea.trend_alignment ? String(idea.trend_alignment).replace("-", " ") : regime.trend;
+  const volatilityWarning = idea.exhaustion_risk === "High" || entryStatus === "WAIT_FOR_RETEST" || freshness.status === "aging";
+  const takeTradeLabel = tradeTaken
+    ? "Trade Taken"
+    : paperTradeLoading
+      ? "Saving..."
+      : freshness.stale
+        ? "Signal Stale"
+        : liquidity.blocking
+          ? "Low Liquidity"
+          : entryStatus === "WAIT_FOR_RETEST"
+            ? "Wait for Retest"
+            : entryStatus === "REJECTED_EXHAUSTED"
+              ? "Rejected"
+              : "Take Trade";
 
   return (
-    <article className={`idea-card ${directionClass}`}>
+    <article className={`idea-card signal-card ${directionClass} status-${signalStatus}`}>
       <div className="idea-top">
-        <div>
-          <h3>{idea.symbol} {idea.timeframe}</h3>
-          <span className="exchange-label">{sourceLabel(idea.source || idea.exchange)}</span>
-          <p>{idea.reason}</p>
+        <div className="signal-title-block">
+          <span className="exchange-label">{sourceLabel(idea.source || idea.exchange)} · {idea.timeframe}</span>
+          <h3>{idea.symbol}</h3>
+          <div className="signal-chip-row">
+            <span className={`regime-badge ${regime.tone}`}><Waves size={13} /> {regime.label}</span>
+            <span className={`freshness-pill ${freshness.status}`}><Clock3 size={13} /> {freshness.label}</span>
+            <span className={`liquidity-pill ${liquidity.status}`}><Gauge size={13} /> {liquidity.label}</span>
+          </div>
         </div>
-        <span className={`badge ${directionClass}`}>
-          <Activity size={14} /> {idea.direction}
+        <span className={`direction-badge ${directionClass}`}>
+          <Activity size={15} /> {String(idea.direction || "").toUpperCase()}
         </span>
+      </div>
+      <div className="signal-score-row">
+        <div>
+          <span>{confidenceLabel}</span>
+          <b>{Math.round(score || 0)}<small>/100</small></b>
+        </div>
+        <div>
+          <span>Risk / Reward</span>
+          <b>{idea.risk_reward_ratio}R</b>
+        </div>
+        <div>
+          <span>Trend</span>
+          <b>{trendLabel}</b>
+        </div>
       </div>
       <div className="confidence-rail" aria-hidden="true">
         <span style={{ width: `${Math.min(100, Math.max(0, score))}%` }} />
       </div>
-      <div className="metric-grid">
-        <div className="metric"><span>Setup score</span><b>{score}/100</b></div>
-        <div className="metric"><span>Grade</span><b>{idea.setup_grade || "Valid Setup"}</b></div>
-        <div className="metric"><span>Market regime</span><b>{idea.regime_label || idea.market_regime || "-"} {regimeScore !== null ? `(${regimeScore > 0 ? "+" : ""}${regimeScore})` : ""}</b></div>
-        <div className="metric"><span>Trade bias</span><b>{idea.trend_alignment || "-"}</b></div>
-        <div className="metric"><span>HTF bias</span><b>{idea.higher_timeframe_bias || "HTF_NEUTRAL"}</b></div>
-        <div className="metric"><span>Regime adjustment</span><b>{idea.regime_confidence_adjustment > 0 ? "+" : ""}{idea.regime_confidence_adjustment || 0}</b></div>
-        <div className="metric"><span>Move maturity</span><b>{idea.move_maturity || "Early"}</b></div>
-        <div className="metric"><span>Entry status</span><b>{idea.entry_status || "READY"}</b></div>
-        <div className="metric"><span>Exhaustion risk</span><b>{idea.exhaustion_risk || "Low"}</b></div>
+      <div className="trade-level-grid">
         <div className="metric"><span>Entry zone</span><b>{fmt(idea.entry_zone[0])} - {fmt(idea.entry_zone[1])}</b></div>
         <div className="metric"><span>Stop loss</span><b>{fmt(idea.stop_loss)}</b></div>
         <div className="metric"><span>Take profit 1</span><b>{fmt(idea.take_profit_1)}</b></div>
         <div className="metric"><span>Take profit 2</span><b>{fmt(idea.take_profit_2)}</b></div>
-        <div className="metric"><span>Risk / reward</span><b>{idea.risk_reward_ratio}R</b></div>
-        <div className="metric"><span>Confidence</span><b>{idea.confidence_score}%</b></div>
+      </div>
+      <section className="setup-story">
+        <div>
+          <span><TrendingUp size={14} /> Why this setup?</span>
+          <p>{whyThisSetup}</p>
+        </div>
+        <div>
+          <span><ShieldAlert size={14} /> Invalidation</span>
+          <p>{idea.invalid_condition}</p>
+        </div>
+      </section>
+      <div className="signal-context-row">
+        <span>Regime confidence: {regime.confidence === null ? "Limited" : `${regime.confidence}%`}</span>
+        <span>{freshness.detail}</span>
+        <span>{liquidity.detail}</span>
+        {volatilityWarning ? <span className="warning">Volatility caution</span> : null}
       </div>
       {idea.reversal_confirmations?.length ? (
         <p className="confirmation-list"><b>Confirmations:</b> {idea.reversal_confirmations.join(", ")}</p>
@@ -63,7 +110,6 @@ export default function TradeIdeaCard({
       {idea.downgraded_reasons?.length ? (
         <p className="confirmation-list"><b>Downgraded:</b> {idea.downgraded_reasons.join(" ")}</p>
       ) : null}
-      <p style={{ marginTop: 12 }}><ShieldAlert size={14} /> {idea.invalid_condition}</p>
       {(onAiScan || onPaperTrade) ? (
         <div className="trade-card-actions">
           {onAiScan && (
@@ -76,9 +122,9 @@ export default function TradeIdeaCard({
               className="primary take-trade-button"
               type="button"
               onClick={() => onPaperTrade(idea)}
-              disabled={tradeTaken || paperTradeLoading || idea.entry_status !== "READY"}
+              disabled={tradeTaken || paperTradeLoading || !canTakeTrade}
             >
-              <Zap size={16} /> {tradeTaken ? "Trade Taken" : paperTradeLoading ? "Saving..." : idea.entry_status === "WAIT_FOR_RETEST" ? "Wait for Retest" : idea.entry_status === "REJECTED_EXHAUSTED" ? "Rejected" : "Take Trade"}
+              {tradeTaken ? <CheckCircle2 size={16} /> : <Zap size={16} />} {takeTradeLabel}
             </button>
           )}
         </div>

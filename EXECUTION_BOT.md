@@ -27,7 +27,10 @@ Add these to `/opt/swiftchart/.env`:
 
 ```bash
 EXECUTION_DATABASE_URL=sqlite:////opt/swiftchart/execution_bot.db
-EXECUTION_WEBHOOK_SECRET=change-this-secret
+EXECUTION_WEBHOOK_SECRET=change-this-secret-with-at-least-32-random-chars
+EXECUTION_CORS_ORIGINS=
+EXECUTION_AUTH_CLOCK_SKEW_SECONDS=300
+EXECUTION_NONCE_TTL_SECONDS=900
 EXECUTION_AUTOTRADE_ENABLED=false
 EXECUTION_SIGNAL_WEBHOOK_URL=http://127.0.0.1:8100/webhook/signal
 EXECUTION_MODE=paper
@@ -49,9 +52,16 @@ MAX_LEVERAGE=5
 MAX_CONSECUTIVE_LOSSES=3
 MIN_CONFIDENCE_TO_TRADE=75
 MIN_ORDER_NOTIONAL=10
+MIN_PERP_VOLUME_24H=100000
+EXECUTION_SYMBOL_ALLOWLIST=BTCUSDT,ETHUSDT,SOLUSDT
+MAX_ENTRY_DEVIATION_PERCENT=0.75
+MAX_SIGNAL_CANDLE_AGE_SECONDS=900
+MAX_RISK_PER_TRADE_PERCENT=5
+CIRCUIT_BREAKER_MAX_FAILURES=3
+CIRCUIT_BREAKER_WINDOW_SECONDS=900
 ```
 
-Use `EXECUTION_EXCHANGE=hyperliquid` when you want market data from Hyperliquid.
+Execution webhooks and control routes require HMAC headers: `X-SwiftChart-Timestamp`, `X-SwiftChart-Nonce`, and `X-SwiftChart-Signature`. The signature is `HMAC_SHA256(EXECUTION_WEBHOOK_SECRET, "{timestamp}.{nonce}." + raw_body)`. Use `EXECUTION_EXCHANGE=hyperliquid` when you want market data from Hyperliquid.
 
 For Hyperliquid API wallet credentials, prefer:
 

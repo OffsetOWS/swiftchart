@@ -66,6 +66,7 @@ async def get_markets_cached(exchange: str) -> list[dict]:
                     "exchange": normalized,
                     "active": market.get("active", True),
                     "volume": market.get("volume"),
+                    "perpVolume24h": market.get("perpVolume24h", market.get("perp_volume_24h", market.get("volume_24h", market.get("volume")))),
                 }
             )
         _market_cache[normalized] = (monotonic(), normalized_markets)

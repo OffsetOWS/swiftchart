@@ -7,6 +7,7 @@ from execution_bot.exchanges import get_execution_exchange
 from execution_bot.market_filter import evaluate_market
 from execution_bot.models import BotStatus, SignalDecision, SignalIn
 from execution_bot.risk import build_execution_plan
+from execution_bot.safety import validate_market_prechecks, validate_plan_prechecks
 from execution_bot.storage import (
     account_balance,
     claim_signal,
@@ -19,6 +20,7 @@ from execution_bot.storage import (
     open_trade_count,
     record_signal,
     record_trade,
+    recent_event_count,
     close_trade,
     list_open_trades,
     runtime_base_risk_percent,
@@ -60,6 +62,8 @@ def preflight_signal(signal: SignalIn) -> tuple[bool, str]:
         return False, "Weekly loss limit reached."
     if consecutive_losses() >= settings.max_consecutive_losses:
         return False, f"{settings.max_consecutive_losses} consecutive losses reached; manual resume required."
+    if recent_event_count("execution_error", settings.circuit_breaker_window_seconds) >= settings.circuit_breaker_max_failures:
+        return False, "Execution circuit breaker is active after repeated recent failures."
     return True, "Preflight passed."
 
 
@@ -93,6 +97,14 @@ async def process_signal(signal: SignalIn) -> SignalDecision:
     symbol = f"{signal.pair}{settings.execution_quote_asset}" if not signal.pair.endswith(settings.execution_quote_asset) else signal.pair
     exchange = get_execution_exchange(settings.execution_exchange)
     snapshot = await exchange.get_market_snapshot(symbol, signal.timeframe)
+    precheck_reasons = validate_market_prechecks(signal, symbol, snapshot, settings)
+    if precheck_reasons:
+        reason = "; ".join(precheck_reasons)
+        decision = SignalDecision(accepted=False, reason=reason, signal=signal)
+        log_event("rejected_signal", {"pair": signal.pair, "reason": reason, "stage": "execution_precheck"})
+        record_signal(decision)
+        await _notify(decision)
+        return decision
     market = evaluate_market(snapshot, settings)
     if not market.allowed:
         decision = SignalDecision(
@@ -125,10 +137,11 @@ async def process_signal(signal: SignalIn) -> SignalDecision:
         record_signal(decision)
         await _notify(decision)
         return decision
-    if plan.notional_value < settings.min_order_notional:
-        reason = f"Order value ${plan.notional_value:.2f} is below the ${settings.min_order_notional:.2f} exchange minimum."
+    plan_precheck_reasons = validate_plan_prechecks(plan, settings)
+    if plan_precheck_reasons:
+        reason = "; ".join(plan_precheck_reasons)
         decision = SignalDecision(accepted=False, reason=reason, signal=signal, plan=plan, metadata=market.model_dump())
-        log_event("rejected_signal", {"pair": signal.pair, "reason": reason, "notional_value": plan.notional_value})
+        log_event("rejected_signal", {"pair": signal.pair, "reason": reason, "notional_value": plan.notional_value, "risk_percent": plan.risk_percent})
         record_signal(decision)
         await _notify(decision)
         return decision

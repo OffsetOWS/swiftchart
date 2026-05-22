@@ -29,6 +29,7 @@ from bot.handlers import (  # noqa: E402
 from bot.alerts import alert_loop  # noqa: E402
 from app.services.scanner import start_background_scanner  # noqa: E402
 from app.utils.database import init_db  # noqa: E402
+from app.utils.secure_logging import install_secure_logging  # noqa: E402
 
 
 async def post_init(application: Application) -> None:
@@ -65,6 +66,7 @@ def main() -> None:
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
+    install_secure_logging()
     logging.getLogger("httpx").setLevel(logging.WARNING)
     asyncio.set_event_loop(asyncio.new_event_loop())
     application = build_application()

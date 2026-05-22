@@ -241,6 +241,7 @@ class Market(BaseModel):
 
 
 class PaperTradeCreate(BaseModel):
+    signal_id: str = Field(..., min_length=8, max_length=240)
     symbol: str
     timeframe: str
     exchange: str = "hyperliquid"
@@ -250,13 +251,22 @@ class PaperTradeCreate(BaseModel):
     take_profit_1: float
     take_profit_2: float
     size: float
+    risk_reward: float | None = None
+    setup_score: float | None = None
+    confidence: float | None = None
+    market_bias: str | None = None
     notes: str | None = None
 
 
 class PaperTrade(PaperTradeCreate):
     id: int
-    status: Literal["open", "closed"] = "open"
+    user_id: str
+    status: Literal["taken", "open", "tp_hit", "sl_hit", "closed"] = "taken"
+    result: Literal["open", "win", "loss", "closed"] = "open"
+    pnl: float | None = None
     created_at: datetime
+    taken_at: datetime | None = None
+    already_taken: bool = False
 
 
 class TradeHistoryRecord(BaseModel):

@@ -82,15 +82,36 @@ class HyperliquidExecutionExchange(ExecutionExchange):
             for row in rows
         ]
         bid = ask = None
+        mark_price = None
         try:
             mids = await self._post_info({"type": "allMids"})
             if isinstance(mids, dict) and coin in mids:
                 mid = float(mids[coin])
+                mark_price = mid
                 bid = mid * 0.9995
                 ask = mid * 1.0005
         except httpx.HTTPError:
             pass
-        return MarketSnapshot(candles=candles, bid=bid, ask=ask)
+        return MarketSnapshot(candles=candles, bid=bid, ask=ask, mark_price=mark_price, perp_volume_24h=await self._perp_volume_24h(coin))
+
+    async def _perp_volume_24h(self, coin: str) -> float | None:
+        try:
+            data = await self._post_info({"type": "metaAndAssetCtxs"})
+        except Exception:
+            return None
+        if not isinstance(data, list) or len(data) < 2:
+            return None
+        universe = data[0].get("universe", []) if isinstance(data[0], dict) else []
+        contexts = data[1] if isinstance(data[1], list) else []
+        for index, item in enumerate(universe):
+            if str(item.get("name", "")).upper() != coin.upper():
+                continue
+            context = contexts[index] if index < len(contexts) and isinstance(contexts[index], dict) else {}
+            try:
+                return float(context.get("dayNtlVlm"))
+            except (TypeError, ValueError):
+                return None
+        return None
 
     async def place_order(self, plan: ExecutionPlan) -> dict:
         if not self.settings.live_enabled:

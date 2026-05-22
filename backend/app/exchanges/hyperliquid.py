@@ -62,17 +62,29 @@ class HyperliquidClient(ExchangeClient):
         return []
 
     async def get_markets(self) -> list[dict]:
-        data = await self._post_info({"type": "meta"})
-        universe = data.get("universe", []) if isinstance(data, dict) else []
-        return [
-            {
-                "symbol": f"{item['name']}USDT",
-                "base_asset": item["name"],
-                "quote_asset": "USDT",
-                "exchange": self.name,
-            }
-            for item in universe
-        ]
+        data = await self._post_info({"type": "metaAndAssetCtxs"})
+        if isinstance(data, list) and len(data) >= 2:
+            universe = data[0].get("universe", []) if isinstance(data[0], dict) else []
+            asset_contexts = data[1] if isinstance(data[1], list) else []
+        else:
+            meta = data if isinstance(data, dict) else {}
+            universe = meta.get("universe", [])
+            asset_contexts = []
+        markets = []
+        for index, item in enumerate(universe):
+            context = asset_contexts[index] if index < len(asset_contexts) and isinstance(asset_contexts[index], dict) else {}
+            markets.append(
+                {
+                    "symbol": f"{item['name']}USDT",
+                    "base_asset": item["name"],
+                    "quote_asset": "USDT",
+                    "exchange": self.name,
+                    "active": not item.get("isDelisted", False),
+                    "volume": context.get("dayNtlVlm"),
+                    "perpVolume24h": context.get("dayNtlVlm"),
+                }
+            )
+        return markets
 
     async def get_candles(self, symbol: str, timeframe: str, limit: int = 300) -> pd.DataFrame:
         coin = symbol.upper().replace("USDT", "")
@@ -88,8 +100,8 @@ class HyperliquidClient(ExchangeClient):
         df = pd.DataFrame(rows)
         if df.empty:
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df = df.rename(columns={"t": "timestamp", "o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
-        df["timestamp"] = df["timestamp"].apply(lambda value: datetime.fromtimestamp(value / 1000, tz=timezone.utc))
+        df = df.rename(columns={"t": "timestamp", "o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"}).copy()
+        df.loc[:, "timestamp"] = df["timestamp"].apply(lambda value: datetime.fromtimestamp(value / 1000, tz=timezone.utc))
         for column in ["open", "high", "low", "close", "volume"]:
-            df[column] = pd.to_numeric(df[column], errors="coerce")
+            df.loc[:, column] = pd.to_numeric(df[column], errors="coerce")
         return df[["timestamp", "open", "high", "low", "close", "volume"]].dropna()

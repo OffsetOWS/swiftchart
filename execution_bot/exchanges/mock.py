@@ -26,7 +26,7 @@ class MockExchange(ExecutionExchange):
                     volume=1000 + index * 3,
                 )
             )
-        return MarketSnapshot(candles=candles, bid=price * 0.9995, ask=price * 1.0005)
+        return MarketSnapshot(candles=candles, bid=price * 0.9995, ask=price * 1.0005, mark_price=price, perp_volume_24h=5_000_000)
 
     async def place_order(self, plan: ExecutionPlan) -> dict:
         return {

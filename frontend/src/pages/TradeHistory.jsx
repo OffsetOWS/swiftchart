@@ -18,7 +18,7 @@ function dt(value) {
 function badgeClass(value) {
   if (["tp_hit", "win"].includes(value)) return "good";
   if (["sl_hit", "loss"].includes(value)) return "bad";
-  if (["closed"].includes(value)) return "warn";
+  if (["closed", "taken"].includes(value)) return "warn";
   return "neutral";
 }
 
@@ -27,15 +27,15 @@ function timeframeForTrade(_trade) {
 }
 
 function tradeStatusFromCandles(trade, candles) {
-  const takenAt = new Date(trade.created_at).getTime();
+  const takenAt = new Date(trade.taken_at || trade.created_at).getTime();
   const relevant = candles.filter((candle) => new Date(candle.timestamp).getTime() >= takenAt);
-  if (!relevant.length || trade.status !== "open") return null;
+  if (!relevant.length || !["open", "taken"].includes(trade.status)) return null;
 
   const entry = Number(trade.entry_price);
   const stop = Number(trade.stop_loss);
   const target = Number(trade.take_profit);
   const risk = Math.abs(entry - stop) || 1;
-  const isLong = trade.direction === "long";
+  const isLong = String(trade.direction).toLowerCase() === "long";
 
   for (const candle of relevant) {
     const high = Number(candle.high);
@@ -67,7 +67,7 @@ export default function TradeHistory({ version = 0 }) {
     const total = records.length;
     const wins = records.filter((record) => record.result === "win").length;
     const losses = records.filter((record) => record.result === "loss").length;
-    const open = records.filter((record) => record.status === "open").length;
+    const open = records.filter((record) => ["open", "taken"].includes(record.status)).length;
     const closed = wins + losses;
     const winRate = closed ? Math.round((wins / closed) * 100) : 0;
     const pnl = records.reduce((sum, record) => sum + (Number(record.pnl) || 0), 0);
@@ -83,7 +83,7 @@ export default function TradeHistory({ version = 0 }) {
     setLoading(true);
     setMessage("");
     try {
-      const trades = await listPaperTrades(auth.user.id);
+      const trades = await listPaperTrades(auth.user.id, auth.session?.access_token);
       setRecords(trades);
       setMessage(trades.length ? `Loaded ${trades.length} paper trades.` : "No paper trades yet. Click Take Trade on a signal to save one here.");
     } catch (error) {
@@ -98,13 +98,13 @@ export default function TradeHistory({ version = 0 }) {
     setLoading(true);
     setMessage("");
     try {
-      const openTrades = records.filter((trade) => trade.status === "open");
+      const openTrades = records.filter((trade) => ["open", "taken"].includes(trade.status));
       const updates = [];
       for (const trade of openTrades) {
         const candles = await getCandles({ exchange: trade.exchange || "hyperliquid", symbol: trade.symbol, timeframe: timeframeForTrade(trade) });
         const statusUpdate = tradeStatusFromCandles(trade, candles);
         if (statusUpdate) {
-          updates.push(updatePaperTradeStatus(trade.id, statusUpdate));
+          updates.push(updatePaperTradeStatus(trade.id, statusUpdate, auth.session?.access_token));
         }
       }
       if (updates.length) {
@@ -123,7 +123,7 @@ export default function TradeHistory({ version = 0 }) {
 
   useEffect(() => {
     load();
-  }, [auth.user?.id, version]);
+  }, [auth.user?.id, auth.session?.access_token, version]);
 
   return (
     <div className="history-page">
@@ -168,7 +168,7 @@ export default function TradeHistory({ version = 0 }) {
             <tbody>
               {records.map((record) => (
                 <tr key={record.id} onClick={() => setExpanded(expanded === record.id ? null : record.id)}>
-                  <td>{dt(record.created_at)}</td>
+                  <td>{dt(record.taken_at || record.created_at)}</td>
                   <td>{record.symbol}</td>
                   <td>{record.timeframe || "-"}</td>
                   <td>{record.direction.toUpperCase()}</td>

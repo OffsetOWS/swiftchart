@@ -10,6 +10,7 @@ import pandas as pd
 from app.config import get_settings
 from app.models.schemas import RiskSettings, TradeIdea
 from app.services.execution_signals import dispatch_trade_ideas_to_execution
+from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
@@ -109,8 +110,16 @@ async def discover_scan_markets(exchange: str) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
-        output.append({"exchange": selected_exchange, "symbol": symbol, "volume": market.get("volume"), "active": True})
-    return output
+        output.append(
+            {
+                "exchange": selected_exchange,
+                "symbol": symbol,
+                "volume": market.get("volume"),
+                "perpVolume24h": market.get("perpVolume24h"),
+                "active": True,
+            }
+        )
+    return filter_liquid_perp_markets(output)
 
 
 async def discover_all_scan_markets(exchange: str) -> list[dict]:

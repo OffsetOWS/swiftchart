@@ -25,11 +25,16 @@ function friendlyErrorMessage(message) {
   return text;
 }
 
-async function request(path, options) {
+async function request(path, options = {}) {
+  const { accessToken, ...fetchOptions } = options;
+  const headers = { "Content-Type": "application/json", ...(fetchOptions.headers || {}) };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
   try {
     const response = await fetch(`${API_BASE}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
+      ...fetchOptions,
+      headers,
     });
     if (!response.ok) {
       const detail = await response.text().then((text) => {
@@ -69,15 +74,24 @@ export function getTopIdeas({ exchange, timeframe }) {
   return request(`/api/top-ideas?exchange=${exchange}&timeframe=${timeframe}`);
 }
 
-export function createPaperTrade(payload) {
-  return request("/api/paper-trade", {
+export function createPaperTrade(payload, accessToken) {
+  return request("/api/user/take-trade", {
     method: "POST",
     body: JSON.stringify(payload),
+    accessToken,
   });
 }
 
-export function getPaperTrades() {
-  return request("/api/paper-trades");
+export function getPaperTrades(accessToken) {
+  return request("/api/user/trades", { accessToken });
+}
+
+export function updatePaperTrade(id, payload, accessToken) {
+  return request(`/api/user/trades/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+    accessToken,
+  });
 }
 
 export function getTradeHistory(filters = {}) {

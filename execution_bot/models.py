@@ -58,6 +58,8 @@ class MarketSnapshot(BaseModel):
     candles: list[Candle]
     bid: float | None = None
     ask: float | None = None
+    mark_price: float | None = None
+    perp_volume_24h: float | None = None
 
 
 class RiskSettingsSnapshot(BaseModel):

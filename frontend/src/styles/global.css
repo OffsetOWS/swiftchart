@@ -814,6 +814,17 @@ p {
 }
 .idea-card.long { border-left: 4px solid var(--green); }
 .idea-card.short { border-left: 4px solid var(--red); }
+.signal-card {
+  display: grid;
+  gap: 14px;
+}
+.signal-card.status-aging {
+  border-color: rgba(128,99,21,0.38);
+}
+.signal-card.status-expired,
+.signal-card.status-invalidated {
+  opacity: 0.72;
+}
 .demo-signal-shell {
   padding: 12px;
   border: 1px dashed rgba(111, 208, 212, 0.5);
@@ -833,6 +844,102 @@ p {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
+}
+.signal-card .idea-top {
+  margin-bottom: 0;
+}
+.signal-title-block {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.signal-title-block h3 {
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+.signal-chip-row,
+.signal-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.regime-badge,
+.freshness-pill,
+.liquidity-pill,
+.direction-badge,
+.signal-context-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: rgba(245,245,238,0.16);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.direction-badge {
+  min-height: 42px;
+  padding: 0 13px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.direction-badge.long,
+.regime-badge.bullish,
+.freshness-pill.fresh,
+.liquidity-pill.healthy {
+  color: var(--green);
+  border-color: rgba(20,92,56,0.38);
+}
+.direction-badge.short,
+.regime-badge.bearish,
+.freshness-pill.stale,
+.liquidity-pill.low {
+  color: var(--red);
+  border-color: rgba(125,40,37,0.42);
+}
+.regime-badge.risk,
+.freshness-pill.aging,
+.liquidity-pill.medium,
+.signal-context-row .warning {
+  color: var(--amber);
+  border-color: rgba(128,99,21,0.42);
+}
+.signal-score-row {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr;
+  gap: 8px;
+}
+.signal-score-row div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(245,245,238,0.18);
+}
+.signal-score-row span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.signal-score-row b {
+  font-family: var(--sans);
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.signal-score-row small {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0;
 }
 .idea-card p { font-size: 12px; }
 .exchange-label {
@@ -865,6 +972,9 @@ p {
   overflow: hidden;
   background: rgba(17,17,17,0.12);
 }
+.signal-card .confidence-rail {
+  margin: 0;
+}
 .confidence-rail span {
   display: block;
   height: 100%;
@@ -873,6 +983,11 @@ p {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.trade-level-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 7px;
 }
 .metric {
@@ -907,6 +1022,32 @@ p {
   border: 1px solid var(--line);
   background: rgba(245,245,238,0.14);
 }
+.setup-story {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.setup-story > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(245,245,238,0.12);
+}
+.setup-story span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.setup-story p {
+  color: var(--muted);
+  line-height: 1.55;
+}
 .trade-card-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -920,6 +1061,11 @@ p {
 .ai-scan-button,
 .take-trade-button {
   min-width: 0;
+}
+.take-trade-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+  transform: none;
 }
 .ai-consensus {
   margin-top: 12px;
@@ -1050,6 +1196,17 @@ p {
   border: 1px solid rgba(128,99,21,0.34);
   color: var(--amber);
   background: rgba(245,245,238,0.14);
+}
+.risk-strip.success {
+  color: var(--green);
+  border-color: rgba(20,92,56,0.42);
+}
+.risk-strip.error {
+  color: var(--red);
+  border-color: rgba(125,40,37,0.42);
+}
+.risk-strip.info {
+  color: var(--amber);
 }
 
 .history-page {
@@ -2473,8 +2630,14 @@ button:disabled {
   }
   .controls,
   .stats,
-  .metric-grid {
+  .metric-grid,
+  .trade-level-grid,
+  .setup-story,
+  .signal-score-row {
     grid-template-columns: 1fr;
+  }
+  .signal-title-block h3 {
+    font-size: 24px;
   }
   .panel,
   .idea-card,

@@ -9,7 +9,7 @@ import pandas as pd
 
 from app.config import get_settings
 from app.models.schemas import SignalReview, TradeIdea
-from app.services.alert_dedupe import mark_alert_sent, should_skip_alert
+from app.services.alert_dedupe import mark_alert_sent, setup_fingerprint, should_skip_alert
 from app.services.market_data import get_candles_cached
 from app.utils.database import get_connection
 
@@ -42,6 +42,14 @@ def _parse_dt(value: str | datetime) -> datetime:
     normalized = value.replace("Z", "+00:00")
     parsed = datetime.fromisoformat(normalized)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _signal_expires_at(idea: TradeIdea) -> str:
+    candle_time = idea.signal_candle_time
+    if candle_time is None:
+        return (datetime.now(UTC) + timedelta(minutes=get_settings().signal_max_age_minutes)).replace(microsecond=0).isoformat()
+    normalized = candle_time if candle_time.tzinfo else candle_time.replace(tzinfo=UTC)
+    return (normalized + timedelta(minutes=get_settings().signal_max_age_minutes)).replace(microsecond=0).isoformat()
 
 
 def _recent_duplicate_id(connection, idea: TradeIdea) -> int | None:
@@ -96,9 +104,10 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         entry_zone_low, entry_zone_high, stop_loss, take_profit_1,
                         take_profit_2, risk_reward, confidence, reason, invalidation,
                         regime_score, regime_label, trend_alignment, regime_confidence_adjustment,
-                        reversal_confirmations, regime_explanation, signal_candle_time
+                        reversal_confirmations, regime_explanation, signal_candle_time,
+                        signal_fingerprint, lifecycle_status, expires_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         idea.symbol.upper(),
@@ -125,6 +134,9 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         json.dumps(idea.reversal_confirmations),
                         idea.regime_explanation,
                         idea.signal_candle_time.isoformat() if idea.signal_candle_time else None,
+                        setup_fingerprint(idea),
+                        "active",
+                        _signal_expires_at(idea),
                     ),
                 )
                 trade_id = int(cursor.lastrowid)

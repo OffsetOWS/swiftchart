@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import logging
+import time
+import uuid
 from datetime import datetime, timezone
 
 import httpx
@@ -52,14 +56,22 @@ def trade_idea_to_execution_signal(idea: TradeIdea) -> dict:
     }
 
 
+def signed_execution_headers(secret: str, body: bytes) -> dict[str, str]:
+    timestamp = str(int(time.time()))
+    nonce = uuid.uuid4().hex
+    payload = f"{timestamp}.{nonce}.".encode("utf-8") + body
+    signature = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    return {
+        "X-SwiftChart-Timestamp": timestamp,
+        "X-SwiftChart-Nonce": nonce,
+        "X-SwiftChart-Signature": signature,
+    }
+
+
 async def dispatch_trade_ideas_to_execution(ideas: list[TradeIdea]) -> None:
     settings = get_settings()
     if not settings.execution_autotrade_enabled or not settings.execution_signal_webhook_url:
         return
-
-    headers = {"Content-Type": "application/json"}
-    if settings.execution_webhook_secret:
-        headers["X-SwiftChart-Secret"] = settings.execution_webhook_secret
 
     async with httpx.AsyncClient(timeout=20) as client:
         for idea in ideas:
@@ -79,7 +91,11 @@ async def dispatch_trade_ideas_to_execution(ideas: list[TradeIdea]) -> None:
             if signal_id in _sent_signal_ids:
                 continue
             try:
-                response = await client.post(settings.execution_signal_webhook_url, json=payload, headers=headers)
+                body = json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8")
+                headers = {"Content-Type": "application/json"}
+                if settings.execution_webhook_secret:
+                    headers.update(signed_execution_headers(settings.execution_webhook_secret, body))
+                response = await client.post(settings.execution_signal_webhook_url, content=body, headers=headers)
                 response.raise_for_status()
                 decision = response.json()
                 if decision.get("accepted"):

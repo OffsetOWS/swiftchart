@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ExecutionSettings(BaseSettings):
     execution_database_url: str = "sqlite:///./execution_bot.db"
     execution_webhook_secret: str = ""
+    execution_cors_origins: str = ""
+    execution_auth_clock_skew_seconds: int = Field(default=300, ge=30)
+    execution_nonce_ttl_seconds: int = Field(default=900, ge=60)
     execution_mode: str = "paper"
     execution_live_confirm: bool = False
     live_trading: bool = False
@@ -40,6 +43,13 @@ class ExecutionSettings(BaseSettings):
     max_atr_percent: float = Field(default=8, gt=0)
     max_spread_percent: float = Field(default=0.25, gt=0)
     min_volume_ratio: float = Field(default=0.55, gt=0)
+    execution_symbol_allowlist: str = "BTCUSDT,ETHUSDT,SOLUSDT"
+    min_perp_volume_24h: float = Field(default=100_000, ge=0)
+    max_entry_deviation_percent: float = Field(default=0.75, gt=0)
+    max_signal_candle_age_seconds: int = Field(default=900, ge=60)
+    max_risk_per_trade_percent: float = Field(default=5, gt=0)
+    circuit_breaker_max_failures: int = Field(default=3, ge=1)
+    circuit_breaker_window_seconds: int = Field(default=900, ge=60)
 
     hyperliquid_base_url: str = "https://api.hyperliquid.xyz"
     hyperliquid_wallet_address: str = ""
@@ -60,6 +70,10 @@ class ExecutionSettings(BaseSettings):
     @property
     def live_enabled(self) -> bool:
         return (self.execution_mode.lower() == "live" and self.execution_live_confirm) or self.live_trading
+
+    @property
+    def allowed_execution_symbols(self) -> set[str]:
+        return {item.strip().upper() for item in self.execution_symbol_allowlist.split(",") if item.strip()}
 
     @property
     def effective_telegram_bot_token(self) -> str:

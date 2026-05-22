@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     variational_api_key: str = ""
     variational_enabled: bool = False
     variational_candles_path: str = "/candles"
-    frontend_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    frontend_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
     live_trading_enabled: bool = False
     default_exchange: str = "hyperliquid"
     default_timeframe: str = "4h"
@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     default_risk_per_trade: float = Field(default=1.0, ge=0.01, le=20)
     default_min_rr: float = Field(default=2.0, ge=0.1)
     default_max_open_trades: int = Field(default=3, ge=1)
+    min_perp_volume_24h: float = Field(default=100_000, ge=0)
+    api_rate_limit_per_minute: int = Field(default=120, ge=1)
+    scanner_rate_limit_per_minute: int = Field(default=20, ge=1)
+    signal_max_age_minutes: int = Field(default=1440, ge=5)
+    signal_max_entry_deviation_percent: float = Field(default=1.5, ge=0)
+    webhook_signing_secret: str = ""
+    webhook_nonce_ttl_seconds: int = Field(default=900, ge=60)
+    webhook_clock_skew_seconds: int = Field(default=300, ge=30)
+    internal_api_secret: str = ""
     trade_history_expiry_bars: int = Field(default=12, ge=1)
     execution_autotrade_enabled: bool = False
     execution_signal_webhook_url: str = ""
@@ -32,6 +41,7 @@ class Settings(BaseSettings):
     genlayer_validator_services: str = ""
     genlayer_llm_provider: str = ""
     genlayer_intelligent_contract_address: str = ""
+    supabase_jwt_secret: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
