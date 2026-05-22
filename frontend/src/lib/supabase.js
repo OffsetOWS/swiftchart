@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 function normalizeSupabaseUrl(value) {
-  const cleaned = String(value || "").trim().replace(/\/+$/, "");
+  const cleaned = String(value || "").trim().replace(/\/+$/, "").replace(/\.+$/, "");
   if (!cleaned) return "";
   return /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
 }

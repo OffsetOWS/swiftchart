@@ -73,7 +73,7 @@ def _supabase_url_from_token(token: str) -> str:
 
 
 def _normalize_supabase_url(value: str) -> str:
-    cleaned = value.strip().rstrip("/")
+    cleaned = value.strip().rstrip("/").rstrip(".")
     if cleaned and not cleaned.startswith(("http://", "https://")):
         cleaned = f"https://{cleaned}"
     return cleaned
