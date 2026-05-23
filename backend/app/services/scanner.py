@@ -31,12 +31,25 @@ PREFILTER_LIMIT = 260
 FULL_LIMIT = 260
 _scan_cache: dict[tuple[str, str], tuple[float, dict]] = {}
 _scan_offsets: dict[str, int] = {}
+_scan_window_meta: dict[str, dict] = {}
+_rotation_history: list[tuple[float, set[str]]] = []
 _scan_lock = asyncio.Lock()
 _background_task: asyncio.Task | None = None
+_scanner_start_count = 0
 _last_health: dict = {
     "scanner_running": False,
     "last_scan_started_at": None,
     "last_scan_finished_at": None,
+    "last_successful_setup_at": None,
+    "last_telegram_sent_at": None,
+    "last_non_empty_website_output_at": None,
+    "scanner_restart_count": 0,
+    "cache_age_seconds": None,
+    "dedup_cache_size": 0,
+    "recent_dedup_keys": [],
+    "current_scan_window_start": None,
+    "current_scan_window_end": None,
+    "total_markets_rotated_last_hour": 0,
     "exchange": None,
     "timeframe": None,
     "markets_fetched": 0,
@@ -90,6 +103,9 @@ class CandleFetchStats:
 
 def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+_PROCESS_STARTED_AT = _now_iso()
 
 
 def debug_scanner_enabled() -> bool:
@@ -225,9 +241,16 @@ async def discover_all_scan_markets(exchange: str) -> list[dict]:
 
 
 def scan_window(exchange: str, markets: list[dict], limit: int = MAX_MARKETS_PER_SCAN, *, timeframe: str = "4h") -> list[dict]:
-    if len(markets) <= limit:
-        return markets
     key = f"{exchange.lower()}:{timeframe.lower()}"
+    if len(markets) <= limit:
+        _scan_window_meta[key] = {
+            "start": 0,
+            "end": len(markets),
+            "market_count": len(markets),
+            "window_size": len(markets),
+            "wrapped": False,
+        }
+        return markets
     slot = int(time() // SCAN_INTERVAL_SECONDS)
     timeframe_seed = sum(ord(char) for char in timeframe.lower())
     default_start = ((slot + timeframe_seed) * limit) % len(markets)
@@ -236,8 +259,48 @@ def scan_window(exchange: str, markets: list[dict], limit: int = MAX_MARKETS_PER
     selected = markets[start:end]
     if len(selected) < limit:
         selected.extend(markets[: limit - len(selected)])
+    _scan_window_meta[key] = {
+        "start": start,
+        "end": end % len(markets),
+        "market_count": len(markets),
+        "window_size": len(selected),
+        "wrapped": end > len(markets),
+    }
     _scan_offsets[key] = (start + limit) % len(markets)
     return selected
+
+
+def _record_rotation(markets: list[dict]) -> None:
+    global _rotation_history
+    now = time()
+    symbols = {
+        f"{str(market.get('exchange', '')).lower()}:{str(market.get('symbol', '')).upper()}"
+        for market in markets
+        if market.get("symbol")
+    }
+    if symbols:
+        _rotation_history.append((now, symbols))
+    cutoff = now - 3600
+    _rotation_history = [(timestamp, item) for timestamp, item in _rotation_history if timestamp >= cutoff]
+
+
+def _total_markets_rotated_last_hour() -> int:
+    cutoff = time() - 3600
+    rotated: set[str] = set()
+    for timestamp, symbols in _rotation_history:
+        if timestamp >= cutoff:
+            rotated.update(symbols)
+    return len(rotated)
+
+
+def _current_window_bounds(exchange: str | None, timeframe: str | None) -> tuple[int | None, int | None]:
+    if not exchange or not timeframe:
+        return None, None
+    keys = [f"{selected.lower()}:{timeframe.lower()}" for selected in selected_exchanges(exchange)]
+    metas = [_scan_window_meta[key] for key in keys if key in _scan_window_meta]
+    if not metas:
+        return None, None
+    return metas[-1].get("start"), metas[-1].get("end")
 
 
 def prefilter_diagnostics(df: pd.DataFrame) -> tuple[bool, float, float, str | None, dict]:
@@ -449,15 +512,67 @@ def _bot_state_path() -> Path:
 def _load_bot_state() -> dict:
     path = _bot_state_path()
     if not path.exists():
-        return {"subscribers": [], "sent_alerts": []}
+        return {"subscribers": [], "sent_alerts": [], "alert_dedupe": {}}
     try:
         data = json.loads(path.read_text())
         return {
             "subscribers": data.get("subscribers", []),
             "sent_alerts": data.get("sent_alerts", []),
+            "alert_dedupe": data.get("alert_dedupe", {}),
         }
     except (OSError, json.JSONDecodeError):
-        return {"subscribers": [], "sent_alerts": []}
+        return {"subscribers": [], "sent_alerts": [], "alert_dedupe": {}}
+
+
+def _dedupe_health_snapshot() -> dict:
+    data = _load_bot_state()
+    sent_alerts = list(data.get("sent_alerts", []))
+    alert_dedupe = data.get("alert_dedupe", {}) if isinstance(data.get("alert_dedupe", {}), dict) else {}
+    recent_keys: list[dict] = []
+    last_telegram_sent_at: str | None = None
+    dedupe_size = len(sent_alerts)
+
+    for namespace, payload in alert_dedupe.items():
+        if not isinstance(payload, dict):
+            continue
+        keys = payload.get("keys", {})
+        fingerprints = payload.get("fingerprints", {})
+        if isinstance(keys, dict):
+            dedupe_size += len(keys)
+            for key, item in keys.items():
+                if not isinstance(item, dict):
+                    continue
+                last_alert_time = item.get("last_alert_time")
+                if namespace == "telegram" and last_alert_time:
+                    if last_telegram_sent_at is None or str(last_alert_time) > last_telegram_sent_at:
+                        last_telegram_sent_at = str(last_alert_time)
+                recent_keys.append(
+                    {
+                        "namespace": namespace,
+                        "key": key,
+                        "last_alert_time": last_alert_time,
+                        "latest_candle_time": item.get("latest_candle_time"),
+                    }
+                )
+        if isinstance(fingerprints, dict):
+            dedupe_size += len(fingerprints)
+
+    recent_keys = sorted(
+        recent_keys,
+        key=lambda item: str(item.get("last_alert_time") or ""),
+        reverse=True,
+    )[:10]
+    if len(recent_keys) < 10:
+        recent_keys.extend(
+            {"namespace": "legacy", "key": key}
+            for key in sent_alerts[-(10 - len(recent_keys)) :]
+        )
+
+    return {
+        "last_telegram_sent_at": last_telegram_sent_at,
+        "dedup_cache_size": dedupe_size,
+        "recent_dedup_keys": recent_keys[:10],
+    }
 
 
 def _telegram_subscribers() -> set[int]:
@@ -514,10 +629,32 @@ def _telegram_diagnostics(ideas: list[TradeIdea]) -> tuple[int, dict[str, int]]:
     return eligible, dict(reasons)
 
 
+def _cache_age_seconds(exchange: str | None, timeframe: str | None) -> int | None:
+    if not exchange or not timeframe:
+        return None
+    key = (normalize_exchange(exchange), timeframe.lower())
+    cached = _scan_cache.get(key)
+    if cached is None and normalize_exchange(exchange) != "all":
+        cached = _scan_cache.get(("all", timeframe.lower()))
+    if cached is None:
+        return None
+    return max(0, int(monotonic() - cached[0]))
+
+
 def scanner_health() -> dict:
+    exchange = _last_health.get("exchange")
+    timeframe = _last_health.get("timeframe")
+    window_start, window_end = _current_window_bounds(exchange, timeframe)
+    dedupe_snapshot = _dedupe_health_snapshot()
     return {
         **_last_health,
         "scanner_running": _background_task is not None and not _background_task.done(),
+        "process_started_at": _PROCESS_STARTED_AT,
+        "cache_age_seconds": _cache_age_seconds(exchange, timeframe),
+        "current_scan_window_start": window_start,
+        "current_scan_window_end": window_end,
+        "total_markets_rotated_last_hour": _total_markets_rotated_last_hour(),
+        **dedupe_snapshot,
     }
 
 
@@ -570,6 +707,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             selected_window = scan_window(current_exchange, exchange_markets, market_limit, timeframe=timeframe)
             logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
             scan_markets.extend(selected_window)
+        _record_rotation(scan_markets)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         prefilter_results = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore, fetch_stats) for market in scan_markets])
         for result_item in prefilter_results:
@@ -765,6 +903,15 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             {"reason": reason, "count": count}
             for reason, count in rejection_reasons.most_common(12)
         ]
+        finished_at = _now_iso()
+        last_successful_setup_at = _last_health.get("last_successful_setup_at")
+        if ideas:
+            last_successful_setup_at = finished_at
+        last_non_empty_website_output_at = _last_health.get("last_non_empty_website_output_at")
+        if ranked:
+            last_non_empty_website_output_at = finished_at
+        window_start, window_end = _current_window_bounds(selected_exchange, timeframe)
+        dedupe_snapshot = _dedupe_health_snapshot()
         result = {
             "timeframe": timeframe,
             "exchange": selected_exchange,
@@ -801,7 +948,17 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         _last_health = {
             "scanner_running": _background_task is not None and not _background_task.done(),
             "last_scan_started_at": started_at,
-            "last_scan_finished_at": _now_iso(),
+            "last_scan_finished_at": finished_at,
+            "last_successful_setup_at": last_successful_setup_at,
+            "last_telegram_sent_at": dedupe_snapshot["last_telegram_sent_at"],
+            "last_non_empty_website_output_at": last_non_empty_website_output_at,
+            "scanner_restart_count": max(0, _scanner_start_count - 1),
+            "cache_age_seconds": None,
+            "dedup_cache_size": dedupe_snapshot["dedup_cache_size"],
+            "recent_dedup_keys": dedupe_snapshot["recent_dedup_keys"],
+            "current_scan_window_start": window_start,
+            "current_scan_window_end": window_end,
+            "total_markets_rotated_last_hour": _total_markets_rotated_last_hour(),
             "exchange": selected_exchange,
             "timeframe": timeframe,
             "markets_fetched": len(markets),
@@ -840,13 +997,14 @@ async def cached_top_ideas(exchange: str, timeframe: str) -> dict:
 
 
 def start_background_scanner() -> None:
-    global _background_task
+    global _background_task, _scanner_start_count
     if _background_task is not None and not _background_task.done():
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
+    _scanner_start_count += 1
     _background_task = loop.create_task(_scan_loop())
 
 
