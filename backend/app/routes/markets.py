@@ -6,7 +6,7 @@ from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.scanner import cached_top_ideas
+from app.services.scanner import cached_top_ideas, scanner_health
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
@@ -229,3 +229,8 @@ async def top_ideas(
         if len(ranked) >= 5
         else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
     }
+
+
+@router.get("/scanner/health")
+async def scanner_health_endpoint():
+    return scanner_health()

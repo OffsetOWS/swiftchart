@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from collections import Counter
 
 from telegram import Bot
 
@@ -27,20 +28,34 @@ def alert_key(idea: TradeIdea) -> str:
     return setup_fingerprint(idea)
 
 
-async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
+async def run_alert_scan(bot: Bot) -> dict:
     timeframe = os.getenv("ALERT_TIMEFRAME", get_settings().default_timeframe)
     exchange = os.getenv("ALERT_EXCHANGE", get_settings().default_exchange)
     min_score = alert_min_score()
+    skip_reasons: Counter[str] = Counter()
     subscribers = get_subscribers()
+    if not os.getenv("TELEGRAM_BOT_TOKEN"):
+        skip_reasons["missing bot token"] += 1
     if not subscribers:
-        return {"status": "ok", "subscribers": 0, "ideas": 0, "sent": 0}
+        skip_reasons["missing chat id"] += 1
+        logger.info("Alert scan skipped: %s", dict(skip_reasons))
+        return {"status": "ok", "subscribers": 0, "ideas": 0, "eligible": 0, "min_score": min_score, "sent": 0, "skip_reasons": dict(skip_reasons)}
 
     ideas, selected_exchange = await scan_top_ideas(timeframe, exchange)
-    eligible_ideas = [idea for idea in ideas if idea_score(idea) >= min_score and idea.entry_status == "READY"]
+    eligible_ideas = []
+    for idea in ideas:
+        if idea_score(idea) < min_score:
+            skip_reasons["score below ALERT_MIN_SCORE"] += 1
+            continue
+        if idea.entry_status != "READY":
+            skip_reasons["entry_status not READY"] += 1
+            continue
+        eligible_ideas.append(idea)
     sent = 0
     for idea in eligible_ideas:
         key = alert_key(idea)
         if is_alert_sent(key) or should_skip_alert(idea, namespace="telegram"):
+            skip_reasons["duplicate alert"] += 1
             continue
         message = format_trade_alert(idea)
         for chat_id in subscribers:
@@ -48,11 +63,12 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
                 await bot.send_message(chat_id=chat_id, text=message)
                 sent += 1
             except Exception as exc:
+                skip_reasons["send error"] += 1
                 logger.warning("Could not send alert to chat %s: %s", chat_id, exc)
         mark_alert_sent(key)
         mark_dedupe_sent(idea, namespace="telegram")
 
-    return {
+    result = {
         "status": "ok",
         "exchange": selected_exchange,
         "timeframe": timeframe,
@@ -61,7 +77,10 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         "eligible": len(eligible_ideas),
         "min_score": min_score,
         "sent": sent,
+        "skip_reasons": dict(skip_reasons),
     }
+    logger.info("Alert scan diagnostics: %s", result)
+    return result
 
 
 async def alert_loop(bot: Bot) -> None:
