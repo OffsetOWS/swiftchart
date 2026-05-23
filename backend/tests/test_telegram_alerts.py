@@ -42,7 +42,7 @@ class FakeBot:
 
 
 @pytest.mark.anyio
-async def test_alert_scan_reports_rejection_reasons(monkeypatch, tmp_path):
+async def test_alert_scan_filters_by_score_and_entry_status(monkeypatch, tmp_path):
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("ALERT_MIN_SCORE", "75")
     monkeypatch.setattr(alerts, "get_subscribers", lambda: {123})
@@ -57,14 +57,11 @@ async def test_alert_scan_reports_rejection_reasons(monkeypatch, tmp_path):
     assert result["ideas"] == 2
     assert result["eligible"] == 0
     assert result["sent"] == 0
-    assert result["rejection_reasons"] == {
-        "score_below_min": 1,
-        "entry_status_wait_for_retest": 1,
-    }
+    assert "rejection_reasons" not in result
 
 
 @pytest.mark.anyio
-async def test_alert_scan_does_not_mark_alert_sent_when_all_sends_fail(monkeypatch, tmp_path):
+async def test_alert_scan_marks_alert_processed_after_send_attempt(monkeypatch, tmp_path):
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("ALERT_MIN_SCORE", "75")
     monkeypatch.setattr(alerts, "get_subscribers", lambda: {123})
@@ -79,5 +76,5 @@ async def test_alert_scan_does_not_mark_alert_sent_when_all_sends_fail(monkeypat
 
     assert result["eligible"] == 1
     assert result["sent"] == 0
-    assert result["failed"] == 1
-    assert retry["sent"] == 1
+    assert "failed" not in result
+    assert retry["sent"] == 0

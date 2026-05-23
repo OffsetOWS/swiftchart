@@ -12,7 +12,6 @@ import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
 import { scanWithGenLayer } from "./lib/genlayer.js";
 import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
-import { freshnessForIdea, liquidityForIdea } from "./lib/signalQuality.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
 
@@ -106,18 +105,6 @@ export default function App() {
     }
     const signalId = signalIdForIdea(idea);
     if (takenSignalIds.has(signalId)) return;
-    const freshness = freshnessForIdea(idea);
-    const liquidity = liquidityForIdea(idea);
-    if (freshness.stale) {
-      setNoticeType("error");
-      setNotice(`This signal is ${freshness.label.toLowerCase()}. Refresh the market before taking it.`);
-      return;
-    }
-    if (liquidity.blocking) {
-      setNoticeType("error");
-      setNotice("This signal has low liquidity. SwiftChart blocked it from being saved.");
-      return;
-    }
     if (!Array.isArray(idea.entry_zone) || idea.entry_zone.length < 2 || !idea.stop_loss || !idea.take_profit_1 || !idea.take_profit_2) {
       setNoticeType("error");
       setNotice("This signal is missing trade data. Refresh and try again.");

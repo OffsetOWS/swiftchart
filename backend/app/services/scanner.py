@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import logging
 from dataclasses import dataclass
 from time import monotonic, time
@@ -10,7 +9,6 @@ import pandas as pd
 
 from app.config import get_settings
 from app.models.schemas import RiskSettings, TradeIdea
-from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
@@ -38,28 +36,6 @@ class Candidate:
     candles: pd.DataFrame
     volume_quality: float
     distance_score: float
-
-
-@dataclass
-class CandidateAnalysis:
-    ideas: list[TradeIdea]
-    rejected_reviews: int = 0
-    rejection_reasons: Counter[str] | None = None
-
-
-def _rejection_bucket(reason: str) -> str:
-    lowered = reason.lower()
-    if "risk/reward" in lowered:
-        return "risk_reward_below_min"
-    if "exhaustion" in lowered or "matur" in lowered:
-        return "move_exhausted_or_mature"
-    if "score is below" in lowered or "setup score" in lowered:
-        return "setup_score_below_min"
-    if "not built" in lowered or "trigger not ready" in lowered:
-        return "trigger_not_ready"
-    if "no setup generation" in lowered or "no trade" in lowered:
-        return "no_trade_regime"
-    return "other"
 
 
 def higher_timeframes_for(timeframe: str) -> list[str]:
@@ -141,7 +117,7 @@ async def discover_scan_markets(exchange: str) -> list[dict]:
                 "active": True,
             }
         )
-    return filter_liquid_perp_markets(output)
+    return output
 
 
 async def discover_all_scan_markets(exchange: str) -> list[dict]:
@@ -261,7 +237,6 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
-        prefilter_rejected = len(scan_markets) - len(candidates)
         candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:candidate_limit]
         breadth_values = []
         global_scores = []
@@ -276,12 +251,12 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         global_score = round(sum(global_scores) / len(global_scores), 1) if global_scores else None
         risk = _risk(timeframe)
 
-        async def analyze_with_context(candidate: Candidate) -> CandidateAnalysis:
+        async def analyze_with_context(candidate: Candidate) -> list[TradeIdea]:
             async with semaphore:
                 try:
                     df = candidate.candles
                     if len(df) < 80:
-                        return CandidateAnalysis([], rejection_reasons=Counter({"insufficient_candles": 1}))
+                        return []
                     htf_dfs = []
                     for htf in higher_timeframes_for(timeframe):
                         try:
@@ -299,21 +274,13 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                         breadth_above_ma_pct=breadth_above_ma_pct,
                     )
                     save_signal_reviews(analysis.rejected_signals)
-                    reasons = Counter(_rejection_bucket(review.reason) for review in analysis.rejected_signals)
-                    ideas = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
-                    return CandidateAnalysis(ideas, len(analysis.rejected_signals), reasons)
+                    return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
                 except Exception as exc:
                     logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
-                    return CandidateAnalysis([], rejection_reasons=Counter({"analysis_exception": 1}))
+                    return []
 
         analyzed = await asyncio.gather(*[analyze_with_context(candidate) for candidate in candidates])
-        ideas = [idea for result in analyzed for idea in result.ideas]
-        rejection_reasons = Counter()
-        rejected_reviews = 0
-        for result in analyzed:
-            rejected_reviews += result.rejected_reviews
-            if result.rejection_reasons:
-                rejection_reasons.update(result.rejection_reasons)
+        ideas = [idea for group in analyzed for idea in group]
         ranked = sorted(
             ideas,
             key=lambda idea: (
@@ -336,9 +303,6 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 "scan_window": len(scan_markets),
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
-                "prefilter_rejected": prefilter_rejected,
-                "strategy_rejected": rejected_reviews,
-                "rejection_reasons": dict(rejection_reasons.most_common()),
                 "valid_setups": len(ranked),
                 "duration_seconds": duration,
                 "global_regime_score": global_score,
@@ -355,15 +319,12 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         }
         _scan_cache[key] = (monotonic(), result)
         logger.info(
-            "Scan completed: Markets: %s Scan window: %s Filtered: %s Prefilter rejected: %s Analyzed: %s Strategy rejected: %s Valid setups: %s Rejection reasons: %s Time: %ss",
+            "Scan completed: Markets: %s Scan window: %s Filtered: %s Analyzed: %s Valid setups: %s Time: %ss",
             len(markets),
             len(scan_markets),
             len(candidates),
-            prefilter_rejected,
             len(candidates),
-            rejected_reviews,
             len(ranked),
-            dict(rejection_reasons.most_common(5)),
             duration,
         )
         return result
