@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from time import monotonic, time
 
 import pandas as pd
@@ -281,16 +283,46 @@ def _trigger_type(idea: TradeIdea) -> str:
     return "setup trigger"
 
 
+def _bot_state_path() -> Path:
+    return Path(os.getenv("BOT_STATE_PATH", ".swiftchart_bot_state.json"))
+
+
+def _load_bot_state() -> dict:
+    path = _bot_state_path()
+    if not path.exists():
+        return {"subscribers": [], "sent_alerts": []}
+    try:
+        data = json.loads(path.read_text())
+        return {
+            "subscribers": data.get("subscribers", []),
+            "sent_alerts": data.get("sent_alerts", []),
+        }
+    except (OSError, json.JSONDecodeError):
+        return {"subscribers": [], "sent_alerts": []}
+
+
+def _telegram_subscribers() -> set[int]:
+    data = _load_bot_state()
+    subscribers = {int(chat_id) for chat_id in data.get("subscribers", [])}
+    raw = os.getenv("TELEGRAM_ALERT_CHAT_IDS", "")
+    for item in raw.split(","):
+        item = item.strip()
+        if item:
+            subscribers.add(int(item))
+    return subscribers
+
+
+def _legacy_alert_sent(alert_key: str) -> bool:
+    data = _load_bot_state()
+    return alert_key in set(data.get("sent_alerts", []))
+
+
 def _telegram_diagnostics(ideas: list[TradeIdea]) -> tuple[int, dict[str, int]]:
     reasons: Counter[str] = Counter()
     min_score = float(os.getenv("ALERT_MIN_SCORE", "75"))
     token_missing = not bool(os.getenv("TELEGRAM_BOT_TOKEN"))
-    is_alert_sent_fn = lambda _key: False
     try:
-        from bot.storage import get_subscribers, is_alert_sent
-
-        subscribers = get_subscribers()
-        is_alert_sent_fn = is_alert_sent
+        subscribers = _telegram_subscribers()
     except Exception as exc:
         subscribers = set()
         reasons[f"telegram subscriber state error: {exc}"] += 1
@@ -311,7 +343,7 @@ def _telegram_diagnostics(ideas: list[TradeIdea]) -> tuple[int, dict[str, int]]:
             continue
         try:
             key = setup_fingerprint(idea)
-            if is_alert_sent_fn(key) or should_skip_alert(idea, namespace="telegram"):
+            if _legacy_alert_sent(key) or should_skip_alert(idea, namespace="telegram"):
                 reasons["duplicate alert"] += 1
                 continue
         except Exception as exc:
