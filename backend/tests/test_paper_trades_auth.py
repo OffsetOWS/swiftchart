@@ -115,6 +115,49 @@ def test_supabase_auth_api_fallback(monkeypatch):
     assert user.email == "user@example.com"
 
 
+def test_supabase_auth_api_fallback_for_non_hs256_token(monkeypatch):
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", "legacy-hs-secret")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+    get_settings.cache_clear()
+    token = ".".join(
+        [
+            b64url(json.dumps({"alg": "RS256", "typ": "JWT"}).encode("utf-8")),
+            b64url(json.dumps({"sub": "user-rs", "exp": int(time.time()) + 3600}).encode("utf-8")),
+            "signature",
+        ]
+    )
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"id": "user-rs", "email": "rs@example.com"}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, headers):
+            assert url == "https://example.supabase.co/auth/v1/user"
+            assert headers["apikey"] == "anon-key"
+            assert headers["Authorization"] == f"Bearer {token}"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.utils.auth.httpx.Client", FakeClient)
+
+    user = verify_supabase_jwt(token)
+
+    assert user.id == "user-rs"
+    assert user.email == "rs@example.com"
+
+
 def test_supabase_auth_api_fallback_uses_token_issuer(monkeypatch):
     monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
     monkeypatch.delenv("SUPABASE_URL", raising=False)

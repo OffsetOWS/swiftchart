@@ -42,7 +42,7 @@ def verify_supabase_jwt(token: str) -> CurrentUser:
         raise HTTPException(status_code=401, detail="Invalid auth token.")
     header = _json_b64url(parts[0])
     if header.get("alg") != "HS256":
-        raise HTTPException(status_code=401, detail="Unsupported auth token algorithm.")
+        return verify_supabase_token_with_auth_api(token)
     signed = f"{parts[0]}.{parts[1]}".encode("utf-8")
     expected = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).digest()
     try:
