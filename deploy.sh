@@ -50,7 +50,7 @@ fi
 cat > /etc/nginx/sites-available/swiftchart <<NGINX
 log_format swiftchart_sanitized '\$remote_addr - \$remote_user [\$time_local] '
                                 '"\$request_method \$uri \$server_protocol" '
-                                '\$status \$body_bytes_sent "\$http_referer" '
+                                '\$status \$body_bytes_sent "-" '
                                 '"\$http_user_agent"';
 
 server {
