@@ -27,6 +27,36 @@ def candles_from_prices(prices: list[float]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def range_edge_candles(edge: str, *, compressed: bool = False, low_atr: bool = False) -> pd.DataFrame:
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = []
+    for idx in range(120):
+        phase = idx % 24
+        base = 100 + (phase - 12) / 12 * 4
+        if phase >= 12:
+            base = 104 - (phase - 12) / 12 * 8
+        if edge == "support" and idx > 112:
+            base = 96 + (idx - 112) * 0.03
+        elif edge == "resistance" and idx > 112:
+            base = 104 - (idx - 112) * 0.03
+        elif edge == "middle" and idx > 112:
+            base = 100 + ((idx % 2) - 0.5) * 0.05
+        if low_atr:
+            base = 100 + ((idx % 3) - 1) * 0.005
+        width = 0.02 if low_atr else 0.25 if compressed else 1.2
+        rows.append(
+            {
+                "timestamp": started + timedelta(hours=idx),
+                "open": base - width * 0.08,
+                "high": base + width,
+                "low": base - width,
+                "close": base,
+                "volume": 1_000 + idx,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def test_market_regime_snapshot_has_structured_transition_fields():
     prices = [100 + idx * 0.08 for idx in range(90)] + [107 + idx * 0.9 for idx in range(30)]
     snapshot = detect_market_regime(candles_from_prices(prices), global_score=30, breadth_above_ma_pct=70)
@@ -46,6 +76,38 @@ def test_market_regime_snapshot_has_structured_transition_fields():
     assert snapshot.trade_decision in {"TRADE_ALLOWED", "WAIT", "NO_TRADE"}
     assert "score_delta_12_candles" in snapshot.components
     assert snapshot.explanation
+
+
+def test_near_support_valid_structure_normal_atr_is_not_no_trade():
+    snapshot = detect_market_regime(range_edge_candles("support"), breadth_above_ma_pct=50)
+
+    assert snapshot.components["near_lower_edge"] is True
+    assert snapshot.components["low_volatility"] is False
+    assert snapshot.trade_decision != "NO_TRADE"
+    assert snapshot.regime_type in {"RANGE_BOUND", "TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}
+
+
+def test_near_resistance_valid_structure_normal_atr_is_not_no_trade():
+    snapshot = detect_market_regime(range_edge_candles("resistance"), breadth_above_ma_pct=50)
+
+    assert snapshot.components["near_upper_edge"] is True
+    assert snapshot.components["low_volatility"] is False
+    assert snapshot.trade_decision != "NO_TRADE"
+    assert snapshot.regime_type in {"RANGE_BOUND", "TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}
+
+
+def test_middle_range_compressed_chop_can_be_no_trade():
+    snapshot = detect_market_regime(range_edge_candles("middle", compressed=True), breadth_above_ma_pct=50)
+
+    assert snapshot.trade_decision == "NO_TRADE"
+    assert snapshot.components["regime_block_reason"] in {"middle_range", "compressed_chop"}
+
+
+def test_low_atr_dead_market_can_be_no_trade():
+    snapshot = detect_market_regime(range_edge_candles("middle", low_atr=True), breadth_above_ma_pct=50)
+
+    assert snapshot.trade_decision == "NO_TRADE"
+    assert snapshot.components["regime_block_reason"] == "low_volatility"
 
 
 def test_transition_regime_requires_confirmation_before_trading():

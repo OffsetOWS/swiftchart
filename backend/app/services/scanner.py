@@ -399,6 +399,7 @@ def _setup_block_reason(analysis: AnalysisResponse) -> str:
     review_reasons = " ".join(review.reason or "" for review in analysis.rejected_signals).lower()
     no_trade = (analysis.no_trade_reason or analysis.warning or "").lower()
     decision = analysis.market_regime_data.trade_decision
+    regime_block_reason = analysis.market_regime_data.components.get("regime_block_reason")
     if "risk/reward" in review_reasons:
         return "R:R below 2.0"
     if "exhaustion" in review_reasons or "too mature" in review_reasons or "exhausted" in review_reasons:
@@ -414,6 +415,8 @@ def _setup_block_reason(analysis: AnalysisResponse) -> str:
     if decision == "WAIT":
         return "regime is WAIT"
     if decision == "NO_TRADE":
+        if regime_block_reason:
+            return f"regime is NO_TRADE: {regime_block_reason}"
         return "regime is NO_TRADE"
     if "range is too compressed" in no_trade:
         return "no valid support/resistance zone"
