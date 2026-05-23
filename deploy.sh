@@ -48,9 +48,16 @@ if [ -n "$DOMAIN" ]; then
 fi
 
 cat > /etc/nginx/sites-available/swiftchart <<NGINX
+log_format swiftchart_sanitized '\$remote_addr - \$remote_user [\$time_local] '
+                                '"\$request_method \$uri \$server_protocol" '
+                                '\$status \$body_bytes_sent "\$http_referer" '
+                                '"\$http_user_agent"';
+
 server {
     listen 80;
     server_name ${SERVER_NAME};
+
+    access_log /var/log/nginx/swiftchart_access.log swiftchart_sanitized;
 
     root /opt/swiftchart/frontend/dist;
     index index.html;
