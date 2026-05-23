@@ -13,7 +13,7 @@ from time import monotonic, time
 import pandas as pd
 
 from app.config import get_settings
-from app.models.schemas import RiskSettings, TradeIdea
+from app.models.schemas import AnalysisResponse, RiskSettings, TradeIdea, Zone
 from app.services.alert_dedupe import setup_fingerprint, should_skip_alert
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
@@ -46,6 +46,11 @@ _last_health: dict = {
     "setups_after_qc": 0,
     "website_visible_count": 0,
     "telegram_eligible_count": 0,
+    "candle_fetch_errors": 0,
+    "successful_candle_fetches": 0,
+    "failed_candle_symbols": [],
+    "setup_block_reasons": [],
+    "prefilter_passed_markets": [],
     "top_rejection_reasons": [],
     "last_error": None,
 }
@@ -72,12 +77,60 @@ class PrefilterResult:
     range_position: float | None = None
 
 
+@dataclass
+class CandleFetchStats:
+    successful: int = 0
+    errors: int = 0
+    failed_symbols: list[dict] | None = None
+
+    def __post_init__(self) -> None:
+        if self.failed_symbols is None:
+            self.failed_symbols = []
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def debug_scanner_enabled() -> bool:
     return os.getenv("DEBUG_SCANNER", "").lower() in {"1", "true", "yes", "on"}
+
+
+async def fetch_candles_resilient(
+    exchange: str,
+    symbol: str,
+    timeframe: str,
+    limit: int,
+    stats: CandleFetchStats,
+) -> pd.DataFrame:
+    attempts = 3
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            df = await get_candles_cached(exchange, symbol, timeframe, limit)
+            stats.successful += 1
+            return df
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                await asyncio.sleep(0.25 * (attempt + 1))
+    stats.errors += 1
+    failure = {
+        "exchange": exchange,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "error": str(last_error),
+    }
+    stats.failed_symbols.append(failure)
+    logger.warning(
+        "Candle fetch failed exchange=%s symbol=%s timeframe=%s limit=%s error=%s",
+        exchange,
+        symbol,
+        timeframe,
+        limit,
+        last_error,
+    )
+    raise last_error  # type: ignore[misc]
 
 
 def higher_timeframes_for(timeframe: str) -> list[str]:
@@ -231,10 +284,10 @@ def prefilter_dataframe(df: pd.DataFrame) -> tuple[bool, float, float]:
     return ok, volume, distance
 
 
-async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Semaphore) -> PrefilterResult:
+async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Semaphore, fetch_stats: CandleFetchStats) -> PrefilterResult:
     async with semaphore:
         try:
-            df = await get_candles_cached(market["exchange"], market["symbol"], timeframe, PREFILTER_LIMIT)
+            df = await fetch_candles_resilient(market["exchange"], market["symbol"], timeframe, PREFILTER_LIMIT, fetch_stats)
             ok, volume, distance, reason, details = prefilter_diagnostics(df)
             if not ok:
                 return PrefilterResult(market=market, candidate=None, reason=reason, **details)
@@ -245,7 +298,7 @@ async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Sem
             return PrefilterResult(market=market, candidate=None, reason=f"candle fetch error: {exc}")
 
 
-async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSettings, semaphore: asyncio.Semaphore) -> list[TradeIdea]:
+async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSettings, semaphore: asyncio.Semaphore, fetch_stats: CandleFetchStats) -> list[TradeIdea]:
     async with semaphore:
         try:
             df = candidate.candles
@@ -254,7 +307,7 @@ async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSet
             htf_dfs = []
             for htf in higher_timeframes_for(timeframe):
                 try:
-                    htf_dfs.append(await get_candles_cached(candidate.exchange, candidate.symbol, htf, 220))
+                    htf_dfs.append(await fetch_candles_resilient(candidate.exchange, candidate.symbol, htf, 220, fetch_stats))
                 except Exception:
                     continue
             analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
@@ -281,6 +334,109 @@ def _trigger_type(idea: TradeIdea) -> str:
     if idea.trend_alignment == "counter-trend":
         return "counter-trend reversal"
     return "setup trigger"
+
+
+def _zone_mid(zone: Zone | None) -> float | None:
+    if zone is None:
+        return None
+    return round((float(zone.lower) + float(zone.upper)) / 2, 8)
+
+
+def _nearest_zones(price: float, supports: list[Zone], resistances: list[Zone]) -> tuple[Zone | None, Zone | None]:
+    support = min(supports, key=lambda zone: abs(price - _zone_mid(zone)), default=None)
+    resistance = min(resistances, key=lambda zone: abs(price - _zone_mid(zone)), default=None)
+    return support, resistance
+
+
+def _position_between_zones(price: float, support: Zone | None, resistance: Zone | None) -> float | None:
+    if support is None or resistance is None:
+        return None
+    width = float(resistance.lower) - float(support.upper)
+    if width <= 0:
+        return None
+    return round(max(0.0, min(1.0, (price - float(support.upper)) / width)), 4)
+
+
+def _trigger_detected(analysis: AnalysisResponse) -> bool:
+    if analysis.trade_ideas:
+        return True
+    if any(sweep.confirmation_status == "confirmed" for sweep in analysis.liquidity_sweeps):
+        return True
+    for review in analysis.rejected_signals:
+        reason = (review.reason or "").lower()
+        if "no rejection" in reason or "trigger not ready" in reason or "not at resistance/retest edge" in reason:
+            continue
+        if review.base_score is not None:
+            return True
+    return False
+
+
+def _review_raw_score(analysis: AnalysisResponse) -> float | None:
+    scores = [float(review.base_score) for review in analysis.rejected_signals if review.base_score is not None]
+    scores.extend(_idea_score(idea) for idea in analysis.trade_ideas)
+    return round(max(scores), 1) if scores else None
+
+
+def _review_rr(analysis: AnalysisResponse) -> float | None:
+    values = [float(idea.risk_reward_ratio) for idea in analysis.trade_ideas if idea.risk_reward_ratio is not None]
+    if values:
+        return round(max(values), 2)
+    for review in analysis.rejected_signals:
+        reason = review.reason or ""
+        if "risk/reward" not in reason:
+            continue
+        parts = reason.split("risk/reward", 1)[-1].strip().split()
+        if not parts:
+            continue
+        try:
+            return round(float(parts[0]), 2)
+        except ValueError:
+            continue
+    return None
+
+
+def _setup_block_reason(analysis: AnalysisResponse) -> str:
+    review_reasons = " ".join(review.reason or "" for review in analysis.rejected_signals).lower()
+    no_trade = (analysis.no_trade_reason or analysis.warning or "").lower()
+    decision = analysis.market_regime_data.trade_decision
+    if "risk/reward" in review_reasons:
+        return "R:R below 2.0"
+    if "exhaustion" in review_reasons or "too mature" in review_reasons or "exhausted" in review_reasons:
+        return "exhausted after QC"
+    if "setup score is below 65" in review_reasons or "setup score is below 65" in no_trade:
+        return "score below 65"
+    if "unconfirmed sweep" in no_trade or "unconfirmed sweep" in review_reasons:
+        return "unconfirmed sweep"
+    if "not enough clean support/resistance" in no_trade:
+        return "no valid support/resistance zone"
+    if "no rejection" in review_reasons or "trigger not ready" in review_reasons or "not at resistance/retest edge" in review_reasons:
+        return "no confirmed trigger"
+    if decision == "WAIT":
+        return "regime is WAIT"
+    if decision == "NO_TRADE":
+        return "regime is NO_TRADE"
+    if "range is too compressed" in no_trade:
+        return "no valid support/resistance zone"
+    if "risk/reward is not good enough" in no_trade:
+        return "score below 65 or R:R below 2.0"
+    return "no setup created"
+
+
+def _near_miss_diagnostic(analysis: AnalysisResponse) -> dict:
+    price = float(analysis.current_price)
+    support, resistance = _nearest_zones(price, analysis.support_zones, analysis.resistance_zones)
+    return {
+        "symbol": analysis.symbol,
+        "regime": analysis.market_regime_data.regime_type,
+        "decision": analysis.market_regime_data.trade_decision,
+        "position": _position_between_zones(price, support, resistance),
+        "nearest_support": _zone_mid(support),
+        "nearest_resistance": _zone_mid(resistance),
+        "trigger_detected": _trigger_detected(analysis),
+        "raw_score": _review_raw_score(analysis),
+        "rr": _review_rr(analysis),
+        "block_reason": _setup_block_reason(analysis),
+    }
 
 
 def _bot_state_path() -> Path:
@@ -398,7 +554,10 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             candidate_limit,
         )
         rejection_reasons: Counter[str] = Counter()
+        setup_block_reasons: Counter[str] = Counter()
         market_debug: list[dict] = []
+        near_misses: list[dict] = []
+        fetch_stats = CandleFetchStats()
         markets = await discover_all_scan_markets(selected_exchange)
         if not markets:
             rejection_reasons["market fetch returned zero markets"] += 1
@@ -409,7 +568,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
             scan_markets.extend(selected_window)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
-        prefilter_results = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
+        prefilter_results = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore, fetch_stats) for market in scan_markets])
         for result_item in prefilter_results:
             if result_item.reason:
                 rejection_reasons[result_item.reason] += 1
@@ -452,8 +611,16 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     htf_dfs = []
                     for htf in higher_timeframes_for(timeframe):
                         try:
-                            htf_dfs.append(await get_candles_cached(candidate.exchange, candidate.symbol, htf, 220))
-                        except Exception:
+                            htf_dfs.append(await fetch_candles_resilient(candidate.exchange, candidate.symbol, htf, 220, fetch_stats))
+                        except Exception as exc:
+                            logger.info(
+                                "Higher timeframe candles skipped exchange=%s symbol=%s timeframe=%s htf=%s error=%s",
+                                candidate.exchange,
+                                candidate.symbol,
+                                timeframe,
+                                htf,
+                                exc,
+                            )
                             continue
                     analysis = analyze_dataframe(
                         candidate.symbol,
@@ -468,6 +635,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     save_signal_reviews(analysis.rejected_signals)
                     setup_attempts += len(analysis.trade_ideas) + len([review for review in analysis.rejected_signals if review.base_score is not None])
                     regime = analysis.market_regime_data
+                    diagnostic = _near_miss_diagnostic(analysis)
                     if analysis.trade_ideas:
                         for idea in analysis.trade_ideas:
                             logger.info(
@@ -490,6 +658,9 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                             )
                     else:
                         reason = analysis.no_trade_reason or "no setup created"
+                        block_reason = diagnostic["block_reason"]
+                        setup_block_reasons[block_reason] += 1
+                        near_misses.append(diagnostic)
                         rejection_reasons[reason] += 1
                         market_debug.append(
                             {
@@ -500,6 +671,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                                 "regime": regime.regime_type,
                                 "decision": regime.trade_decision,
                                 "confidence": regime.confidence_score,
+                                "block_reason": block_reason,
                             }
                         )
                         logger.info(
@@ -517,6 +689,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                         )
                     for review in analysis.rejected_signals:
                         reason = review.reason or "rejected by setup/QC"
+                        block_reason = _setup_block_reason(analysis)
                         rejection_reasons[reason] += 1
                         market_debug.append(
                             {
@@ -528,6 +701,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                                 "direction": review.direction,
                                 "score_before_qc": review.base_score,
                                 "score_after_qc": review.adjusted_score,
+                                "block_reason": block_reason,
                             }
                         )
                         logger.info(
@@ -572,6 +746,18 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         telegram_eligible_count, telegram_skip_reasons = _telegram_diagnostics(ranked)
         rejection_reasons.update(telegram_skip_reasons)
         duration = round(monotonic() - started, 2)
+        setup_block_reason_list = [
+            {"reason": reason, "count": count}
+            for reason, count in setup_block_reasons.most_common(12)
+        ]
+        top_near_misses = sorted(
+            near_misses,
+            key=lambda item: (
+                float(item["raw_score"] or 0),
+                float(item["rr"] or 0),
+            ),
+            reverse=True,
+        )[:10]
         top_rejection_reasons = [
             {"reason": reason, "count": count}
             for reason, count in rejection_reasons.most_common(12)
@@ -591,6 +777,11 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 "telegram_eligible": telegram_eligible_count,
                 "telegram_skip_reasons": telegram_skip_reasons,
                 "top_rejection_reasons": top_rejection_reasons,
+                "setup_block_reasons": setup_block_reason_list,
+                "prefilter_passed_markets": top_near_misses,
+                "candle_fetch_errors": fetch_stats.errors,
+                "successful_candle_fetches": fetch_stats.successful,
+                "failed_candle_symbols": fetch_stats.failed_symbols[:20],
                 "duration_seconds": duration,
                 "global_regime_score": global_score,
                 "breadth_above_ma_pct": breadth_above_ma_pct,
@@ -617,6 +808,11 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             "setups_after_qc": len(ideas),
             "website_visible_count": len(ranked),
             "telegram_eligible_count": telegram_eligible_count,
+            "candle_fetch_errors": fetch_stats.errors,
+            "successful_candle_fetches": fetch_stats.successful,
+            "failed_candle_symbols": fetch_stats.failed_symbols[:20],
+            "setup_block_reasons": setup_block_reason_list,
+            "prefilter_passed_markets": top_near_misses,
             "top_rejection_reasons": top_rejection_reasons,
             "last_error": None,
         }
