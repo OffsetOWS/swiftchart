@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from execution_bot.config import get_execution_settings
+from execution_bot.exchanges.hyperliquid import HyperliquidRateLimited
 from execution_bot.models import BotStatus, SignalDecision, SignalIn
 from execution_bot.security import install_secure_logging, require_signed_request
 from execution_bot.service import process_signal, sync_live_account_state
@@ -16,6 +18,7 @@ from execution_bot.telegram_bot import start_telegram_bot, stop_telegram_bot
 app = FastAPI(title="SwiftChart Execution Bot")
 logger = logging.getLogger(__name__)
 _sync_task: asyncio.Task | None = None
+_last_sync_error_log_at = 0.0
 
 execution_origins = [origin.strip() for origin in get_execution_settings().execution_cors_origins.split(",") if origin.strip()]
 if execution_origins:
@@ -55,9 +58,16 @@ async def shutdown() -> None:
 
 
 async def _account_sync_loop() -> None:
+    global _last_sync_error_log_at
     while True:
         try:
             await sync_live_account_state()
+        except HyperliquidRateLimited:
+            now = time.monotonic()
+            settings = get_execution_settings()
+            if now - _last_sync_error_log_at >= settings.hyperliquid_rate_limit_log_interval_seconds:
+                logger.warning("Live account sync is rate limited; retrying after cooldown.")
+                _last_sync_error_log_at = now
         except Exception as exc:
             logger.warning("Live account sync failed, will retry: %s", exc)
         await asyncio.sleep(30)

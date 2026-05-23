@@ -50,6 +50,9 @@ class ExecutionSettings(BaseSettings):
     max_risk_per_trade_percent: float = Field(default=5, gt=0)
     circuit_breaker_max_failures: int = Field(default=3, ge=1)
     circuit_breaker_window_seconds: int = Field(default=900, ge=60)
+    hyperliquid_account_cache_ttl_seconds: int = Field(default=60, ge=5)
+    hyperliquid_rate_limit_cooldown_seconds: int = Field(default=300, ge=30)
+    hyperliquid_rate_limit_log_interval_seconds: int = Field(default=60, ge=10)
 
     hyperliquid_base_url: str = "https://api.hyperliquid.xyz"
     hyperliquid_wallet_address: str = ""

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import asyncio
 
+import httpx
 import pytest
 
 from execution_bot.config import ExecutionSettings
+from execution_bot.exchanges.hyperliquid import HyperliquidExecutionExchange, HyperliquidRateLimited
 from execution_bot.indicators import atr
 from execution_bot.market_filter import evaluate_market
 from execution_bot.models import Candle, MarketSnapshot, SignalDecision, SignalIn
@@ -157,6 +160,84 @@ def test_hyperliquid_address_is_not_used_as_signing_secret(settings):
     )
 
     assert custom.effective_hyperliquid_signing_secret == ""
+
+
+def test_hyperliquid_account_summary_uses_cache(settings, monkeypatch):
+    async def run():
+        HyperliquidExecutionExchange.clear_account_cache()
+        exchange = HyperliquidExecutionExchange()
+        exchange.settings = settings.model_copy(update={"hyperliquid_account_cache_ttl_seconds": 60})
+        calls = 0
+
+        async def load_state(address, key):
+            nonlocal calls
+            calls += 1
+            return {"marginSummary": {"accountValue": "123.45"}, "assetPositions": []}
+
+        monkeypatch.setattr(exchange, "_load_account_state", load_state)
+
+        first = await exchange._account_state("0xabc")
+        second = await exchange._account_state("0xabc")
+
+        assert first == second
+        assert calls == 1
+
+    asyncio.run(run())
+
+
+def test_hyperliquid_429_sets_backoff_and_raises_rate_limit(settings, monkeypatch):
+    async def run():
+        HyperliquidExecutionExchange.clear_account_cache()
+        exchange = HyperliquidExecutionExchange()
+        exchange.settings = settings.model_copy(update={"hyperliquid_rate_limit_cooldown_seconds": 30})
+        sleeps = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        async def operation():
+            request = httpx.Request("POST", "https://api.hyperliquid.xyz/info")
+            response = httpx.Response(429, request=request)
+            raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+        monkeypatch.setattr("execution_bot.exchanges.hyperliquid.asyncio.sleep", fake_sleep)
+
+        with pytest.raises(HyperliquidRateLimited):
+            await exchange._retry_async(operation, attempts=3, account_cache_key=("https://api.hyperliquid.xyz", "0xabc"))
+
+        assert sleeps == [1, 2]
+        assert exchange._account_rate_limited_until[("https://api.hyperliquid.xyz", "0xabc")] > 0
+
+    asyncio.run(run())
+
+
+def test_secure_logging_redacts_tokens_and_user_tuning_params():
+    from execution_bot.security import redact_sensitive
+
+    message = (
+        'GET /api/analyze?symbol=BTCUSDT&account_size=10000&risk_per_trade_pct=1&min_rr=2 '
+        'Authorization: Bearer ey.secret.token api_key="abc123" private_key=0x'
+        + "a" * 64
+    )
+
+    redacted = redact_sensitive(message)
+
+    assert "account_size=10000" not in redacted
+    assert "risk_per_trade_pct=1" not in redacted
+    assert "min_rr=2" not in redacted
+    assert "abc123" not in redacted
+    assert "a" * 64 not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_strategy_regression_core_risk_and_targets_unchanged(settings):
+    signal = SignalIn(pair="BTC", side="BUY", entry=100, confidence=96, timeframe="15m")
+    targets = take_profit_levels(signal, 10)
+
+    assert risk_percent_for_signal(96, 0, settings) == 5
+    assert risk_percent_for_signal(96, 3, settings) == 2.5
+    assert [target["target"] for target in targets] == [110, 120, 130]
+    assert [target["close_percent"] for target in targets] == [40, 30, 30]
 
 
 def test_take_profit_levels_are_r_based():

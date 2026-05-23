@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
+import time
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from typing import Any
@@ -16,6 +18,8 @@ from execution_bot.config import get_execution_settings
 from execution_bot.exchanges.base import ExecutionExchange
 from execution_bot.models import Candle, ExecutionPlan, MarketSnapshot
 
+logger = logging.getLogger(__name__)
+
 
 TIMEFRAME_TO_HL = {
     "1m": "1m",
@@ -29,8 +33,16 @@ TIMEFRAME_TO_HL = {
 }
 
 
+class HyperliquidRateLimited(RuntimeError):
+    pass
+
+
 class HyperliquidExecutionExchange(ExecutionExchange):
     name = "hyperliquid"
+    _account_state_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+    _account_state_locks: dict[tuple[str, str], asyncio.Lock] = {}
+    _account_rate_limited_until: dict[tuple[str, str], float] = {}
+    _last_rate_limit_log_at: dict[tuple[str, str], float] = {}
 
     def __init__(self) -> None:
         self.settings = get_execution_settings()
@@ -45,23 +57,84 @@ class HyperliquidExecutionExchange(ExecutionExchange):
 
         return await self._retry_async(request)
 
-    async def _retry_async(self, operation, attempts: int = 3):
+    @classmethod
+    def clear_account_cache(cls) -> None:
+        cls._account_state_cache.clear()
+        cls._account_state_locks.clear()
+        cls._account_rate_limited_until.clear()
+        cls._last_rate_limit_log_at.clear()
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        response = getattr(exc, "response", None)
+        if getattr(response, "status_code", None) == 429:
+            return True
+        return "429" in str(exc)
+
+    def _account_cache_key(self, address: str) -> tuple[str, str]:
+        return (self.base_url, address.lower())
+
+    def _cache_ttl(self) -> float:
+        return float(self.settings.hyperliquid_account_cache_ttl_seconds)
+
+    def _cooldown_seconds(self) -> float:
+        return float(self.settings.hyperliquid_rate_limit_cooldown_seconds)
+
+    def _mark_account_rate_limited(self, key: tuple[str, str]) -> None:
+        now = time.monotonic()
+        self._account_rate_limited_until[key] = now + self._cooldown_seconds()
+        last_log = self._last_rate_limit_log_at.get(key, 0)
+        if now - last_log >= self.settings.hyperliquid_rate_limit_log_interval_seconds:
+            logger.warning(
+                "Hyperliquid account sync rate limited; using cached account state when available for %.0fs",
+                self._cooldown_seconds(),
+            )
+            self._last_rate_limit_log_at[key] = now
+
+    def _cached_account_state(self, key: tuple[str, str], *, max_age_seconds: float | None = None) -> dict | None:
+        cached = self._account_state_cache.get(key)
+        if not cached:
+            return None
+        cached_at, state = cached
+        age = time.monotonic() - cached_at
+        if max_age_seconds is not None and age > max_age_seconds:
+            return None
+        return dict(state)
+
+    def _store_account_state(self, key: tuple[str, str], state: dict) -> dict:
+        self._account_state_cache[key] = (time.monotonic(), dict(state))
+        self._account_rate_limited_until.pop(key, None)
+        return dict(state)
+
+    def _account_lock(self, key: tuple[str, str]) -> asyncio.Lock:
+        lock = self._account_state_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._account_state_locks[key] = lock
+        return lock
+
+    async def _retry_async(self, operation, attempts: int = 3, *, account_cache_key: tuple[str, str] | None = None):
         last_error: Exception | None = None
         for index in range(attempts):
             try:
                 return await operation()
             except Exception as exc:
                 last_error = exc
+                rate_limited = self._is_rate_limit_error(exc)
+                if rate_limited and account_cache_key:
+                    self._mark_account_rate_limited(account_cache_key)
                 if index == attempts - 1:
                     break
-                await asyncio.sleep(1 + index)
+                await asyncio.sleep(min(8, 2**index) if rate_limited else 1 + index)
+        if last_error and self._is_rate_limit_error(last_error):
+            raise HyperliquidRateLimited(f"Hyperliquid rate limited request: {last_error}") from last_error
         raise RuntimeError(f"Hyperliquid connection failed after {attempts} attempts: {last_error}") from last_error
 
-    async def _retry_thread(self, operation, attempts: int = 3):
+    async def _retry_thread(self, operation, attempts: int = 3, *, account_cache_key: tuple[str, str] | None = None):
         async def call():
             return await asyncio.to_thread(operation)
 
-        return await self._retry_async(call, attempts=attempts)
+        return await self._retry_async(call, attempts=attempts, account_cache_key=account_cache_key)
 
     async def get_market_snapshot(self, symbol: str, timeframe: str, limit: int = 120) -> MarketSnapshot:
         coin = symbol.upper().replace("USDT", "")
@@ -235,12 +308,7 @@ class HyperliquidExecutionExchange(ExecutionExchange):
         address = self._account_address()
         if not address:
             return {}
-
-        def load_state():
-            info = Info(self.base_url, skip_ws=True, timeout=20)
-            return info.user_state(address)
-
-        state = await self._retry_thread(load_state)
+        state = await self._account_state(address)
         margin = state.get("marginSummary") or state.get("crossMarginSummary") or {}
         positions = []
         for item in state.get("assetPositions", []):
@@ -256,6 +324,43 @@ class HyperliquidExecutionExchange(ExecutionExchange):
                     }
                 )
         return {"balance": float(margin["accountValue"]) if margin.get("accountValue") is not None else None, "positions": positions}
+
+    async def _account_state(self, address: str) -> dict:
+        key = self._account_cache_key(address)
+        cooldown_until = self._account_rate_limited_until.get(key, 0)
+        if cooldown_until > time.monotonic():
+            cached = self._cached_account_state(key)
+            if cached is not None:
+                return cached
+
+        cached = self._cached_account_state(key, max_age_seconds=self._cache_ttl())
+        if cached is not None:
+            return cached
+
+        async with self._account_lock(key):
+            cached = self._cached_account_state(key, max_age_seconds=self._cache_ttl())
+            if cached is not None:
+                return cached
+            cooldown_until = self._account_rate_limited_until.get(key, 0)
+            if cooldown_until > time.monotonic():
+                cached = self._cached_account_state(key)
+                if cached is not None:
+                    return cached
+            try:
+                return self._store_account_state(key, await self._load_account_state(address, key))
+            except HyperliquidRateLimited:
+                cached = self._cached_account_state(key)
+                if cached is not None:
+                    return cached
+                raise
+
+    async def _load_account_state(self, address: str, key: tuple[str, str]) -> dict:
+        def load_state():
+            info = Info(self.base_url, skip_ws=True, timeout=20)
+            return info.user_state(address)
+
+        state = await self._retry_thread(load_state, account_cache_key=key)
+        return state if isinstance(state, dict) else {}
 
     async def recent_fills(self, symbol: str, start_time_ms: int) -> list[dict]:
         address = self._account_address()
