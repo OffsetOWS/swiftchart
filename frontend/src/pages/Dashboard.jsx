@@ -1,5 +1,34 @@
-import { RefreshCcw } from "lucide-react";
+import { Clock3, Eye, RefreshCcw } from "lucide-react";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
+
+function fmt(value) {
+  if (value === undefined || value === null) return "-";
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+
+function WatchlistCard({ item }) {
+  const label = item.label || "Watching";
+  const rr = item.rr ? `${item.rr}R` : "-";
+  const score = item.raw_score ? Math.round(item.raw_score) : "-";
+  return (
+    <article className="watchlist-card">
+      <div>
+        <span className="watchlist-label"><Eye size={13} /> {label}</span>
+        <h3>{item.symbol}</h3>
+        <p>{item.reason || item.block_reason || "Needs confirmation"}</p>
+      </div>
+      <div className="watchlist-meta">
+        <span>{item.timeframe || "-"} · {item.regime || "Scanning"}</span>
+        <span>Score {score}</span>
+        <span>R:R {rr}</span>
+      </div>
+      <div className="watchlist-levels">
+        <span>Support <b>{fmt(item.nearest_support)}</b></span>
+        <span>Resistance <b>{fmt(item.nearest_resistance)}</b></span>
+      </div>
+    </article>
+  );
+}
 
 export default function Dashboard({
   exchange,
@@ -7,6 +36,7 @@ export default function Dashboard({
   timeframe,
   setTimeframe,
   topIdeas,
+  watchlist = [],
   loadingTopIdeas,
   refreshTopIdeas,
   onPaperTrade,
@@ -92,6 +122,23 @@ export default function Dashboard({
                 />
               );
             })}
+          </div>
+        </section>
+
+        <section className="panel watchlist-panel">
+          <div className="panel-head">
+            <div>
+              <span className="eyebrow">WATCHLIST</span>
+              <h2>Near-Miss Candidates</h2>
+            </div>
+            <span className="badge"><Clock3 size={13} /> Waiting</span>
+          </div>
+          <div className="watchlist-list">
+            {loadingTopIdeas ? <div className="empty">Checking near-miss candidates...</div> : null}
+            {!loadingTopIdeas && watchlist.length === 0 ? <div className="empty">No watchlist candidates right now.</div> : null}
+            {watchlist.map((item) => (
+              <WatchlistCard key={`${item.exchange}-${item.symbol}-${item.reason}-${item.raw_score || 0}`} item={item} />
+            ))}
           </div>
         </section>
 

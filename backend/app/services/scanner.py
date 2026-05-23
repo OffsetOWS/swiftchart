@@ -43,6 +43,7 @@ _last_health: dict = {
     "last_successful_setup_at": None,
     "last_telegram_sent_at": None,
     "last_non_empty_website_output_at": None,
+    "last_watchlist_update_at": None,
     "scanner_restart_count": 0,
     "cache_age_seconds": None,
     "dedup_cache_size": 0,
@@ -57,6 +58,9 @@ _last_health: dict = {
     "candidates_prefilter_passed": 0,
     "setups_created": 0,
     "setups_after_qc": 0,
+    "ready_setups_count": 0,
+    "watchlist_count": 0,
+    "watchlist_reasons": [],
     "website_visible_count": 0,
     "telegram_eligible_count": 0,
     "candle_fetch_errors": 0,
@@ -488,6 +492,18 @@ def _setup_block_reason(analysis: AnalysisResponse) -> str:
     return "no setup created"
 
 
+def _watchlist_label(block_reason: str, entry_status: str | None = None) -> str:
+    normalized_status = str(entry_status or "").upper()
+    normalized_reason = block_reason.lower()
+    if normalized_status == "WAIT_FOR_RETEST" or "retest" in normalized_reason:
+        return "Waiting for retest"
+    if "unconfirmed sweep" in normalized_reason:
+        return "Unconfirmed sweep"
+    if "wait" in normalized_reason:
+        return "Watching"
+    return "Needs confirmation"
+
+
 def _near_miss_diagnostic(analysis: AnalysisResponse) -> dict:
     price = float(analysis.current_price)
     support, resistance = _nearest_zones(price, analysis.support_zones, analysis.resistance_zones)
@@ -502,6 +518,66 @@ def _near_miss_diagnostic(analysis: AnalysisResponse) -> dict:
         "raw_score": _review_raw_score(analysis),
         "rr": _review_rr(analysis),
         "block_reason": _setup_block_reason(analysis),
+    }
+
+
+def _watchlist_candidate_from_analysis(analysis: AnalysisResponse) -> dict | None:
+    diagnostic = _near_miss_diagnostic(analysis)
+    block_reason = str(diagnostic["block_reason"] or "")
+    decision = analysis.market_regime_data.trade_decision
+    components = analysis.market_regime_data.components
+    raw_score = diagnostic.get("raw_score")
+    rr = diagnostic.get("rr")
+    position = diagnostic.get("position")
+    near_edge = position is None or position <= 0.32 or position >= 0.68
+    hard_no_trade = decision == "NO_TRADE" or block_reason.startswith("regime is NO_TRADE")
+    dead_or_invalid = components.get("regime_block_reason") in {"low_volatility", "insufficient_structure", "compressed_chop"}
+    score_watch = raw_score is not None and 55 <= float(raw_score) < MIN_SETUP_SCORE
+    rr_watch = rr is not None and float(rr) >= 1.7
+    confirmation_watch = block_reason in {"regime is WAIT", "unconfirmed sweep", "no confirmed trigger", "score below 65"}
+    if hard_no_trade or dead_or_invalid or not near_edge:
+        return None
+    if not (confirmation_watch or score_watch or rr_watch or diagnostic.get("trigger_detected")):
+        return None
+    return {
+        **diagnostic,
+        "label": _watchlist_label(block_reason),
+        "reason": block_reason,
+        "timeframe": analysis.timeframe,
+        "exchange": analysis.exchange,
+        "current_price": round(float(analysis.current_price), 8),
+    }
+
+
+def _watchlist_candidate_from_idea(idea: TradeIdea) -> dict | None:
+    score = _idea_score(idea)
+    rr = float(idea.risk_reward_ratio)
+    entry_status = str(idea.entry_status)
+    if entry_status == "REJECTED_EXHAUSTED" or idea.exhaustion_risk == "High" or idea.regime_trade_decision == "NO_TRADE":
+        return None
+    if entry_status == "READY" and score >= MIN_SETUP_SCORE and rr >= 2.0:
+        return None
+    reason = "Waiting for retest" if entry_status == "WAIT_FOR_RETEST" else "Needs confirmation"
+    if not (entry_status == "WAIT_FOR_RETEST" or 55 <= score < MIN_SETUP_SCORE or 1.7 <= rr < 2.0):
+        return None
+    return {
+        "symbol": idea.symbol,
+        "timeframe": idea.timeframe,
+        "exchange": idea.exchange,
+        "regime": idea.regime_type or idea.market_regime,
+        "decision": idea.regime_trade_decision or "WAIT",
+        "direction": idea.direction,
+        "position": None,
+        "nearest_support": None,
+        "nearest_resistance": None,
+        "trigger_detected": bool(idea.reversal_confirmations),
+        "raw_score": round(score, 1),
+        "rr": round(rr, 2),
+        "block_reason": reason,
+        "label": _watchlist_label(reason, entry_status),
+        "reason": reason,
+        "entry_status": entry_status,
+        "current_price": None,
     }
 
 
@@ -695,8 +771,10 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         )
         rejection_reasons: Counter[str] = Counter()
         setup_block_reasons: Counter[str] = Counter()
+        watchlist_reasons: Counter[str] = Counter()
         market_debug: list[dict] = []
         near_misses: list[dict] = []
+        watchlist: list[dict] = []
         fetch_stats = CandleFetchStats()
         markets = await discover_all_scan_markets(selected_exchange)
         if not markets:
@@ -779,6 +857,10 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     diagnostic = _near_miss_diagnostic(analysis)
                     if analysis.trade_ideas:
                         for idea in analysis.trade_ideas:
+                            watchlist_candidate = _watchlist_candidate_from_idea(idea)
+                            if watchlist_candidate:
+                                watchlist.append(watchlist_candidate)
+                                watchlist_reasons[watchlist_candidate["reason"]] += 1
                             logger.info(
                                 (
                                     "Scanner setup result exchange=%s symbol=%s timeframe=%s regime=%s decision=%s "
@@ -802,6 +884,10 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                         block_reason = diagnostic["block_reason"]
                         setup_block_reasons[block_reason] += 1
                         near_misses.append(diagnostic)
+                        watchlist_candidate = _watchlist_candidate_from_analysis(analysis)
+                        if watchlist_candidate:
+                            watchlist.append(watchlist_candidate)
+                            watchlist_reasons[watchlist_candidate["reason"]] += 1
                         rejection_reasons[reason] += 1
                         market_debug.append(
                             {
@@ -858,7 +944,13 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                             review.adjusted_score,
                             reason,
                         )
-                    return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+                    return [
+                        idea
+                        for idea in analysis.trade_ideas
+                        if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE
+                        and idea.risk_reward_ratio >= risk.min_rr
+                        and idea.entry_status == "READY"
+                    ]
                 except Exception as exc:
                     logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
                     rejection_reasons[f"analysis error: {exc}"] += 1
@@ -891,6 +983,10 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             {"reason": reason, "count": count}
             for reason, count in setup_block_reasons.most_common(12)
         ]
+        watchlist_reason_list = [
+            {"reason": reason, "count": count}
+            for reason, count in watchlist_reasons.most_common(12)
+        ]
         top_near_misses = sorted(
             near_misses,
             key=lambda item: (
@@ -903,6 +999,15 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             {"reason": reason, "count": count}
             for reason, count in rejection_reasons.most_common(12)
         ]
+        watchlist_ranked = sorted(
+            watchlist,
+            key=lambda item: (
+                float(item.get("raw_score") or 0),
+                float(item.get("rr") or 0),
+                bool(item.get("trigger_detected")),
+            ),
+            reverse=True,
+        )[:12]
         finished_at = _now_iso()
         last_successful_setup_at = _last_health.get("last_successful_setup_at")
         if ideas:
@@ -910,12 +1015,16 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         last_non_empty_website_output_at = _last_health.get("last_non_empty_website_output_at")
         if ranked:
             last_non_empty_website_output_at = finished_at
+        last_watchlist_update_at = _last_health.get("last_watchlist_update_at")
+        if watchlist_ranked:
+            last_watchlist_update_at = finished_at
         window_start, window_end = _current_window_bounds(selected_exchange, timeframe)
         dedupe_snapshot = _dedupe_health_snapshot()
         result = {
             "timeframe": timeframe,
             "exchange": selected_exchange,
             "ideas": ranked,
+            "watchlist": watchlist_ranked,
             "errors": [],
             "message": None if len(ranked) >= 5 else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
             "scan_stats": {
@@ -924,6 +1033,9 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
                 "valid_setups": len(ranked),
+                "ready_setups": len(ranked),
+                "watchlist_count": len(watchlist_ranked),
+                "watchlist_reasons": watchlist_reason_list,
                 "telegram_eligible": telegram_eligible_count,
                 "telegram_skip_reasons": telegram_skip_reasons,
                 "top_rejection_reasons": top_rejection_reasons,
@@ -952,6 +1064,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             "last_successful_setup_at": last_successful_setup_at,
             "last_telegram_sent_at": dedupe_snapshot["last_telegram_sent_at"],
             "last_non_empty_website_output_at": last_non_empty_website_output_at,
+            "last_watchlist_update_at": last_watchlist_update_at,
             "scanner_restart_count": max(0, _scanner_start_count - 1),
             "cache_age_seconds": None,
             "dedup_cache_size": dedupe_snapshot["dedup_cache_size"],
@@ -966,6 +1079,9 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             "candidates_prefilter_passed": len(candidates),
             "setups_created": setup_attempts,
             "setups_after_qc": len(ideas),
+            "ready_setups_count": len(ranked),
+            "watchlist_count": len(watchlist_ranked),
+            "watchlist_reasons": watchlist_reason_list,
             "website_visible_count": len(ranked),
             "telegram_eligible_count": telegram_eligible_count,
             "candle_fetch_errors": fetch_stats.errors,

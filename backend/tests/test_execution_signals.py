@@ -1,8 +1,11 @@
 from app.models.schemas import TradeIdea
-from app.services.execution_signals import execution_signal_id, trade_idea_to_execution_signal
+import pytest
+
+from app.services import execution_signals
+from app.services.execution_signals import dispatch_trade_ideas_to_execution, execution_signal_id, trade_idea_to_execution_signal
 
 
-def sample_idea(direction: str = "Long") -> TradeIdea:
+def sample_idea(direction: str = "Long", entry_status: str = "READY") -> TradeIdea:
     return TradeIdea(
         symbol="BTCUSDT",
         timeframe="4h",
@@ -17,6 +20,7 @@ def sample_idea(direction: str = "Long") -> TradeIdea:
         confidence_score=82,
         invalid_condition="Break below support.",
         rank_score=91,
+        entry_status=entry_status,
     )
 
 
@@ -45,3 +49,42 @@ def test_execution_signal_id_is_stable_for_same_trade_shape():
     idea = sample_idea()
 
     assert execution_signal_id(idea) == execution_signal_id(idea.model_copy())
+
+
+@pytest.mark.anyio
+async def test_execution_dispatch_ignores_non_ready_watchlist_candidate(monkeypatch, tmp_path):
+    posts = []
+
+    class Settings:
+        execution_autotrade_enabled = True
+        execution_signal_webhook_url = "https://example.test/webhook"
+        execution_webhook_secret = ""
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"accepted": True}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            posts.append((args, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(execution_signals, "get_settings", lambda: Settings())
+    monkeypatch.setattr(execution_signals.httpx, "AsyncClient", FakeClient)
+
+    await dispatch_trade_ideas_to_execution([sample_idea(entry_status="WAIT_FOR_RETEST")])
+
+    assert posts == []

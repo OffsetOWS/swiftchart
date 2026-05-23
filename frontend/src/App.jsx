@@ -41,6 +41,7 @@ export default function App() {
   const [symbol, setSymbol] = useState("SOLUSDT");
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });
   const [topIdeas, setTopIdeas] = useState([]);
+  const [watchlist, setWatchlist] = useState([]);
   const [candles, setCandles] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -69,6 +70,7 @@ export default function App() {
     try {
       const data = await getTopIdeas({ exchange, timeframe });
       setTopIdeas(data.ideas || []);
+      setWatchlist(data.watchlist || []);
     } catch (error) {
       setNoticeType("error");
       setNotice(error.message);
@@ -421,6 +423,7 @@ export default function App() {
               timeframe={timeframe}
               setTimeframe={setTimeframe}
               topIdeas={topIdeas}
+              watchlist={watchlist}
               loadingTopIdeas={loadingTopIdeas}
               refreshTopIdeas={refreshTopIdeas}
               onPaperTrade={paperTrade}
@@ -440,6 +443,7 @@ export default function App() {
               timeframe={timeframe}
               setTimeframe={setTimeframe}
               topIdeas={topIdeas}
+              watchlist={watchlist}
               loadingTopIdeas={loadingTopIdeas}
               refreshTopIdeas={refreshTopIdeas}
               onPaperTrade={paperTrade}

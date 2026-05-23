@@ -61,6 +61,25 @@ async def test_alert_scan_filters_by_score_and_entry_status(monkeypatch, tmp_pat
 
 
 @pytest.mark.anyio
+async def test_bot_top_ideas_ignores_website_watchlist(monkeypatch):
+    from bot import handlers
+
+    async def fake_cached_top_ideas(exchange: str, timeframe: str):
+        return {
+            "exchange": "hyperliquid",
+            "ideas": [],
+            "watchlist": [{"symbol": "BTCUSDT", "label": "Watching"}],
+        }
+
+    monkeypatch.setattr(handlers, "cached_top_ideas", fake_cached_top_ideas)
+
+    ideas, exchange = await handlers.scan_top_ideas("4h", "hyperliquid")
+
+    assert exchange == "hyperliquid"
+    assert ideas == []
+
+
+@pytest.mark.anyio
 async def test_alert_scan_marks_alert_processed_after_send_attempt(monkeypatch, tmp_path):
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("ALERT_MIN_SCORE", "75")

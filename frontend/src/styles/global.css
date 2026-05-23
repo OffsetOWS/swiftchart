@@ -582,8 +582,10 @@ p {
 .bento-hero { grid-column: span 5; }
 .chart-preview-panel { grid-column: span 3; }
 .dominant-ideas { grid-column: span 4; grid-row: span 4; }
+.watchlist-panel { grid-column: span 4; grid-row: span 3; }
 .compact-dashboard .bento-hero { grid-column: span 4; }
 .compact-dashboard .dominant-ideas { grid-column: span 8; }
+.compact-dashboard .watchlist-panel { grid-column: span 12; }
 .mini-card { grid-column: span 2; min-height: 128px; }
 .strategy-statement { grid-column: span 8; }
 .risk-card { grid-column: span 4; }
@@ -807,6 +809,71 @@ p {
 .idea-list {
   display: grid;
   gap: 12px;
+}
+.watchlist-list {
+  display: grid;
+  gap: 10px;
+}
+.watchlist-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(128, 99, 21, 0.28);
+  background: rgba(221, 184, 79, 0.08);
+  animation: fadeInUp 320ms ease both;
+}
+.dark-mode .watchlist-card {
+  border-color: rgba(221, 184, 79, 0.24);
+  background:
+    linear-gradient(145deg, rgba(221,184,79,0.11), rgba(255,255,255,0.025)),
+    #101110;
+}
+.watchlist-label,
+.watchlist-meta,
+.watchlist-levels {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.watchlist-label {
+  width: fit-content;
+  margin-bottom: 8px;
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.watchlist-card h3 {
+  font-size: 24px;
+  line-height: 1;
+}
+.watchlist-card p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.watchlist-meta span,
+.watchlist-levels span {
+  min-height: 28px;
+  padding: 7px 9px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 800;
+}
+.dark-mode .watchlist-meta span,
+.dark-mode .watchlist-levels span {
+  border-color: rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.035);
+}
+.watchlist-levels b {
+  color: var(--ink);
+  font-weight: 900;
+}
+.dark-mode .watchlist-levels b {
+  color: #f5f3ea;
 }
 .idea-card {
   padding: 18px;
@@ -2517,8 +2584,10 @@ button:disabled {
   .bento-hero,
   .chart-preview-panel,
   .dominant-ideas,
+  .watchlist-panel,
   .compact-dashboard .bento-hero,
   .compact-dashboard .dominant-ideas,
+  .compact-dashboard .watchlist-panel,
   .mini-card,
   .strategy-statement,
   .risk-card {
