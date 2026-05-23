@@ -36,6 +36,10 @@ def redact_sensitive(value: object) -> str:
 
 class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == "uvicorn.access" and isinstance(record.args, tuple):
+            record.msg = redact_sensitive(record.msg)
+            record.args = tuple(redact_sensitive(arg) if isinstance(arg, str) else arg for arg in record.args)
+            return True
         record.msg = redact_sensitive(record.getMessage())
         record.args = ()
         return True

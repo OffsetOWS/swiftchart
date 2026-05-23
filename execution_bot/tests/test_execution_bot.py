@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import asyncio
+import logging
 
 import httpx
 import pytest
@@ -212,7 +213,7 @@ def test_hyperliquid_429_sets_backoff_and_raises_rate_limit(settings, monkeypatc
 
 
 def test_secure_logging_redacts_tokens_and_user_tuning_params():
-    from execution_bot.security import redact_sensitive
+    from execution_bot.security import RedactingFilter, redact_sensitive
 
     message = (
         'GET /api/analyze?symbol=BTCUSDT&account_size=10000&risk_per_trade_pct=1&min_rr=2 '
@@ -228,6 +229,20 @@ def test_secure_logging_redacts_tokens_and_user_tuning_params():
     assert "abc123" not in redacted
     assert "a" * 64 not in redacted
     assert "[REDACTED]" in redacted
+
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        '%s - "%s" %s',
+        ("127.0.0.1:1234", "GET /api/analyze?account_size=10000&risk_per_trade_pct=1 HTTP/1.1", 200),
+        None,
+    )
+    assert RedactingFilter().filter(record) is True
+    assert len(record.args) == 3
+    assert "account_size=10000" not in record.args[1]
+    assert "risk_per_trade_pct=1" not in record.args[1]
 
 
 def test_strategy_regression_core_risk_and_targets_unchanged(settings):
