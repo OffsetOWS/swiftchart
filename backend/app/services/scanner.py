@@ -40,6 +40,33 @@ class Candidate:
     distance_score: float
 
 
+@dataclass
+class ScanFetchStats:
+    successful_candle_fetches: int = 0
+    failed_candle_fetches: int = 0
+    failed_symbols: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.failed_symbols is None:
+            self.failed_symbols = []
+
+    def record_success(self) -> None:
+        self.successful_candle_fetches += 1
+
+    def record_failure(self, exchange: str, symbol: str, timeframe: str, error: Exception) -> None:
+        self.failed_candle_fetches += 1
+        label = f"{exchange}:{symbol}:{timeframe}"
+        if self.failed_symbols is not None and label not in self.failed_symbols:
+            self.failed_symbols.append(label)
+        logger.warning(
+            "Scanner candle fetch failed exchange=%s symbol=%s timeframe=%s error=%s",
+            exchange,
+            symbol,
+            timeframe,
+            error,
+        )
+
+
 def higher_timeframes_for(timeframe: str) -> list[str]:
     normalized = timeframe.lower()
     if normalized in {"30m", "1h"}:
@@ -171,10 +198,20 @@ def prefilter_dataframe(df: pd.DataFrame) -> tuple[bool, float, float]:
     return bool(near_edge and not choppy), volume, distance_from_mid
 
 
-async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Semaphore) -> Candidate | None:
+async def _scan_candles(exchange: str, symbol: str, timeframe: str, limit: int, stats: ScanFetchStats) -> pd.DataFrame:
+    try:
+        df = await get_candles_cached(exchange, symbol, timeframe, limit)
+        stats.record_success()
+        return df
+    except Exception as exc:
+        stats.record_failure(exchange, symbol, timeframe, exc)
+        raise
+
+
+async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Semaphore, stats: ScanFetchStats) -> Candidate | None:
     async with semaphore:
         try:
-            df = await get_candles_cached(market["exchange"], market["symbol"], timeframe, PREFILTER_LIMIT)
+            df = await _scan_candles(market["exchange"], market["symbol"], timeframe, PREFILTER_LIMIT, stats)
             ok, volume, distance = prefilter_dataframe(df)
             if not ok:
                 return None
@@ -184,7 +221,7 @@ async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Sem
             return None
 
 
-async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSettings, semaphore: asyncio.Semaphore) -> list[TradeIdea]:
+async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSettings, semaphore: asyncio.Semaphore, stats: ScanFetchStats) -> list[TradeIdea]:
     async with semaphore:
         try:
             df = candidate.candles
@@ -193,7 +230,7 @@ async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSet
             htf_dfs = []
             for htf in higher_timeframes_for(timeframe):
                 try:
-                    htf_dfs.append(await get_candles_cached(candidate.exchange, candidate.symbol, htf, 220))
+                    htf_dfs.append(await _scan_candles(candidate.exchange, candidate.symbol, htf, 220, stats))
                 except Exception:
                     continue
             analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
@@ -229,7 +266,8 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
             scan_markets.extend(selected_window)
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
-        candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore) for market in scan_markets])
+        fetch_stats = ScanFetchStats()
+        candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore, fetch_stats) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
         candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:candidate_limit]
         breadth_values = []
@@ -254,7 +292,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     htf_dfs = []
                     for htf in higher_timeframes_for(timeframe):
                         try:
-                            htf_dfs.append(await get_candles_cached(candidate.exchange, candidate.symbol, htf, 220))
+                            htf_dfs.append(await _scan_candles(candidate.exchange, candidate.symbol, htf, 220, fetch_stats))
                         except Exception:
                             continue
                     analysis = analyze_dataframe(
@@ -299,6 +337,9 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
                 "valid_setups": len(ranked),
+                "successful_candle_fetches": fetch_stats.successful_candle_fetches,
+                "failed_candle_fetches": fetch_stats.failed_candle_fetches,
+                "failed_symbols": fetch_stats.failed_symbols or [],
                 "duration_seconds": duration,
                 "global_regime_score": global_score,
                 "breadth_above_ma_pct": breadth_above_ma_pct,
@@ -314,12 +355,15 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         }
         _scan_cache[key] = (monotonic(), result)
         logger.info(
-            "Scan completed: Markets: %s Scan window: %s Filtered: %s Analyzed: %s Valid setups: %s Time: %ss",
+            "Scan completed: Markets: %s Scan window: %s Filtered: %s Analyzed: %s Valid setups: %s Candle successes: %s Candle failures: %s Failed symbols: %s Time: %ss",
             len(markets),
             len(scan_markets),
             len(candidates),
             len(candidates),
             len(ranked),
+            fetch_stats.successful_candle_fetches,
+            fetch_stats.failed_candle_fetches,
+            fetch_stats.failed_symbols or [],
             duration,
         )
         return result

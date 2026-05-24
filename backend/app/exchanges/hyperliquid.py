@@ -26,10 +26,11 @@ class HyperliquidClient(ExchangeClient):
     def __init__(self) -> None:
         self.base_url = get_settings().hyperliquid_base_url.rstrip("/")
 
-    async def _post_info(self, payload: dict) -> dict | list:
+    async def _post_info(self, payload: dict, *, attempts: int = 3) -> dict | list:
         async with httpx.AsyncClient(timeout=20) as client:
             last_error: Exception | None = None
-            for attempt in range(3):
+            total_attempts = max(1, attempts)
+            for attempt in range(total_attempts):
                 try:
                     response = await client.post(f"{self.base_url}/info", json=payload)
                     if response.status_code in {429} or response.status_code >= 500:
@@ -38,21 +39,21 @@ class HyperliquidClient(ExchangeClient):
                             request=response.request,
                             response=response,
                         )
-                        if attempt < 2:
+                        if attempt < total_attempts - 1:
                             await asyncio.sleep(0.6 * (attempt + 1))
                             continue
                     response.raise_for_status()
                     return response.json()
                 except (httpx.TimeoutException, httpx.NetworkError) as exc:
                     last_error = exc
-                    if attempt < 2:
+                    if attempt < total_attempts - 1:
                         await asyncio.sleep(0.6 * (attempt + 1))
                         continue
                     break
                 except httpx.HTTPStatusError as exc:
                     last_error = exc
                     if exc.response.status_code in {429} or exc.response.status_code >= 500:
-                        if attempt < 2:
+                        if attempt < total_attempts - 1:
                             await asyncio.sleep(0.6 * (attempt + 1))
                             continue
                         break
@@ -96,7 +97,7 @@ class HyperliquidClient(ExchangeClient):
             "type": "candleSnapshot",
             "req": {"coin": coin, "interval": interval, "startTime": start_ms, "endTime": now_ms},
         }
-        rows = await self._post_info(payload)
+        rows = await self._post_info(payload, attempts=1)
         df = pd.DataFrame(rows)
         if df.empty:
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
