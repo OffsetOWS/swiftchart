@@ -27,13 +27,11 @@ from bot.handlers import (  # noqa: E402
     unsubscribe,
 )
 from bot.alerts import alert_loop  # noqa: E402
-from app.services.scanner import start_background_scanner  # noqa: E402
 from app.utils.database import init_db  # noqa: E402
 from app.utils.secure_logging import install_secure_logging  # noqa: E402
 
 
 async def post_init(application: Application) -> None:
-    start_background_scanner()
     asyncio.create_task(alert_loop(application.bot))
 
 

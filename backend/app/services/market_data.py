@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
+import time
 from time import monotonic
 from typing import Any
 
@@ -16,8 +18,6 @@ _candle_cache: dict[tuple[str, str, str, int], tuple[float, pd.DataFrame]] = {}
 _market_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _locks: dict[str, asyncio.Lock] = {}
 _candle_semaphores: dict[str, asyncio.Semaphore] = {}
-_candle_pacing_locks: dict[str, asyncio.Lock] = {}
-_last_candle_request_at: dict[str, float] = {}
 
 
 def _lock(name: str) -> asyncio.Lock:
@@ -34,13 +34,6 @@ def _candle_semaphore(exchange: str) -> asyncio.Semaphore:
     return _candle_semaphores[normalized]
 
 
-def _candle_pacing_lock(exchange: str) -> asyncio.Lock:
-    normalized = exchange.lower()
-    if normalized not in _candle_pacing_locks:
-        _candle_pacing_locks[normalized] = asyncio.Lock()
-    return _candle_pacing_locks[normalized]
-
-
 async def _pace_candle_request(exchange: str) -> None:
     normalized = exchange.lower()
     if normalized != "hyperliquid":
@@ -48,12 +41,24 @@ async def _pace_candle_request(exchange: str) -> None:
     delay = get_settings().hyperliquid_candle_request_delay_seconds
     if delay <= 0:
         return
-    async with _candle_pacing_lock(normalized):
-        now = monotonic()
-        elapsed = now - _last_candle_request_at.get(normalized, 0)
+    lock_path = "/tmp/swiftchart_hyperliquid_candle_pace.lock"
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        lock_file.seek(0)
+        raw = lock_file.read().strip()
+        try:
+            last_request_at = float(raw) if raw else 0.0
+        except ValueError:
+            last_request_at = 0.0
+        now = time.time()
+        elapsed = now - last_request_at
         if elapsed < delay:
             await asyncio.sleep(delay - elapsed)
-        _last_candle_request_at[normalized] = monotonic()
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(str(time.time()))
+        lock_file.flush()
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def candle_ttl(timeframe: str) -> int:
