@@ -6,11 +6,11 @@ from telegram.ext import ContextTypes
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.models.schemas import RiskSettings
 from app.services.market_data import get_candles_cached
-from app.services.scanner import cached_top_ideas
 from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas, stats
 from app.strategy.trade_ideas import analyze_dataframe
 from bot.formatter import format_analysis, format_history, format_stats, format_top_ideas, help_text, strategy_text
 from bot.keyboards import command_keyboard, main_menu_keyboard
+from bot.scanner import scan_top_ideas
 from bot.storage import add_subscriber, get_subscribers, remove_subscriber
 
 logger = logging.getLogger(__name__)
@@ -62,12 +62,6 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
     return analysis
 
 
-async def scan_top_ideas(timeframe: str, exchange: str | None = None):
-    selected_exchange = exchange or get_settings().default_exchange
-    result = await cached_top_ideas(selected_exchange, timeframe)
-    return result["ideas"], result.get("exchange", selected_exchange)
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = (
         "Welcome to SwiftChart Bot.\n\n"
@@ -111,8 +105,8 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     status = await update.effective_message.reply_text(f"Scanning top ideas on {timeframe.upper()}...")
     try:
-        ideas, exchange = await scan_top_ideas(timeframe)
-        await status.edit_text(format_top_ideas(ideas, timeframe, exchange))
+        ideas, exchange, _ = await scan_top_ideas(timeframe)
+        await status.edit_text(format_top_ideas(ideas[:5], timeframe, exchange))
     except Exception as exc:
         logger.exception("Top scan failed")
         await status.edit_text(f"Could not scan top ideas: {exc}\n\nNot financial advice. Manage your risk.")
