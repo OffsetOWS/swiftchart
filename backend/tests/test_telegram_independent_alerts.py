@@ -111,7 +111,7 @@ def test_telegram_does_not_call_cached_top_ideas(monkeypatch, tmp_path):
     assert result["sent"] == 1
 
 
-def test_telegram_sends_only_ready_setups(monkeypatch, tmp_path):
+def test_telegram_sends_limit_order_setups(monkeypatch, tmp_path):
     from bot.alerts import run_alert_scan
 
     configure_independent_scan(
@@ -120,17 +120,21 @@ def test_telegram_sends_only_ready_setups(monkeypatch, tmp_path):
         {
             "SOLUSDT": [idea("SOLUSDT", entry_status="READY")],
             "ETHUSDT": [idea("ETHUSDT", score=95, entry_status="WAIT_FOR_RETEST")],
+            "DOGEUSDT": [idea("DOGEUSDT", score=95, entry_status="REJECTED_EXHAUSTED")],
         },
     )
 
     bot = FakeBot()
     result = asyncio.run(run_alert_scan(bot))
 
-    assert result["ideas"] == 2
-    assert result["eligible"] == 1
-    assert result["sent"] == 1
-    assert len(bot.messages) == 1
-    assert "SOLUSDT" in bot.messages[0][1]
+    assert result["ideas"] == 3
+    assert result["eligible"] == 2
+    assert result["sent"] == 2
+    assert len(bot.messages) == 2
+    sent_text = "\n".join(message for _, message in bot.messages)
+    assert "SOLUSDT" in sent_text
+    assert "ETHUSDT" in sent_text
+    assert "DOGEUSDT" not in sent_text
 
 
 def test_telegram_alert_dedup_is_kept(monkeypatch, tmp_path):
@@ -145,6 +149,26 @@ def test_telegram_alert_dedup_is_kept(monkeypatch, tmp_path):
     assert first["sent"] == 1
     assert second["sent"] == 0
     assert len(bot.messages) == 1
+
+
+def test_telegram_market_discovery_does_not_filter_low_liquidity(monkeypatch):
+    import bot.scanner as telegram_scanner
+
+    async def fake_markets(exchange):
+        return [
+            {"symbol": "LOWUSDT", "active": True, "perpVolume24h": 1},
+            {"symbol": "ZEROUSDT", "active": True, "perpVolume24h": 0},
+            {"symbol": "OFFUSDT", "active": False, "perpVolume24h": 1_000_000},
+        ]
+
+    monkeypatch.setenv("TELEGRAM_SCAN_SYMBOL_LIMIT", "50")
+    monkeypatch.setattr(telegram_scanner, "get_markets_cached", fake_markets)
+
+    symbols = asyncio.run(telegram_scanner._scan_symbols("hyperliquid"))
+
+    assert "LOWUSDT" in symbols
+    assert "ZEROUSDT" in symbols
+    assert "OFFUSDT" not in symbols
 
 
 def test_website_top_ideas_still_uses_shared_cache(monkeypatch):

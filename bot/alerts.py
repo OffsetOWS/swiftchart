@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from collections import Counter
+from datetime import UTC, datetime
 
 from telegram import Bot
 
@@ -25,7 +26,12 @@ def idea_score(idea: TradeIdea) -> float:
 
 
 def alert_key(idea: TradeIdea) -> str:
-    return setup_fingerprint(idea)
+    hour = datetime.now(UTC).strftime("%Y%m%d%H")
+    return f"{setup_fingerprint(idea)}|{hour}"
+
+
+def is_limit_order_alertable(idea: TradeIdea) -> bool:
+    return idea.entry_status != "REJECTED_EXHAUSTED"
 
 
 async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
@@ -45,24 +51,24 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     ideas, selected_exchange, scan_meta = await scan_top_ideas(timeframe, exchange)
     rejection_reasons.update(scan_meta.get("rejection_reasons", {}))
     eligible_ideas = []
-    ready_ideas = 0
+    limit_order_ideas = 0
     score_eligible_ideas = 0
     skipped_by_score = 0
     skipped_by_entry_status = 0
     for idea in ideas:
         score_ok = idea_score(idea) >= min_score
-        ready = idea.entry_status == "READY"
+        limit_order_ok = is_limit_order_alertable(idea)
         if score_ok:
             score_eligible_ideas += 1
-        if ready:
-            ready_ideas += 1
+        if limit_order_ok:
+            limit_order_ideas += 1
         if not score_ok:
             skipped_by_score += 1
             rejection_reasons["score below ALERT_MIN_SCORE"] += 1
             continue
-        if not ready:
+        if not limit_order_ok:
             skipped_by_entry_status += 1
-            rejection_reasons["entry_status not READY"] += 1
+            rejection_reasons["entry_status rejected/exhausted"] += 1
             continue
         eligible_ideas.append(idea)
     sent = 0
@@ -87,14 +93,14 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     logger.info(
         (
             "telegram_alert_scan_complete exchange=%s timeframe=%s symbols_scanned=%s valid_ideas_found=%s "
-            "ready_ideas=%s score_eligible_ideas=%s eligible_alerts=%s sent_alerts=%s "
+            "limit_order_ideas=%s score_eligible_ideas=%s eligible_alerts=%s sent_alerts=%s "
             "skipped_by_dedup=%s skipped_by_score=%s skipped_by_entry_status=%s rejection_reasons=%s"
         ),
         selected_exchange,
         timeframe,
         scan_meta.get("symbols_scanned", 0),
         scan_meta.get("valid_ideas_found", len(ideas)),
-        ready_ideas,
+        limit_order_ideas,
         score_eligible_ideas,
         len(eligible_ideas),
         sent,
@@ -111,7 +117,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         "ideas": len(ideas),
         "symbols_scanned": scan_meta.get("symbols_scanned", 0),
         "valid_ideas_found": scan_meta.get("valid_ideas_found", len(ideas)),
-        "ready_ideas": ready_ideas,
+        "limit_order_ideas": limit_order_ideas,
         "score_eligible_ideas": score_eligible_ideas,
         "eligible": len(eligible_ideas),
         "min_score": min_score,

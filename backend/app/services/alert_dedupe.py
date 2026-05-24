@@ -103,7 +103,7 @@ def setup_fingerprint(idea: TradeIdea) -> str:
 
 
 def alert_cooldown_minutes(timeframe: str) -> int:
-    default = "240" if timeframe.lower() == "4h" else "0"
+    default = "60"
     return max(0, int(os.getenv("ALERT_COOLDOWN_MINUTES", default)))
 
 

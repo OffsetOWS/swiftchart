@@ -4,7 +4,7 @@ import os
 from app.config import DEFAULT_SCAN_LIST, get_settings
 from app.exchanges.factory import get_exchange
 from app.models.schemas import RiskSettings, TradeIdea
-from app.services.liquidity_filter import filter_liquid_perp_markets, perp_volume_24h
+from app.services.liquidity_filter import perp_volume_24h
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.strategy.trade_ideas import analyze_dataframe
 
@@ -46,8 +46,8 @@ async def _scan_symbols(exchange: str) -> list[str]:
     limit = _scan_symbol_limit()
     try:
         markets = await get_markets_cached(exchange)
-        liquid = filter_liquid_perp_markets([market for market in markets if market.get("active", True)])
-        ranked = sorted(liquid, key=lambda market: perp_volume_24h(market) or 0, reverse=True)
+        active_markets = [market for market in markets if market.get("active", True)]
+        ranked = sorted(active_markets, key=lambda market: perp_volume_24h(market) or 0, reverse=True)
         symbols = [str(market.get("symbol", "")).upper() for market in ranked if market.get("symbol")]
         if symbols:
             return list(dict.fromkeys(symbols))[:limit]
