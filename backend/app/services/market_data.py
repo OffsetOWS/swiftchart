@@ -119,10 +119,12 @@ async def get_markets_cached(exchange: str) -> list[dict]:
         markets = await _with_retries(lambda: get_exchange(normalized).get_markets())
         normalized_markets = []
         for market in markets:
+            exchange_symbol = str(market.get("symbol", ""))
             normalized_markets.append(
                 {
                     **market,
-                    "symbol": str(market.get("symbol", "")).upper(),
+                    "symbol": exchange_symbol.upper(),
+                    "exchange_symbol": exchange_symbol,
                     "exchange": normalized,
                     "active": market.get("active", True),
                     "volume": market.get("volume"),

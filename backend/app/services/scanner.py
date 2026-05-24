@@ -35,6 +35,7 @@ _background_task: asyncio.Task | None = None
 class Candidate:
     exchange: str
     symbol: str
+    fetch_symbol: str
     candles: pd.DataFrame
     volume_quality: float
     distance_score: float
@@ -141,6 +142,7 @@ async def discover_scan_markets(exchange: str) -> list[dict]:
             {
                 "exchange": selected_exchange,
                 "symbol": symbol,
+                "exchange_symbol": market.get("exchange_symbol", symbol),
                 "volume": market.get("volume"),
                 "perpVolume24h": market.get("perpVolume24h"),
                 "active": True,
@@ -211,11 +213,12 @@ async def _scan_candles(exchange: str, symbol: str, timeframe: str, limit: int, 
 async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Semaphore, stats: ScanFetchStats) -> Candidate | None:
     async with semaphore:
         try:
-            df = await _scan_candles(market["exchange"], market["symbol"], timeframe, PREFILTER_LIMIT, stats)
+            fetch_symbol = str(market.get("exchange_symbol") or market["symbol"])
+            df = await _scan_candles(market["exchange"], fetch_symbol, timeframe, PREFILTER_LIMIT, stats)
             ok, volume, distance = prefilter_dataframe(df)
             if not ok:
                 return None
-            return Candidate(market["exchange"], market["symbol"], df, volume, distance)
+            return Candidate(market["exchange"], market["symbol"], fetch_symbol, df, volume, distance)
         except Exception as exc:
             logger.debug("Prefilter skipped %s %s: %s", market.get("exchange"), market.get("symbol"), exc)
             return None
@@ -230,7 +233,7 @@ async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSet
             htf_dfs = []
             for htf in higher_timeframes_for(timeframe):
                 try:
-                    htf_dfs.append(await _scan_candles(candidate.exchange, candidate.symbol, htf, 220, stats))
+                    htf_dfs.append(await _scan_candles(candidate.exchange, candidate.fetch_symbol, htf, 220, stats))
                 except Exception:
                     continue
             analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
@@ -292,7 +295,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     htf_dfs = []
                     for htf in higher_timeframes_for(timeframe):
                         try:
-                            htf_dfs.append(await _scan_candles(candidate.exchange, candidate.symbol, htf, 220, fetch_stats))
+                            htf_dfs.append(await _scan_candles(candidate.exchange, candidate.fetch_symbol, htf, 220, fetch_stats))
                         except Exception:
                             continue
                     analysis = analyze_dataframe(

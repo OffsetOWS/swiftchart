@@ -88,7 +88,8 @@ class HyperliquidClient(ExchangeClient):
         return markets
 
     async def get_candles(self, symbol: str, timeframe: str, limit: int = 300) -> pd.DataFrame:
-        coin = symbol.upper().replace("USDT", "")
+        raw_symbol = symbol.strip()
+        coin = raw_symbol[:-4] if raw_symbol.upper().endswith("USDT") else raw_symbol
         interval = TIMEFRAME_TO_HL.get(timeframe.lower(), "4h")
         now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
         interval_minutes = {"30m": 30, "1h": 60, "2h": 120, "4h": 240, "8h": 480, "12h": 720, "1d": 1440}[interval]
