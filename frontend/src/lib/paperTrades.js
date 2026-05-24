@@ -79,6 +79,7 @@ export function ideaToPaperTrade(idea, userId) {
   const liquidity = liquidityForIdea(idea);
   return {
     signal_id: signalIdForIdea(idea),
+    user_id: userId,
     symbol: idea.symbol,
     exchange: idea.exchange || "hyperliquid",
     timeframe: idea.timeframe || "4h",
@@ -106,7 +107,7 @@ export async function createPaperTradeFromSignal(idea, userId, accessToken) {
 }
 
 export async function listPaperTrades(_userId, accessToken) {
-  const trades = await getPaperTrades(accessToken);
+  const trades = await getPaperTrades(_userId, accessToken);
   return (trades || []).map(normalizeTrade);
 }
 
@@ -118,5 +119,6 @@ export async function listPaperTradesForSignals(_userId, signalIds, accessToken)
 }
 
 export async function updatePaperTradeStatus(id, statusUpdate, accessToken) {
-  return normalizeTrade(await updatePaperTrade(id, statusUpdate, accessToken));
+  const userId = statusUpdate?.user_id || null;
+  return normalizeTrade(await updatePaperTrade(id, statusUpdate, userId, accessToken));
 }

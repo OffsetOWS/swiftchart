@@ -4,13 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.middleware.rate_limit import InMemoryRateLimitMiddleware
 from app.routes.genlayer import router as genlayer_router
-from app.routes.internal import router as internal_router
 from app.routes.markets import router as markets_router
 from app.routes.paper_trades import router as paper_trades_router
-from app.routes.signals import router as signals_router
 from app.routes.trade_history import router as trade_history_router
-from app.routes.user_api import router as user_api_router
-from app.routes.webhooks import router as webhooks_router
 from app.services.scanner import start_background_scanner
 from app.utils.database import init_db
 from app.utils.secure_logging import install_secure_logging
@@ -47,10 +43,6 @@ def health():
 
 
 app.include_router(markets_router, prefix="/api", tags=["markets"])
-app.include_router(signals_router, prefix="/api", tags=["signals"])
-app.include_router(user_api_router, prefix="/api", tags=["user"])
-app.include_router(webhooks_router, prefix="/api", tags=["webhooks"])
-app.include_router(internal_router, prefix="/api", tags=["internal"])
 app.include_router(paper_trades_router, prefix="/api", tags=["paper-trades"])
 app.include_router(trade_history_router, prefix="/api", tags=["trade-history"])
 app.include_router(genlayer_router, prefix="/api", tags=["genlayer-ai"])

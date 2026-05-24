@@ -242,6 +242,7 @@ class Market(BaseModel):
 
 class PaperTradeCreate(BaseModel):
     signal_id: str = Field(..., min_length=8, max_length=240)
+    user_id: str | None = None
     symbol: str
     timeframe: str
     exchange: str = "hyperliquid"
@@ -260,7 +261,7 @@ class PaperTradeCreate(BaseModel):
 
 class PaperTrade(PaperTradeCreate):
     id: int
-    user_id: str
+    user_id: str | None = None
     status: Literal["taken", "open", "tp_hit", "sl_hit", "closed"] = "taken"
     result: Literal["open", "win", "loss", "closed"] = "open"
     pnl: float | None = None

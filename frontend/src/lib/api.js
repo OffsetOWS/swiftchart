@@ -75,19 +75,21 @@ export function getTopIdeas({ exchange, timeframe }) {
 }
 
 export function createPaperTrade(payload, accessToken) {
-  return request("/api/user/take-trade", {
+  return request("/api/paper-trade", {
     method: "POST",
     body: JSON.stringify(payload),
     accessToken,
   });
 }
 
-export function getPaperTrades(accessToken) {
-  return request("/api/user/trades", { accessToken });
+export function getPaperTrades(userId, accessToken) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  return request(`/api/paper-trades${query}`, { accessToken });
 }
 
-export function updatePaperTrade(id, payload, accessToken) {
-  return request(`/api/user/trades/${id}`, {
+export function updatePaperTrade(id, payload, userId, accessToken) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  return request(`/api/paper-trades/${id}${query}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
     accessToken,

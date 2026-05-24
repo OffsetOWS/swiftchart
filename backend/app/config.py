@@ -30,10 +30,6 @@ class Settings(BaseSettings):
     scanner_rate_limit_per_minute: int = Field(default=20, ge=1)
     signal_max_age_minutes: int = Field(default=1440, ge=5)
     signal_max_entry_deviation_percent: float = Field(default=1.5, ge=0)
-    webhook_signing_secret: str = ""
-    webhook_nonce_ttl_seconds: int = Field(default=900, ge=60)
-    webhook_clock_skew_seconds: int = Field(default=300, ge=30)
-    internal_api_secret: str = ""
     trade_history_expiry_bars: int = Field(default=12, ge=1)
     execution_autotrade_enabled: bool = False
     execution_signal_webhook_url: str = ""
@@ -45,7 +41,6 @@ class Settings(BaseSettings):
     genlayer_validator_services: str = ""
     genlayer_llm_provider: str = ""
     genlayer_intelligent_contract_address: str = ""
-    supabase_jwt_secret: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
