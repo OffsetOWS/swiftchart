@@ -72,12 +72,12 @@ export function liquidityForIdea(idea) {
 }
 
 export function regimeViewForIdea(idea) {
-  const rawLabel = String(idea.regime_label || idea.market_regime || "");
+  const rawLabel = String(idea.regime_label || idea.market_regime || "Range Environment");
   const type = String(idea.regime_type || idea.market_regime || "").toUpperCase();
   const score = numberOrNull(idea.regime_score);
   const confidence = numberOrNull(idea.regime_confidence_score);
 
-  let label = rawLabel || "Range Environment";
+  let label = rawLabel;
   if (/TRENDING_UP|BREAKOUT|BULL/i.test(type + rawLabel)) label = score !== null && score < 35 ? "Weak Bull Trend" : "Strong Bull Trend";
   if (/TRENDING_DOWN|BREAKDOWN|BEAR/i.test(type + rawLabel)) label = score !== null && score > -35 ? "Breakdown Environment" : "Strong Bear Trend";
   if (/RANGE|NEUTRAL/i.test(type + rawLabel)) label = "Range Environment";

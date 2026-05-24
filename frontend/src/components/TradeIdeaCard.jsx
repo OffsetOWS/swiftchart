@@ -31,7 +31,7 @@ export default function TradeIdeaCard({
   const signalStatus = statusForIdea(idea);
   const confidenceLabel = confidenceLabelForIdea(idea);
   const blockedStatus = ["WAIT_FOR_RETEST", "REJECTED_EXHAUSTED", "REJECTED"].includes(entryStatus);
-  const canTakeTrade = !blockedStatus;
+  const canTakeTrade = !blockedStatus && !freshness.stale && !liquidity.blocking;
   const whyThisSetup = idea.reason || "Clean setup with defined entry, stop, and targets.";
   const trendLabel = idea.trend_alignment ? String(idea.trend_alignment).replace("-", " ") : regime.trend;
   const volatilityWarning = idea.exhaustion_risk === "High" || entryStatus === "WAIT_FOR_RETEST" || freshness.status === "aging";
@@ -39,11 +39,15 @@ export default function TradeIdeaCard({
     ? "Trade Taken"
     : paperTradeLoading
       ? "Saving..."
-      : entryStatus === "WAIT_FOR_RETEST"
-        ? "Wait for Retest"
-        : entryStatus === "REJECTED_EXHAUSTED"
-          ? "Rejected"
-          : "Take Trade";
+      : freshness.stale
+        ? "Signal Stale"
+        : liquidity.blocking
+          ? "Low Liquidity"
+          : entryStatus === "WAIT_FOR_RETEST"
+            ? "Wait for Retest"
+            : entryStatus === "REJECTED_EXHAUSTED"
+              ? "Rejected"
+              : "Take Trade";
 
   return (
     <article className={`idea-card signal-card ${directionClass} status-${signalStatus}`}>
@@ -78,24 +82,12 @@ export default function TradeIdeaCard({
       <div className="confidence-rail" aria-hidden="true">
         <span style={{ width: `${Math.min(100, Math.max(0, score))}%` }} />
       </div>
-      <section className="trade-level-list" aria-label="Trade levels">
-        <div className="level-row entry">
-          <span>Entry zone</span>
-          <b>{fmt(idea.entry_zone[0])} - {fmt(idea.entry_zone[1])}</b>
-        </div>
-        <div className="level-row stop">
-          <span>Stop loss</span>
-          <b>{fmt(idea.stop_loss)}</b>
-        </div>
-        <div className="level-row target">
-          <span>Take profit 1</span>
-          <b>{fmt(idea.take_profit_1)}</b>
-        </div>
-        <div className="level-row target">
-          <span>Take profit 2</span>
-          <b>{fmt(idea.take_profit_2)}</b>
-        </div>
-      </section>
+      <div className="trade-level-grid">
+        <div className="metric"><span>Entry zone</span><b>{fmt(idea.entry_zone[0])} - {fmt(idea.entry_zone[1])}</b></div>
+        <div className="metric"><span>Stop loss</span><b>{fmt(idea.stop_loss)}</b></div>
+        <div className="metric"><span>Take profit 1</span><b>{fmt(idea.take_profit_1)}</b></div>
+        <div className="metric"><span>Take profit 2</span><b>{fmt(idea.take_profit_2)}</b></div>
+      </div>
       <section className="setup-story">
         <div>
           <span><TrendingUp size={14} /> Why this setup?</span>

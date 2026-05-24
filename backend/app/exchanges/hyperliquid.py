@@ -101,7 +101,7 @@ class HyperliquidClient(ExchangeClient):
         if df.empty:
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
         df = df.rename(columns={"t": "timestamp", "o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"}).copy()
-        df = df.assign(timestamp=pd.to_datetime(df["timestamp"], unit="ms", utc=True))
-        numeric_columns = ["open", "high", "low", "close", "volume"]
-        df = df.assign(**{column: pd.to_numeric(df[column], errors="coerce") for column in numeric_columns})
+        df.loc[:, "timestamp"] = df["timestamp"].apply(lambda value: datetime.fromtimestamp(value / 1000, tz=timezone.utc))
+        for column in ["open", "high", "low", "close", "volume"]:
+            df.loc[:, column] = pd.to_numeric(df[column], errors="coerce")
         return df[["timestamp", "open", "high", "low", "close", "volume"]].dropna()

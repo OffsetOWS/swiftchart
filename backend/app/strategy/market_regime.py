@@ -118,17 +118,6 @@ def _structure_profile(df: pd.DataFrame) -> dict[str, float | str | bool]:
             "bias_flip_trigger": None,
             "volatility_compression": False,
             "distance_from_range_boundary": 0.0,
-            "range_position": None,
-            "range_width_pct": None,
-            "atr_ratio": None,
-            "near_lower_edge": False,
-            "near_upper_edge": False,
-            "near_range_edge": False,
-            "low_volatility": True,
-            "compressed_chop": False,
-            "weak_volume": True,
-            "bullish_reclaim_hint": False,
-            "bearish_rejection_hint": False,
         }
 
     recent = df.tail(90).reset_index(drop=True)
@@ -145,20 +134,11 @@ def _structure_profile(df: pd.DataFrame) -> dict[str, float | str | bool]:
     range_high = float(prior_range["high"].max())
     range_low = float(prior_range["low"].min())
     range_width = max(range_high - range_low, 1e-9)
-    atr_ratio = atr / max(price, 1e-9)
-    range_width_pct = range_width / max(price, 1e-9)
-    range_position = max(0.0, min(1.0, (price - range_low) / range_width))
-    near_lower_edge = range_position <= 0.32
-    near_upper_edge = range_position >= 0.68
     distance_from_boundary = min(abs(price - range_high), abs(price - range_low)) / range_width
 
     recent_range = float(recent["high"].tail(20).max() - recent["low"].tail(20).min())
     previous_range = float(recent["high"].iloc[-45:-20].max() - recent["low"].iloc[-45:-20].min()) if len(recent) >= 45 else recent_range
     volatility_compression = previous_range > 0 and recent_range < previous_range * 0.75
-    compressed_chop = bool(volatility_compression and (range_width <= atr * 1.4 or range_width_pct <= 0.012))
-    low_volatility = bool(atr_ratio < 0.002)
-    volume_baseline = float(recent["volume"].tail(24).mean() or recent["volume"].mean() or 1)
-    weak_volume = float(recent["volume"].iloc[-1]) < volume_baseline * 0.85
 
     range_tolerance = max(atr * 0.8, range_width * 0.035)
     high_touches = int((prior_range["high"] >= range_high - range_tolerance).sum())
@@ -168,9 +148,6 @@ def _structure_profile(df: pd.DataFrame) -> dict[str, float | str | bool]:
     last = recent.iloc[-1]
     previous = recent.iloc[-2]
     candle_body = abs(float(last["close"]) - float(last["open"]))
-    candle_range = max(float(last["high"] - last["low"]), 1e-9)
-    lower_wick = min(float(last["open"]), float(last["close"])) - float(last["low"])
-    upper_wick = float(last["high"]) - max(float(last["open"]), float(last["close"]))
     recent_support = float(recent["low"].iloc[-34:-3].min()) if len(recent) >= 37 else float(prior_range["low"].min())
     recent_resistance = float(recent["high"].iloc[-34:-3].max()) if len(recent) >= 37 else float(prior_range["high"].max())
     breakout_close = price > range_high + atr * 0.15
@@ -220,23 +197,6 @@ def _structure_profile(df: pd.DataFrame) -> dict[str, float | str | bool]:
     elif bullish_structure_active:
         bias_flip_trigger = "price reclaimed recent structural resistance with HH/HL structure and bullish EMA/momentum confirmation"
 
-    bullish_reclaim_hint = bool(
-        near_lower_edge
-        and (
-            (lower_wick / candle_range >= 0.35 and price > float(last["open"]))
-            or price > float(previous["close"]) + atr * 0.1
-            or float(last["low"]) <= range_low + atr * 0.35
-        )
-    )
-    bearish_rejection_hint = bool(
-        near_upper_edge
-        and (
-            (upper_wick / candle_range >= 0.35 and price < float(last["open"]))
-            or price < float(previous["close"]) - atr * 0.1
-            or float(last["high"]) >= range_high - atr * 0.35
-        )
-    )
-
     if bullish_cycles >= 2:
         structure = "HH/HL"
     elif bearish_cycles >= 2:
@@ -272,17 +232,6 @@ def _structure_profile(df: pd.DataFrame) -> dict[str, float | str | bool]:
         "bias_flip_trigger": bias_flip_trigger,
         "volatility_compression": volatility_compression,
         "distance_from_range_boundary": round(distance_from_boundary, 3),
-        "range_position": round(range_position, 3),
-        "range_width_pct": round(range_width_pct, 6),
-        "atr_ratio": round(atr_ratio, 6),
-        "near_lower_edge": near_lower_edge,
-        "near_upper_edge": near_upper_edge,
-        "near_range_edge": near_lower_edge or near_upper_edge,
-        "low_volatility": low_volatility,
-        "compressed_chop": compressed_chop,
-        "weak_volume": weak_volume,
-        "bullish_reclaim_hint": bullish_reclaim_hint,
-        "bearish_rejection_hint": bearish_rejection_hint,
     }
 
 
@@ -313,13 +262,6 @@ def _regime_type(
     breakdown_confirmed = bool(structure_profile["breakdown_confirmed"])
     bearish_structure_active = bool(structure_profile["bearish_structure_active"])
     bullish_structure_active = bool(structure_profile["bullish_structure_active"])
-    near_lower_edge = bool(structure_profile.get("near_lower_edge"))
-    near_upper_edge = bool(structure_profile.get("near_upper_edge"))
-    near_range_edge = bool(structure_profile.get("near_range_edge"))
-    low_volatility = bool(structure_profile.get("low_volatility"))
-    compressed_chop = bool(structure_profile.get("compressed_chop"))
-    valid_structure = structure != "Insufficient structure"
-    normal_volatility = valid_structure and not low_volatility and not compressed_chop
 
     if bearish_structure_active:
         return "BREAKDOWN" if bool(structure_profile["structural_support_break"]) else "TRENDING_DOWN"
@@ -346,12 +288,6 @@ def _regime_type(
         return "TRENDING_UP"
     if score <= -45 and bearish_structure and bearish_cycles >= 2:
         return "TRENDING_DOWN"
-    if normal_volatility and near_range_edge:
-        if near_lower_edge and bool(structure_profile.get("bullish_reclaim_hint")):
-            return "TRANSITION_TO_BULLISH"
-        if near_upper_edge and bool(structure_profile.get("bearish_rejection_hint")):
-            return "TRANSITION_TO_BEARISH"
-        return "RANGE_BOUND"
     if structure == "Range" and abs(score) <= 25 and (adx is None or adx < 22):
         return "RANGE_BOUND"
     if abs(score) <= 25 or structure == "Mixed / Choppy":
@@ -411,61 +347,12 @@ def _confidence_breakdown(
     }
 
 
-def _regime_block_reason(
-    *,
-    regime_type: MarketRegimeType,
-    confidence: float,
-    score: float,
-    htf: str,
-    structure_profile: dict[str, float | str | bool],
-) -> str | None:
-    structure = str(structure_profile.get("structure"))
-    near_edge = bool(structure_profile.get("near_range_edge"))
-    middle_range = not near_edge
-    weak_volume = bool(structure_profile.get("weak_volume"))
-    conflicting_signals = (htf == "HTF_BULLISH" and score < -15) or (htf == "HTF_BEARISH" and score > 15)
-
-    if structure == "Insufficient structure":
-        return "insufficient_structure"
-    if bool(structure_profile.get("low_volatility")):
-        return "low_volatility"
-    if bool(structure_profile.get("compressed_chop")):
-        return "compressed_chop"
-    if regime_type == "CHOP" and middle_range:
-        return "middle_range"
-    if conflicting_signals and weak_volume:
-        return "conflicting_signals"
-    if regime_type in {"TRENDING_UP", "TRENDING_DOWN"} and not near_edge and confidence < MIN_REGIME_CONFIDENCE:
-        return "weak_trend_no_edge"
-    if confidence < MIN_REGIME_CONFIDENCE and not near_edge:
-        return "unknown_fallback"
-    return None
-
-
-def _trade_decision(
-    regime_type: MarketRegimeType,
-    confidence: float,
-    score: float,
-    *,
-    htf: str,
-    structure_profile: dict[str, float | str | bool],
-) -> tuple[str, str | None]:
-    block_reason = _regime_block_reason(
-        regime_type=regime_type,
-        confidence=confidence,
-        score=score,
-        htf=htf,
-        structure_profile=structure_profile,
-    )
-    if block_reason is not None:
-        return "NO_TRADE", block_reason
-    if regime_type == "CHOP":
-        return "NO_TRADE", "unknown_fallback"
-    if confidence < MIN_REGIME_CONFIDENCE and not bool(structure_profile.get("near_range_edge")):
-        return "NO_TRADE", "unknown_fallback"
+def _trade_decision(regime_type: MarketRegimeType, confidence: float, score: float) -> str:
+    if regime_type == "CHOP" or confidence < MIN_REGIME_CONFIDENCE:
+        return "NO_TRADE"
     if regime_type in {"TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}:
-        return "WAIT", None
-    return "TRADE_ALLOWED", None
+        return "WAIT"
+    return "TRADE_ALLOWED"
 
 
 def _bias_reason(regime_type: MarketRegimeType, label: str, score: float, structure_profile: dict[str, float | str | bool]) -> tuple[str, str | None]:
@@ -601,13 +488,7 @@ def detect_market_regime(
         structure_profile=structure_profile,
     )
     confidence_score = round(max(confidence_breakdown["bullish"], confidence_breakdown["bearish"], confidence_breakdown["range"]), 1)
-    trade_decision, regime_block_reason = _trade_decision(
-        regime_type,
-        confidence_score,
-        score,
-        htf=htf,
-        structure_profile=structure_profile,
-    )
+    trade_decision = _trade_decision(regime_type, confidence_score, score)
     bias, long_bias, short_bias = _bias(label, regime_type)
     bias_reason, bias_flip_trigger = _bias_reason(regime_type, label, score, structure_profile)
     components = {
@@ -621,7 +502,6 @@ def detect_market_regime(
         "ema_slope": round(ema_slope, 5),
         "rsi": rsi,
         "adx": adx,
-        "regime_block_reason": regime_block_reason,
         **structure_profile,
     }
     explanation = (

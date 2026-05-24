@@ -5,8 +5,9 @@ from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
 from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
+from app.services.liquidity_filter import skip_low_volume_market
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.scanner import cached_top_ideas, scanner_health
+from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
@@ -27,6 +28,22 @@ async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
 
 async def _market_scan_symbols(exchange: str) -> list[str]:
     return DEFAULT_SCAN_LIST
+
+
+async def _market_for_symbol(exchange: str, symbol: str) -> dict | None:
+    normalized_symbol = symbol.upper()
+    for market in await get_markets_cached(exchange):
+        if str(market.get("symbol", "")).upper() == normalized_symbol:
+            return market
+    return None
+
+
+async def _skip_low_volume_symbol(exchange: str, symbol: str) -> bool:
+    market = await _market_for_symbol(exchange, symbol)
+    if market is None:
+        logger.info("Skipping %s: perp volume below $100k", symbol.upper())
+        return True
+    return skip_low_volume_market(market)
 
 
 def _unique_display_ideas(ideas: list) -> list:
@@ -127,6 +144,9 @@ async def analyze(
         analysis = None
         for selected_exchange in exchanges:
             try:
+                if await _skip_low_volume_symbol(selected_exchange, symbol):
+                    last_error = "Perp 24h volume is below the scanner liquidity minimum."
+                    continue
                 df = await get_candles_cached(selected_exchange, symbol, timeframe, 320)
                 if len(df) < 80:
                     last_error = "Not enough candle history for analysis."
@@ -196,6 +216,8 @@ async def top_ideas(
         scan_symbols = [item.strip().upper() for item in symbols.split(",")] if symbols else await _market_scan_symbols(selected_exchange)
         for symbol in scan_symbols:
             try:
+                if await _skip_low_volume_symbol(selected_exchange, symbol):
+                    continue
                 df = await get_candles_cached(selected_exchange, symbol, timeframe, 260)
                 if len(df) >= 80:
                     htf_dfs = []
@@ -229,8 +251,3 @@ async def top_ideas(
         if len(ranked) >= 5
         else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
     }
-
-
-@router.get("/scanner/health")
-async def scanner_health_endpoint():
-    return scanner_health()
