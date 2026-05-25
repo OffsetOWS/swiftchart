@@ -48,6 +48,13 @@ TrendAlignment = Literal["with-trend", "counter-trend", "range-trade"]
 MoveMaturity = Literal["Early", "Mid-Trend", "Extended", "Exhausted"]
 ExhaustionRisk = Literal["Low", "Medium", "High"]
 EntryStatus = Literal["READY", "WAIT_FOR_RETEST", "REJECTED_EXHAUSTED"]
+PendingSetupStatus = Literal[
+    "WATCHING",
+    "WAITING_FOR_RETEST",
+    "UNCONFIRMED_SWEEP",
+    "NEEDS_TRIGGER",
+    "CONTINUATION_WATCH",
+]
 GenLayerDecision = Literal["APPROVE", "REJECT", "WAIT", "REDUCE_SIZE"]
 GenLayerRiskLevel = Literal["Low", "Medium", "High"]
 GenLayerPaperExecutionStatus = Literal["NOT_EXECUTED", "PAPER_EXECUTED"]
@@ -134,6 +141,27 @@ class TradeIdea(BaseModel):
     entry_status: EntryStatus = "READY"
     downgraded_reasons: list[str] = Field(default_factory=list)
     signal_candle_time: datetime | None = None
+
+
+class PendingSetup(BaseModel):
+    symbol: str
+    direction: Direction
+    regime: str
+    status: PendingSetupStatus
+    reason: str
+    price: float
+    entry_zone: tuple[float, float]
+    invalidation_level: float
+    nearest_support: tuple[float, float] | None = None
+    nearest_resistance: tuple[float, float] | None = None
+    price_position: float | None = None
+    trigger_hints: list[str] = Field(default_factory=list)
+    confirmation_needed: list[str] = Field(default_factory=list)
+    estimated_rr: float | None = None
+    score_preview: float
+    timeframe: str
+    exchange: str
+    created_at: datetime
 
 
 class GenLayerSignalPayload(BaseModel):

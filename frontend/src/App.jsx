@@ -4,6 +4,7 @@ import { Analytics, track } from "@vercel/analytics/react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
+import Watchlist from "./pages/Watchlist.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
@@ -42,6 +43,7 @@ export default function App() {
   const [symbol, setSymbol] = useState("SOLUSDT");
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });
   const [topIdeas, setTopIdeas] = useState([]);
+  const [pendingSetups, setPendingSetups] = useState([]);
   const [candles, setCandles] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -70,6 +72,7 @@ export default function App() {
     try {
       const data = await getTopIdeas({ exchange, timeframe });
       setTopIdeas(data.ideas || []);
+      setPendingSetups(data.pending_setups || []);
     } catch (error) {
       setNoticeType("error");
       setNotice(error.message);
@@ -272,6 +275,7 @@ export default function App() {
     ["dashboard", "Dashboard"],
     ["markets", "Markets"],
     ["ideas", "Trade Ideas"],
+    ["watchlist", "Watchlist"],
     ["history", "History"],
     ["alerts", "Alerts"],
   ];
@@ -482,6 +486,17 @@ export default function App() {
               aiResults={aiResults}
               aiErrors={aiErrors}
               aiLoadingSignalId={aiLoadingSignalId}
+            />
+          )}
+          {page === "watchlist" && (
+            <Watchlist
+              pendingSetups={pendingSetups}
+              loading={loadingTopIdeas}
+              exchange={exchange}
+              setExchange={setExchange}
+              timeframe={timeframe}
+              setTimeframe={setTimeframe}
+              onRefresh={refreshTopIdeas}
             />
           )}
           {page === "history" && <TradeHistory version={paperHistoryVersion} />}

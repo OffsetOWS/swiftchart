@@ -8,10 +8,11 @@ from time import monotonic, time
 import pandas as pd
 
 from app.config import get_settings
-from app.models.schemas import RiskSettings, TradeIdea
+from app.models.schemas import PendingSetup, RiskSettings, TradeIdea
 from app.services.execution_signals import dispatch_trade_ideas_to_execution
 from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
+from app.services.pending_setups import build_pending_setup
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.support_resistance import average_true_range
@@ -286,12 +287,12 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         global_score = round(sum(global_scores) / len(global_scores), 1) if global_scores else None
         risk = _risk(timeframe)
 
-        async def analyze_with_context(candidate: Candidate) -> list[TradeIdea]:
+        async def analyze_with_context(candidate: Candidate) -> tuple[list[TradeIdea], PendingSetup | None]:
             async with semaphore:
                 try:
                     df = candidate.candles
                     if len(df) < 80:
-                        return []
+                        return [], None
                     htf_dfs = []
                     for htf in higher_timeframes_for(timeframe):
                         try:
@@ -309,13 +310,20 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                         breadth_above_ma_pct=breadth_above_ma_pct,
                     )
                     save_signal_reviews(analysis.rejected_signals)
-                    return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+                    valid_ideas = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+                    pending_setup = None if valid_ideas else build_pending_setup(analysis, df)
+                    return valid_ideas, pending_setup
                 except Exception as exc:
                     logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
-                    return []
+                    return [], None
 
         analyzed = await asyncio.gather(*[analyze_with_context(candidate) for candidate in candidates])
-        ideas = [idea for group in analyzed for idea in group]
+        ideas = [idea for group, _ in analyzed for idea in group]
+        pending_setups = sorted(
+            [pending for _, pending in analyzed if pending is not None],
+            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
+            reverse=True,
+        )[:20]
         ranked = sorted(
             ideas,
             key=lambda idea: (
@@ -332,6 +340,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             "timeframe": timeframe,
             "exchange": selected_exchange,
             "ideas": ranked,
+            "pending_setups": pending_setups,
             "errors": [],
             "message": None if len(ranked) >= 5 else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
             "scan_stats": {
@@ -340,6 +349,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
                 "valid_setups": len(ranked),
+                "pending_setups": len(pending_setups),
                 "successful_candle_fetches": fetch_stats.successful_candle_fetches,
                 "failed_candle_fetches": fetch_stats.failed_candle_fetches,
                 "failed_symbols": fetch_stats.failed_symbols or [],

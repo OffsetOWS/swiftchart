@@ -7,6 +7,7 @@ from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
 from app.services.liquidity_filter import skip_low_volume_market
 from app.services.market_data import get_candles_cached, get_markets_cached
+from app.services.pending_setups import build_pending_setup
 from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
@@ -199,6 +200,7 @@ async def top_ideas(
         return {
             **result,
             "ideas": _unique_display_ideas(result.get("ideas", [])),
+            "pending_setups": result.get("pending_setups", []),
         }
 
     selected_exchanges = scan_selected_exchanges(selected_exchange)
@@ -211,6 +213,7 @@ async def top_ideas(
         preferred_timeframe=timeframe,
     )
     ideas = []
+    pending_setups = []
     errors = []
     for selected_exchange in selected_exchanges:
         scan_symbols = [item.strip().upper() for item in symbols.split(",")] if symbols else await _market_scan_symbols(selected_exchange)
@@ -236,6 +239,10 @@ async def top_ideas(
                         global_regime_score=await global_regime_score(selected_exchange, timeframe),
                     )
                     ideas.extend(analysis.trade_ideas)
+                    if not analysis.trade_ideas:
+                        pending_setup = build_pending_setup(analysis, df)
+                        if pending_setup is not None:
+                            pending_setups.append(pending_setup)
                     save_signal_reviews(analysis.rejected_signals)
             except Exception as exc:
                 errors.append({"exchange": selected_exchange, "symbol": symbol, "error": str(exc)})
@@ -246,6 +253,11 @@ async def top_ideas(
         "timeframe": timeframe,
         "exchange": exchange,
         "ideas": ranked,
+        "pending_setups": sorted(
+            pending_setups,
+            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
+            reverse=True,
+        )[:20],
         "errors": errors,
         "message": None
         if len(ranked) >= 5
