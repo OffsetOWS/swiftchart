@@ -74,6 +74,10 @@ export function getTopIdeas({ exchange, timeframe }) {
   return request(`/api/top-ideas?exchange=${exchange}&timeframe=${timeframe}`);
 }
 
+export function refreshTopIdeasCache({ exchange, timeframe }) {
+  return request(`/api/top-ideas/refresh?exchange=${exchange}&timeframe=${timeframe}`, { method: "POST" });
+}
+
 export function createPaperTrade(payload, accessToken) {
   return request("/api/paper-trade", {
     method: "POST",

@@ -26,6 +26,7 @@ export default function Watchlist({
   timeframe,
   setTimeframe,
   onRefresh,
+  meta = {},
 }) {
   return (
     <section className="watchlist-page">
@@ -35,7 +36,7 @@ export default function Watchlist({
           <h2>Pending Setups</h2>
           <p>Early structure worth watching. These are not trade signals yet and cannot be taken, sent to Telegram, or passed to execution.</p>
         </div>
-        <button className="icon-btn" onClick={onRefresh} title="Refresh watchlist">
+        <button className="icon-btn" onClick={() => onRefresh({ manual: true })} title="Refresh watchlist">
           <RefreshCcw size={18} />
         </button>
         <div className="controls">
@@ -59,7 +60,8 @@ export default function Watchlist({
       </div>
 
       <div className="watchlist-grid">
-        {loading ? <div className="panel empty">Scanning pending structures...</div> : null}
+        {meta.refreshing ? <div className="panel empty watchlist-refreshing">Refreshing cached watchlist...</div> : null}
+        {loading ? <div className="panel empty">Loading cached watchlist...</div> : null}
         {!loading && pendingSetups.length === 0 ? <div className="panel empty">No pending setups worth watching right now.</div> : null}
         {pendingSetups.map((setup) => (
           <article className="panel watchlist-card" key={`${setup.symbol}-${setup.direction}-${setup.status}-${setup.created_at}`}>

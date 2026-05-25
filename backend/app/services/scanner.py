@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from time import monotonic, time
 
 import pandas as pd
@@ -27,6 +28,10 @@ MAX_MARKETS_PER_SCAN = 45
 PREFILTER_LIMIT = 260
 FULL_LIMIT = 260
 _scan_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+_refresh_tasks: dict[tuple[str, str], asyncio.Task] = {}
+_refresh_started_at: dict[tuple[str, str], datetime] = {}
+_refresh_finished_at: dict[tuple[str, str], datetime] = {}
+_refresh_duration_seconds: dict[tuple[str, str], float] = {}
 _scan_offsets: dict[str, int] = {}
 _scan_lock = asyncio.Lock()
 _background_task: asyncio.Task | None = None
@@ -383,7 +388,103 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
 
 
 async def cached_top_ideas(exchange: str, timeframe: str) -> dict:
-    return await run_scan(exchange=exchange, timeframe=timeframe, force=False)
+    selected_exchange = normalize_exchange(exchange)
+    normalized_timeframe = timeframe.lower()
+    key = (selected_exchange, normalized_timeframe)
+    cached = _scan_cache.get(key)
+    cache_age = monotonic() - cached[0] if cached else None
+    if cached is None or cache_age is None or cache_age > SCAN_TTL_SECONDS:
+        trigger_top_ideas_refresh(selected_exchange, normalized_timeframe)
+    if cached:
+        return _with_refresh_metadata(key, cached[1])
+    return _with_refresh_metadata(
+        key,
+        {
+            "timeframe": timeframe,
+            "exchange": selected_exchange,
+            "ideas": [],
+            "pending_setups": [],
+            "errors": [],
+            "message": "Scanner cache is warming up. Results will refresh shortly.",
+            "scan_stats": {
+                "markets": 0,
+                "scan_window": 0,
+                "filtered": 0,
+                "analyzed": 0,
+                "valid_setups": 0,
+                "pending_setups": 0,
+            },
+        },
+    )
+
+
+def _task_running(key: tuple[str, str]) -> bool:
+    task = _refresh_tasks.get(key)
+    return task is not None and not task.done()
+
+
+def _with_refresh_metadata(key: tuple[str, str], result: dict) -> dict:
+    cached = _scan_cache.get(key)
+    output = {**result}
+    cache_age = round(monotonic() - cached[0], 2) if cached else None
+    started = _refresh_started_at.get(key)
+    finished = _refresh_finished_at.get(key)
+    refresh_in_progress = _task_running(key)
+    output.update(
+        {
+            "cache_age_seconds": cache_age,
+            "last_refresh_started_at": started.isoformat() if started else None,
+            "last_refresh_finished_at": finished.isoformat() if finished else None,
+            "refresh_in_progress": refresh_in_progress,
+            "refreshing": refresh_in_progress,
+            "scan_duration_seconds": _refresh_duration_seconds.get(key),
+        }
+    )
+    return output
+
+
+def trigger_top_ideas_refresh(exchange: str, timeframe: str, *, force: bool = True) -> dict:
+    selected_exchange = normalize_exchange(exchange)
+    normalized_timeframe = timeframe.lower()
+    key = (selected_exchange, normalized_timeframe)
+    if _task_running(key):
+        return _refresh_status(key, started=False)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return _refresh_status(key, started=False)
+    _refresh_started_at[key] = datetime.now(UTC).replace(microsecond=0)
+    task = loop.create_task(_refresh_top_ideas_cache(selected_exchange, normalized_timeframe, force=force))
+    _refresh_tasks[key] = task
+    task.add_done_callback(lambda _: _refresh_tasks.pop(key, None))
+    return _refresh_status(key, started=True)
+
+
+def _refresh_status(key: tuple[str, str], *, started: bool) -> dict:
+    cached = _scan_cache.get(key)
+    return {
+        "exchange": key[0],
+        "timeframe": key[1],
+        "started": started,
+        "refresh_in_progress": _task_running(key),
+        "cache_age_seconds": round(monotonic() - cached[0], 2) if cached else None,
+        "last_refresh_started_at": _refresh_started_at[key].isoformat() if key in _refresh_started_at else None,
+        "last_refresh_finished_at": _refresh_finished_at[key].isoformat() if key in _refresh_finished_at else None,
+        "scan_duration_seconds": _refresh_duration_seconds.get(key),
+    }
+
+
+async def _refresh_top_ideas_cache(exchange: str, timeframe: str, *, force: bool) -> None:
+    key = (normalize_exchange(exchange), timeframe.lower())
+    started = monotonic()
+    try:
+        await run_scan(exchange=exchange, timeframe=timeframe, force=force)
+    except Exception:
+        logger.exception("Background top ideas refresh failed exchange=%s timeframe=%s", exchange, timeframe)
+    finally:
+        duration = round(monotonic() - started, 2)
+        _refresh_duration_seconds[key] = duration
+        _refresh_finished_at[key] = datetime.now(UTC).replace(microsecond=0)
 
 
 def start_background_scanner() -> None:
@@ -401,7 +502,9 @@ async def _scan_loop() -> None:
     await asyncio.sleep(5)
     while True:
         try:
-            await run_scan(exchange="all", timeframe=get_settings().default_timeframe, force=True)
+            timeframe = get_settings().default_timeframe
+            for exchange in ("all", "hyperliquid"):
+                trigger_top_ideas_refresh(exchange, timeframe, force=True)
         except Exception:
             logger.exception("Background scan failed")
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)

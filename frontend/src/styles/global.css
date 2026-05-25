@@ -605,6 +605,12 @@ p {
   gap: 16px;
   margin-bottom: 18px;
 }
+.panel-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .controls {
   display: grid;
   grid-template-columns: 170px 1fr;
@@ -1094,6 +1100,14 @@ p {
 }
 .badge.long { color: var(--green); border-color: rgba(20,92,56,0.35); }
 .badge.short { color: var(--red); border-color: rgba(125,40,37,0.35); }
+.refresh-badge {
+  color: #6b4d00;
+  border-color: rgba(166, 125, 30, 0.34);
+  background: rgba(255, 214, 102, 0.18);
+}
+.watchlist-refreshing {
+  color: var(--muted);
+}
 .confidence-rail {
   height: 5px;
   margin: 14px 0;

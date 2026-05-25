@@ -10,7 +10,7 @@ import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
-import { getAnalysis, getCandles, getTopIdeas } from "./lib/api.js";
+import { getAnalysis, getCandles, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
 import { scanWithGenLayer } from "./lib/genlayer.js";
 import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
 import { freshnessForIdea, liquidityForIdea } from "./lib/signalQuality.js";
@@ -44,6 +44,7 @@ export default function App() {
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });
   const [topIdeas, setTopIdeas] = useState([]);
   const [pendingSetups, setPendingSetups] = useState([]);
+  const [topIdeasMeta, setTopIdeasMeta] = useState({});
   const [candles, setCandles] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -65,14 +66,26 @@ export default function App() {
     setPath(nextPath);
   }
 
-  async function refreshTopIdeas() {
-    setLoadingTopIdeas(true);
+  async function refreshTopIdeas(options = {}) {
+    const manual = options?.manual === true;
+    const firstLoad = topIdeas.length === 0 && pendingSetups.length === 0;
+    setLoadingTopIdeas(firstLoad);
     setNotice("");
     setNoticeType("info");
     try {
+      if (manual) {
+        await refreshTopIdeasCache({ exchange, timeframe });
+      }
       const data = await getTopIdeas({ exchange, timeframe });
       setTopIdeas(data.ideas || []);
       setPendingSetups(data.pending_setups || []);
+      setTopIdeasMeta({
+        refreshing: Boolean(data.refreshing || data.refresh_in_progress),
+        cacheAgeSeconds: data.cache_age_seconds,
+        lastRefreshStartedAt: data.last_refresh_started_at,
+        lastRefreshFinishedAt: data.last_refresh_finished_at,
+        scanDurationSeconds: data.scan_duration_seconds,
+      });
     } catch (error) {
       setNoticeType("error");
       setNotice(error.message);
@@ -440,6 +453,7 @@ export default function App() {
               topIdeas={topIdeas}
               loadingTopIdeas={loadingTopIdeas}
               refreshTopIdeas={refreshTopIdeas}
+              topIdeasMeta={topIdeasMeta}
               onPaperTrade={paperTrade}
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
@@ -459,6 +473,7 @@ export default function App() {
               topIdeas={topIdeas}
               loadingTopIdeas={loadingTopIdeas}
               refreshTopIdeas={refreshTopIdeas}
+              topIdeasMeta={topIdeasMeta}
               onPaperTrade={paperTrade}
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
@@ -492,6 +507,7 @@ export default function App() {
             <Watchlist
               pendingSetups={pendingSetups}
               loading={loadingTopIdeas}
+              meta={topIdeasMeta}
               exchange={exchange}
               setExchange={setExchange}
               timeframe={timeframe}

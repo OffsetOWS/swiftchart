@@ -1,15 +1,15 @@
 from fastapi import APIRouter, HTTPException, Query
 import logging
 
-from app.config import DEFAULT_SCAN_LIST, SUPPORTED_TIMEFRAMES, get_settings
+from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
 from app.services.liquidity_filter import skip_low_volume_market
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.pending_setups import build_pending_setup
 from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
+from app.services.scanner import trigger_top_ideas_refresh
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.trade_ideas import analyze_dataframe
@@ -25,10 +25,6 @@ def _selected_exchange(exchange: str | None) -> str:
 
 async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
     return await get_candles_cached(exchange, symbol, timeframe, limit)
-
-
-async def _market_scan_symbols(exchange: str) -> list[str]:
-    return DEFAULT_SCAN_LIST
 
 
 async def _market_for_symbol(exchange: str, symbol: str) -> dict | None:
@@ -195,71 +191,35 @@ async def top_ideas(
     if timeframe.lower() not in SUPPORTED_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
     selected_exchange = _selected_exchange(exchange)
-    if symbols is None:
-        result = await cached_top_ideas(selected_exchange, timeframe)
-        return {
-            **result,
-            "ideas": _unique_display_ideas(result.get("ideas", [])),
-            "pending_setups": result.get("pending_setups", []),
-        }
-
-    selected_exchanges = scan_selected_exchanges(selected_exchange)
-    settings = get_settings()
-    risk = RiskSettings(
-        account_size=settings.default_account_size,
-        risk_per_trade_pct=settings.default_risk_per_trade,
-        min_rr=settings.default_min_rr,
-        max_open_trades=settings.default_max_open_trades,
-        preferred_timeframe=timeframe,
-    )
-    ideas = []
-    pending_setups = []
-    errors = []
-    for selected_exchange in selected_exchanges:
-        scan_symbols = [item.strip().upper() for item in symbols.split(",")] if symbols else await _market_scan_symbols(selected_exchange)
-        for symbol in scan_symbols:
-            try:
-                if await _skip_low_volume_symbol(selected_exchange, symbol):
-                    continue
-                df = await get_candles_cached(selected_exchange, symbol, timeframe, 260)
-                if len(df) >= 80:
-                    htf_dfs = []
-                    for htf in higher_timeframes_for(timeframe):
-                        try:
-                            htf_dfs.append(await get_candles_cached(selected_exchange, symbol, htf, 220))
-                        except Exception:
-                            continue
-                    analysis = analyze_dataframe(
-                        symbol,
-                        timeframe,
-                        selected_exchange,
-                        df,
-                        risk,
-                        htf_dfs,
-                        global_regime_score=await global_regime_score(selected_exchange, timeframe),
-                    )
-                    ideas.extend(analysis.trade_ideas)
-                    if not analysis.trade_ideas:
-                        pending_setup = build_pending_setup(analysis, df)
-                        if pending_setup is not None:
-                            pending_setups.append(pending_setup)
-                    save_signal_reviews(analysis.rejected_signals)
-            except Exception as exc:
-                errors.append({"exchange": selected_exchange, "symbol": symbol, "error": str(exc)})
-    ranked = _unique_display_ideas(sorted(ideas, key=lambda idea: idea.rank_score, reverse=True))[:5]
-    saved_ids = save_trade_ideas(ranked)
-    logger.info("Top ideas generated %s ranked ideas and saved %s for exchange=%s timeframe=%s", len(ranked), len(saved_ids), exchange, timeframe)
+    result = await cached_top_ideas(selected_exchange, timeframe)
+    ideas = _unique_display_ideas(result.get("ideas", []))
+    pending_setups = result.get("pending_setups", [])
+    if symbols:
+        selected_symbols = {item.strip().upper() for item in symbols.split(",") if item.strip()}
+        ideas = [idea for idea in ideas if getattr(idea, "symbol", "").upper() in selected_symbols]
+        pending_setups = [setup for setup in pending_setups if getattr(setup, "symbol", "").upper() in selected_symbols]
     return {
-        "timeframe": timeframe,
-        "exchange": exchange,
-        "ideas": ranked,
-        "pending_setups": sorted(
-            pending_setups,
-            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
-            reverse=True,
-        )[:20],
-        "errors": errors,
-        "message": None
-        if len(ranked) >= 5
-        else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
+        **result,
+        "ideas": ideas,
+        "pending_setups": pending_setups,
     }
+
+
+@router.post("/top-ideas/refresh")
+async def refresh_top_ideas(
+    exchange: str = Query(default="hyperliquid"),
+    timeframe: str = Query(default="4h"),
+):
+    if timeframe.lower() not in SUPPORTED_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
+    return trigger_top_ideas_refresh(_selected_exchange(exchange), timeframe)
+
+
+@router.get("/top-ideas/refresh")
+async def refresh_top_ideas_get(
+    exchange: str = Query(default="hyperliquid"),
+    timeframe: str = Query(default="4h"),
+):
+    if timeframe.lower() not in SUPPORTED_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
+    return trigger_top_ideas_refresh(_selected_exchange(exchange), timeframe)

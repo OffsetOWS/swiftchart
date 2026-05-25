@@ -9,6 +9,7 @@ export default function Dashboard({
   topIdeas,
   loadingTopIdeas,
   refreshTopIdeas,
+  topIdeasMeta = {},
   onPaperTrade,
   takenSignalIds = new Set(),
   paperTradeLoadingSignalId = "",
@@ -32,7 +33,7 @@ export default function Dashboard({
             <h2>{compact ? "Trade Ideas" : "Dashboard"}</h2>
             <p>Scan liquid markets for clean edges, swept liquidity, and breakout conditions without forcing mid-range noise.</p>
           </div>
-          <button className="icon-btn" onClick={refreshTopIdeas} title="Refresh top ideas"><RefreshCcw size={18} /></button>
+          <button className="icon-btn" onClick={() => refreshTopIdeas({ manual: true })} title="Refresh top ideas"><RefreshCcw size={18} /></button>
           <div className="controls">
             <div className="field">
               <label>Exchange</label>
@@ -71,10 +72,13 @@ export default function Dashboard({
               <span className="eyebrow">TOP SETUPS</span>
               <h2>Top 5 Trade Ideas</h2>
             </div>
-            <span className="badge">{timeframe}</span>
+            <div className="panel-badges">
+              {topIdeasMeta.refreshing ? <span className="badge refresh-badge">Refreshing...</span> : null}
+              <span className="badge">{timeframe}</span>
+            </div>
           </div>
           <div className="idea-list">
-            {loadingTopIdeas ? <div className="empty">Scanning markets...</div> : null}
+            {loadingTopIdeas ? <div className="empty">Loading cached setups...</div> : null}
             {!loadingTopIdeas && topIdeas.length === 0 ? <div className="empty">No clean setups found right now.</div> : null}
             {topIdeas.map((idea) => {
               const signalId = getSignalId ? getSignalId(idea) : "";
