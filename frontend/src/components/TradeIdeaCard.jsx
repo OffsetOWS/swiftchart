@@ -12,6 +12,19 @@ function sourceLabel(value) {
   return value || "exchange";
 }
 
+function levelList(items) {
+  return (
+    <ul className="level-list">
+      {items.map((item) => (
+        <li key={item.label}>
+          <small>{item.label}</small>
+          <b>{fmt(item.value)}</b>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function TradeIdeaCard({
   idea,
   onPaperTrade,
@@ -83,10 +96,21 @@ export default function TradeIdeaCard({
         <span style={{ width: `${Math.min(100, Math.max(0, score))}%` }} />
       </div>
       <div className="trade-level-grid">
-        <div className="metric"><span>Entry zone</span><b>{fmt(idea.entry_zone[0])} - {fmt(idea.entry_zone[1])}</b></div>
+        <div className="metric level-metric">
+          <span>Entry zone</span>
+          {levelList([
+            { label: "Low", value: idea.entry_zone[0] },
+            { label: "High", value: idea.entry_zone[1] },
+          ])}
+        </div>
         <div className="metric"><span>Stop loss</span><b>{fmt(idea.stop_loss)}</b></div>
-        <div className="metric"><span>Take profit 1</span><b>{fmt(idea.take_profit_1)}</b></div>
-        <div className="metric"><span>Take profit 2</span><b>{fmt(idea.take_profit_2)}</b></div>
+        <div className="metric level-metric">
+          <span>Take profit</span>
+          {levelList([
+            { label: "TP1", value: idea.take_profit_1 },
+            { label: "TP2", value: idea.take_profit_2 },
+          ])}
+        </div>
       </div>
       <section className="setup-story">
         <div>

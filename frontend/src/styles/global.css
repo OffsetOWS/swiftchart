@@ -952,6 +952,21 @@ p {
   display: grid;
   gap: 14px;
 }
+.dark-mode .idea-card.signal-card {
+  border-color: rgba(238,238,234,0.14);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018) 52%, rgba(255,255,255,0.045)),
+    rgba(9, 10, 9, 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 -18px 34px rgba(0,0,0,0.22),
+    0 24px 64px rgba(0,0,0,0.42);
+}
+.dark-mode .idea-card.signal-card:hover {
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.09), rgba(255,255,255,0.026) 52%, rgba(255,255,255,0.055)),
+    rgba(11, 12, 11, 0.92);
+}
 .signal-card.status-aging {
   border-color: rgba(128,99,21,0.38);
 }
@@ -1129,7 +1144,7 @@ p {
 }
 .trade-level-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1.1fr 0.9fr 1.1fr;
   gap: 7px;
 }
 .metric {
@@ -1157,6 +1172,58 @@ p {
 .metric b {
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+.level-metric {
+  display: grid;
+  align-content: start;
+}
+.level-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.level-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.level-list small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.level-list b {
+  justify-self: end;
+  font-size: 15px;
+  line-height: 1.15;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.dark-mode .signal-card .signal-score-row div,
+.dark-mode .signal-card .metric,
+.dark-mode .signal-card .setup-story > div,
+.dark-mode .signal-card .confirmation-list {
+  border-color: rgba(238,238,234,0.13);
+  background: rgba(238,238,234,0.045);
+}
+.dark-mode .signal-card .regime-badge,
+.dark-mode .signal-card .freshness-pill,
+.dark-mode .signal-card .liquidity-pill,
+.dark-mode .signal-card .direction-badge,
+.dark-mode .signal-card .signal-context-row span {
+  background: rgba(238,238,234,0.045);
+}
+.dark-mode .signal-card .confidence-rail {
+  background: rgba(238,238,234,0.1);
+}
+.dark-mode .signal-card .confidence-rail span {
+  background: var(--ink);
 }
 .confirmation-list {
   margin-top: 12px;
@@ -2411,7 +2478,7 @@ button:disabled {
   justify-content: space-between;
   gap: 18px;
 }
-.signal-card {
+.launch-preview-card.signal-card {
   grid-column: span 3;
   grid-row: span 2;
 }
@@ -2423,7 +2490,7 @@ button:disabled {
   gap: 12px;
 }
 .locked-soft::after,
-.signal-card::after {
+.launch-preview-card.signal-card::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -2829,7 +2896,7 @@ button:disabled {
   .bias-card,
   .confidence-card,
   .locked-card,
-  .signal-card,
+  .launch-preview-card.signal-card,
   .mini-preview {
     grid-column: auto;
     grid-row: auto;
