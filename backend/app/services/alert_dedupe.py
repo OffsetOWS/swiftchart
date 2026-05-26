@@ -60,6 +60,23 @@ def _source(idea: TradeIdea) -> str:
 
 
 def alert_dedupe_key(idea: TradeIdea) -> str:
+    entry_low, entry_high = idea.entry_zone
+    return "|".join(
+        [
+            _source(idea),
+            idea.symbol.upper(),
+            idea.timeframe.lower(),
+            idea.direction.upper(),
+            _rounded_price(entry_low),
+            _rounded_price(entry_high),
+            _rounded_price(idea.stop_loss),
+            _rounded_price(idea.take_profit_1),
+            _rounded_price(idea.take_profit_2),
+        ]
+    )
+
+
+def _symbol_direction_key(idea: TradeIdea) -> str:
     return "|".join(
         [
             _source(idea),
@@ -85,10 +102,14 @@ def _rounded_price(value: float) -> str:
 
 
 def _setup_shape_fingerprint(idea: TradeIdea) -> str:
+    return alert_dedupe_key(idea)
+
+
+def _legacy_setup_shape_fingerprint(idea: TradeIdea) -> str:
     entry_low, entry_high = idea.entry_zone
     return "|".join(
         [
-            alert_dedupe_key(idea),
+            _symbol_direction_key(idea),
             _rounded_price(entry_low),
             _rounded_price(entry_high),
             _rounded_price(idea.stop_loss),
@@ -98,11 +119,16 @@ def _setup_shape_fingerprint(idea: TradeIdea) -> str:
 
 
 def setup_fingerprint(idea: TradeIdea) -> str:
-    candle_time = _iso(_latest_candle_time(idea)) or ""
-    return "|".join([_setup_shape_fingerprint(idea), candle_time])
+    return _setup_shape_fingerprint(idea)
 
 
-def alert_cooldown_minutes(timeframe: str) -> int:
+def telegram_alert_cooldown_hours() -> float:
+    return max(0.0, float(os.getenv("TELEGRAM_ALERT_COOLDOWN_HOURS", "12")))
+
+
+def alert_cooldown_minutes(timeframe: str, *, namespace: str = "alerts") -> int:
+    if namespace == "telegram":
+        return int(telegram_alert_cooldown_hours() * 60)
     default = "60"
     return max(0, int(os.getenv("ALERT_COOLDOWN_MINUTES", default)))
 
@@ -116,45 +142,61 @@ def _latest_candle_time(idea: TradeIdea) -> datetime | None:
     return _parse_dt(idea.signal_candle_time)
 
 
-def _log_skip(idea: TradeIdea, record: dict | None, latest_candle_time: datetime | None) -> None:
+def _cooldown_remaining(current_time: datetime, last_alert_time: datetime | None, cooldown: timedelta) -> int:
+    if last_alert_time is None:
+        return 0
+    remaining = cooldown - (current_time - last_alert_time)
+    return max(0, int(remaining.total_seconds()))
+
+
+def _log_skip(idea: TradeIdea, record: dict | None, current_time: datetime, cooldown: timedelta) -> None:
+    last_sent_at = (record or {}).get("last_alert_time")
+    last_alert_time = _parse_dt(last_sent_at)
     logger.info(
-        "Skipped duplicate alert: same candle / cooldown active source=%s symbol=%s timeframe=%s direction=%s lastAlertTime=%s latestCandleTime=%s",
+        (
+            "duplicate_skipped source=%s symbol=%s timeframe=%s direction=%s "
+            "dedup_key=%s last_sent_at=%s cooldown_remaining=%s"
+        ),
         _source(idea),
         idea.symbol.upper(),
         idea.timeframe.lower(),
         idea.direction.upper(),
-        (record or {}).get("last_alert_time"),
-        _iso(latest_candle_time),
+        alert_dedupe_key(idea),
+        last_sent_at,
+        _cooldown_remaining(current_time, last_alert_time, cooldown),
     )
 
 
 def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: datetime | None = None) -> bool:
     data = _load()
     bucket = _namespace(data, namespace)
-    key = alert_dedupe_key(idea)
-    fingerprint = setup_fingerprint(idea)
-    shape_fingerprint = _setup_shape_fingerprint(idea)
-    latest_candle_time = _latest_candle_time(idea)
+    key = _symbol_direction_key(idea)
+    dedup_key = alert_dedupe_key(idea)
     record = bucket["keys"].get(key)
     current_time = now or datetime.now(UTC)
+    cooldown = timedelta(minutes=alert_cooldown_minutes(idea.timeframe, namespace=namespace))
 
     if record:
         last_alert_time = _parse_dt(record.get("last_alert_time"))
-        last_candle_time = _parse_dt(record.get("latest_candle_time"))
-        same_candle = latest_candle_time is not None and last_candle_time == latest_candle_time
-        same_setup = record.get("fingerprint") == fingerprint or record.get("shape_fingerprint") == shape_fingerprint
-        cooldown = timedelta(minutes=alert_cooldown_minutes(idea.timeframe))
+        legacy_key = _legacy_setup_shape_fingerprint(idea)
+        record_fingerprint = str(record.get("fingerprint") or "")
+        same_setup = (
+            record.get("dedup_key") == dedup_key
+            or record.get("fingerprint") == dedup_key
+            or record.get("shape_fingerprint") == dedup_key
+            or record.get("shape_fingerprint") == legacy_key
+            or record_fingerprint.startswith(f"{legacy_key}|")
+        )
         cooldown_active = bool(last_alert_time and cooldown.total_seconds() > 0 and current_time - last_alert_time < cooldown)
         previous_closed = str(record.get("status", "active")).upper() in {"CLOSED", "INVALIDATED", "TP_HIT", "SL_HIT"}
 
-        if same_setup and not previous_closed and (same_candle or cooldown_active):
-            _log_skip(idea, record, latest_candle_time)
+        if same_setup and not previous_closed and cooldown_active:
+            _log_skip(idea, record, current_time, cooldown)
             return True
 
-    fingerprint_time = _parse_dt(bucket["fingerprints"].get(fingerprint))
-    cooldown = timedelta(minutes=alert_cooldown_minutes(idea.timeframe))
+    fingerprint_time = _parse_dt(bucket["fingerprints"].get(dedup_key))
     if fingerprint_time and cooldown.total_seconds() > 0 and current_time - fingerprint_time < cooldown:
-        _log_skip(idea, record, latest_candle_time)
+        _log_skip(idea, record, current_time, cooldown)
         return True
 
     return False
@@ -163,23 +205,23 @@ def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: dateti
 def mark_alert_sent(idea: TradeIdea, *, namespace: str = "alerts", status: str = "active", now: datetime | None = None) -> None:
     data = _load()
     bucket = _namespace(data, namespace)
-    key = alert_dedupe_key(idea)
-    fingerprint = setup_fingerprint(idea)
-    shape_fingerprint = _setup_shape_fingerprint(idea)
+    key = _symbol_direction_key(idea)
+    dedup_key = alert_dedupe_key(idea)
     current_time = now or datetime.now(UTC)
     bucket["keys"][key] = {
         "source": _source(idea),
         "symbol": idea.symbol.upper(),
         "timeframe": idea.timeframe.lower(),
         "direction": idea.direction.upper(),
-        "fingerprint": fingerprint,
-        "shape_fingerprint": shape_fingerprint,
+        "dedup_key": dedup_key,
+        "fingerprint": dedup_key,
+        "shape_fingerprint": dedup_key,
         "last_alert_time": _iso(current_time),
         "latest_candle_time": _iso(_latest_candle_time(idea)),
         "status": status,
     }
     fingerprints = bucket["fingerprints"]
-    fingerprints[fingerprint] = _iso(current_time)
+    fingerprints[dedup_key] = _iso(current_time)
     if len(fingerprints) > RECENT_FINGERPRINT_LIMIT:
         ordered = sorted(fingerprints.items(), key=lambda item: item[1] or "")
         bucket["fingerprints"] = dict(ordered[-RECENT_FINGERPRINT_LIMIT:])

@@ -2,17 +2,16 @@ import asyncio
 import logging
 import os
 from collections import Counter
-from datetime import UTC, datetime
 
 from telegram import Bot
 
 from app.config import get_settings
 from app.models.schemas import TradeIdea
 from app.services.alert_dedupe import mark_alert_sent as mark_dedupe_sent
-from app.services.alert_dedupe import setup_fingerprint, should_skip_alert
+from app.services.alert_dedupe import should_skip_alert
 from bot.formatter import format_trade_alert
 from bot.scanner import scan_top_ideas
-from bot.storage import get_subscribers, is_alert_sent, mark_alert_sent
+from bot.storage import get_subscribers
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +22,6 @@ def alert_min_score() -> float:
 
 def idea_score(idea: TradeIdea) -> float:
     return float(idea.setup_score or idea.confidence_score or 0)
-
-
-def alert_key(idea: TradeIdea) -> str:
-    hour = datetime.now(UTC).strftime("%Y%m%d%H")
-    return f"{setup_fingerprint(idea)}|{hour}"
 
 
 def is_limit_order_alertable(idea: TradeIdea) -> bool:
@@ -74,8 +68,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     sent = 0
     skipped_by_dedup = 0
     for idea in eligible_ideas:
-        key = alert_key(idea)
-        if is_alert_sent(key) or should_skip_alert(idea, namespace="telegram"):
+        if should_skip_alert(idea, namespace="telegram"):
             skipped_by_dedup += 1
             rejection_reasons["duplicate alert"] += 1
             continue
@@ -87,7 +80,6 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             except Exception as exc:
                 rejection_reasons["send error"] += 1
                 logger.warning("Could not send alert to chat %s: %s", chat_id, exc)
-        mark_alert_sent(key)
         mark_dedupe_sent(idea, namespace="telegram")
 
     logger.info(
