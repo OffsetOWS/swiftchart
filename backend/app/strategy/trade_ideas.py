@@ -213,17 +213,19 @@ def _signal_quality_control(
     cap: float | None = None
     status = "READY"
 
+    exhaustion_cluster = extension_atr > 3.0 and momentum_decay and far_from_equilibrium
     if extension_atr > 3.5:
-        penalty += 30
-        cap = min(cap or 100.0, 65.0)
-        reasons.append(f"{direction} downgraded: move is exhausted at {extension_atr:.1f}x ATR.")
+        penalty += 18 if exhaustion_cluster else 8
+        if exhaustion_cluster:
+            cap = min(cap or 100.0, 65.0)
+        reasons.append(f"{direction} downgraded: move is extended at {extension_atr:.1f}x ATR.")
     elif extension_atr > 3.0:
-        penalty += 20
-        cap = min(cap or 100.0, 75.0)
+        penalty += 12 if exhaustion_cluster else 6
+        if exhaustion_cluster:
+            cap = min(cap or 100.0, 75.0)
         reasons.append(f"{direction} downgraded: move is already extended vs ATR.")
     elif extension_atr > 2.5:
-        penalty += 12
-        cap = min(cap or 100.0, 80.0)
+        penalty += 5
         reasons.append(f"{direction} downgraded: move is maturing vs ATR.")
 
     if momentum_decay:
@@ -252,9 +254,13 @@ def _signal_quality_control(
 
     strong_extension = extension_atr > 3.0
     extreme_extension = extension_atr > 3.5
-    if (regime in {"BREAKOUT", "BREAKDOWN", "TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"} and strong_extension) or (strong_extension and (momentum_decay or far_from_equilibrium)):
+    if exhaustion_cluster or (
+        regime in {"BREAKOUT", "BREAKDOWN", "TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}
+        and strong_extension
+        and (momentum_decay or far_from_equilibrium)
+    ):
         status = "WAIT_FOR_RETEST"
-    if trap_sweep or (extreme_extension and rsi_exhausted):
+    if trap_sweep or (extreme_extension and momentum_decay and far_from_equilibrium and rsi_exhausted):
         status = "REJECTED_EXHAUSTED"
 
     adjusted = max(0.0, score - penalty)
@@ -264,7 +270,7 @@ def _signal_quality_control(
     if status == "READY" and adjusted < MIN_SETUP_SCORE:
         status = "REJECTED_EXHAUSTED" if reasons else "READY"
 
-    if extension_atr > 3.5 or (extension_atr > 3.0 and (rsi_exhausted or momentum_decay or far_from_equilibrium)):
+    if exhaustion_cluster or (extension_atr > 3.5 and rsi_exhausted and (momentum_decay or far_from_equilibrium)):
         maturity = "Exhausted"
     elif extension_atr > 2.5 or momentum_decay or far_from_equilibrium or rsi_exhausted:
         maturity = "Extended"
@@ -460,6 +466,23 @@ def _regime_adjustment(direction: str, score: float, market_regime: MarketRegime
             f"and only has {len(confirmations)} reversal confirmation{'s' if len(confirmations) != 1 else ''}; {required} required."
         )
     return adjusted, penalty, f"Counter-trend {direction.lower()} allowed with {len(confirmations)} strong reversal confirmations."
+
+
+def _clone_regime_for_setup(
+    market_regime: MarketRegimeSnapshot,
+    *,
+    regime_type: str,
+    trade_decision: str = "TRADE_ALLOWED",
+    note: str,
+) -> MarketRegimeSnapshot:
+    return market_regime.model_copy(
+        update={
+            "regime_type": regime_type,
+            "trade_decision": trade_decision,
+            "is_transition": regime_type in {"TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"},
+            "explanation": f"{market_regime.explanation} Softened for setup construction: {note}",
+        }
+    )
 
 
 def _log_signal_review(
@@ -779,35 +802,6 @@ def build_trade_ideas(
     htf_bias: str,
     market_regime_data: MarketRegimeSnapshot,
 ) -> tuple[list[TradeIdea], str | None, list[SignalReview]]:
-    if market_regime_data.trade_decision == "WAIT" and market_regime_data.regime_type not in {"TRANSITION_TO_BULLISH", "TRANSITION_TO_BEARISH"}:
-        logger.info(
-            "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=WAIT",
-            symbol,
-            timeframe,
-            exchange,
-            market_regime_data.bias,
-            market_regime_data.bias_reason,
-            market_regime_data.bias_flip_trigger,
-        )
-        return [], (
-            f"WAIT / NO TRADE: {market_regime_data.label} has {market_regime_data.confidence_score:.0f}% confidence. "
-            f"{market_regime_data.explanation}"
-        ), []
-    if market_regime_data.trade_decision == "NO_TRADE":
-        logger.info(
-            "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=NO_TRADE",
-            symbol,
-            timeframe,
-            exchange,
-            market_regime_data.bias,
-            market_regime_data.bias_reason,
-            market_regime_data.bias_flip_trigger,
-        )
-        return [], (
-            f"NO TRADE: regime confidence is {market_regime_data.confidence_score:.0f}% or market is {market_regime_data.label}. "
-            f"{market_regime_data.explanation}"
-        ), []
-
     if support is None or resistance is None:
         return [], "NO TRADE: not enough clean support/resistance structure.", []
 
@@ -890,9 +884,102 @@ def build_trade_ideas(
     long_trigger_ready = any([support_rejection, bullish_retest, bullish_sweep is not None, resistance_reclaim])
     short_confirmation_ready = bearish_momentum or vol_ok or support_break
     long_confirmation_ready = bullish_momentum or vol_ok or resistance_reclaim
+    normal_volatility = 0.002 <= atr / max(price, 1e-9) <= 0.12
+    near_long_edge = position is not None and position <= 0.4
+    near_short_edge = position is not None and position >= 0.6
+
+    def evidence(direction: str) -> list[str]:
+        items: list[str] = []
+        if direction == "Long":
+            if bullish_sweep is not None or any(sweep.direction == "bullish" for sweep in sweeps):
+                items.append("sweep hint")
+            if resistance_reclaim:
+                items.append("reclaim hint")
+            if bullish_retest:
+                items.append("retest hint")
+            if bullish_momentum:
+                items.append("momentum agrees")
+            if vol_ok:
+                items.append("volume confirms")
+            if htf_bias in {"HTF_BULLISH", "HTF_NEUTRAL"}:
+                items.append("HTF bias agrees")
+            if support_rejection:
+                items.append("price reacts at valid zone")
+        else:
+            if bearish_sweep is not None or any(sweep.direction == "bearish" for sweep in sweeps):
+                items.append("sweep hint")
+            if resistance_rejection or failed_reclaim:
+                items.append("rejection hint")
+            if bearish_retest:
+                items.append("retest hint")
+            if bearish_momentum:
+                items.append("momentum agrees")
+            if vol_ok:
+                items.append("volume confirms")
+            if htf_bias in {"HTF_BEARISH", "HTF_NEUTRAL"}:
+                items.append("HTF bias agrees")
+            if resistance_rejection or failed_reclaim:
+                items.append("price reacts at valid zone")
+        return list(dict.fromkeys(items))
+
+    long_evidence = evidence("Long")
+    short_evidence = evidence("Short")
+    long_evidence_ready = len(long_evidence) >= 2
+    short_evidence_ready = len(short_evidence) >= 2
+    original_decision = market_regime_data.trade_decision
+    original_regime = regime
+    hard_chop = market_regime_data.regime_type == "CHOP" and not (near_long_edge or near_short_edge)
+    invalid_structure = "invalid" in market_regime_data.structure.lower() or "insufficient" in market_regime_data.structure.lower()
+    dead_volatility = atr / max(price, 1e-9) < 0.0015
+
+    if market_regime_data.trade_decision in {"WAIT", "NO_TRADE"}:
+        soften_note = ""
+        softened_regime = None
+        if (
+            normal_volatility
+            and not invalid_structure
+            and not dead_volatility
+            and not hard_chop
+            and (near_long_edge or resistance_reclaim or bullish_retest)
+            and long_evidence_ready
+        ):
+            softened_regime = "TRANSITION_TO_BULLISH" if market_regime_data.trade_decision == "WAIT" else "RANGE_BOUND"
+            soften_note = f"long evidence at support/edge: {', '.join(long_evidence)}"
+        elif (
+            normal_volatility
+            and not invalid_structure
+            and not dead_volatility
+            and not hard_chop
+            and (near_short_edge or support_break or bearish_retest or failed_reclaim)
+            and short_evidence_ready
+        ):
+            softened_regime = "TRANSITION_TO_BEARISH" if market_regime_data.trade_decision == "WAIT" else "RANGE_BOUND"
+            soften_note = f"short evidence at resistance/edge: {', '.join(short_evidence)}"
+        if softened_regime is None:
+            logger.info(
+                "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=%s long_evidence=%s short_evidence=%s",
+                symbol,
+                timeframe,
+                exchange,
+                market_regime_data.bias,
+                market_regime_data.bias_reason,
+                market_regime_data.bias_flip_trigger,
+                market_regime_data.trade_decision,
+                long_evidence,
+                short_evidence,
+            )
+            return [], (
+                f"WAIT / NO TRADE: {market_regime_data.label} lacks edge/evidence for setup construction. "
+                f"{market_regime_data.explanation}"
+            ), []
+        market_regime_data = _clone_regime_for_setup(market_regime_data, regime_type=softened_regime, note=soften_note)
+        regime = softened_regime
+
+    if original_decision == "WAIT" and regime == "RANGE_BOUND":
+        regime = "TRANSITION_TO_BULLISH" if near_long_edge and long_evidence_ready else "TRANSITION_TO_BEARISH" if near_short_edge and short_evidence_ready else regime
 
     if regime == "RANGE_BOUND":
-        if position is not None and position <= 0.25:
+        if position is not None and position <= 0.35 and long_evidence_ready:
             sweep_low = min([float(df.loc[df["timestamp"] == bullish_sweep.candle_time, "low"].iloc[0])] if bullish_sweep is not None else [support.lower])
             append(
                 _build_idea(
@@ -921,7 +1008,7 @@ def build_trade_ideas(
                     bearish_sweep=bearish_sweep,
                 )
             )
-        elif position is not None and position >= 0.75:
+        elif position is not None and position >= 0.65 and short_evidence_ready:
             sweep_high = max([float(df.loc[df["timestamp"] == bearish_sweep.candle_time, "high"].iloc[0])] if bearish_sweep is not None else [resistance.upper])
             append(
                 _build_idea(
@@ -951,8 +1038,10 @@ def build_trade_ideas(
                 )
             )
 
-    if regime in {"TRENDING_UP", "TRANSITION_TO_BULLISH"} and position is not None and (
-        position <= 0.4 or (regime == "TRANSITION_TO_BULLISH" and long_trigger_ready and long_confirmation_ready)
+    if regime in {"TRENDING_UP", "TRANSITION_TO_BULLISH"} and position is not None and long_evidence_ready and (
+        position <= 0.5
+        or (regime == "TRANSITION_TO_BULLISH" and long_trigger_ready and long_confirmation_ready)
+        or (original_regime in {"TRENDING_UP", "BREAKOUT"} and bullish_retest and bullish_momentum)
     ):
         append(
             _build_idea(
@@ -983,7 +1072,11 @@ def build_trade_ideas(
         )
 
     if regime in {"TRENDING_DOWN", "TRANSITION_TO_BEARISH"} and position is not None:
-        if position >= 0.6 or (regime == "TRANSITION_TO_BEARISH" and short_trigger_ready and short_confirmation_ready):
+        if short_evidence_ready and (
+            position >= 0.5
+            or (regime == "TRANSITION_TO_BEARISH" and short_trigger_ready and short_confirmation_ready)
+            or (original_regime in {"TRENDING_DOWN", "BREAKDOWN"} and (bearish_retest or failed_reclaim) and bearish_momentum)
+        ):
             entry_anchor_low = resistance.lower if resistance_rejection else price
             entry_anchor_high = resistance.upper if resistance_rejection else price + atr * 0.25
             if failed_reclaim or bearish_retest:
@@ -1026,7 +1119,7 @@ def build_trade_ideas(
                 missing.append("no bearish momentum/volume/support-break confirmation")
             reject_short("Bearish regime short candidate was not built.", ", ".join(missing) or "short trigger not ready")
 
-    if regime == "BREAKOUT" and (vol_ok or mom_ok):
+    if regime == "BREAKOUT" and (vol_ok or mom_ok) and long_evidence_ready:
         append(
             _build_idea(
                 symbol=symbol,
@@ -1056,7 +1149,7 @@ def build_trade_ideas(
         )
 
     if regime == "BREAKDOWN":
-        if vol_ok or mom_ok or support_break:
+        if short_evidence_ready and (vol_ok or mom_ok or support_break):
             append(
                 _build_idea(
                     symbol=symbol,

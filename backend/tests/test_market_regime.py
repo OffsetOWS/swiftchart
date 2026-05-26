@@ -155,7 +155,12 @@ def test_transition_to_bearish_rejects_short_after_exhausted_dump():
 
     assert warning
     assert ideas == []
-    assert any(review.direction == "Short" and not review.accepted and "exhaustion filters" in review.reason for review in reviews)
+    assert any(
+        review.direction == "Short"
+        and not review.accepted
+        and "below 65 after exhaustion quality control" in review.reason
+        for review in reviews
+    )
 
 
 def test_bearish_bias_switch_on_support_break_lh_ll_and_momentum():
@@ -243,7 +248,7 @@ def test_reclaimed_high_quality_long_can_trade_against_bearish_structure():
     assert note and "Counter-trend long allowed" in note
 
 
-def test_short_after_large_dump_is_rejected_as_exhausted():
+def test_short_after_large_dump_waits_for_retest_without_full_exhaustion_cluster():
     prices = [104 - idx * 0.03 for idx in range(60)] + [101, 96, 91, 85, 79, 74, 71, 70.5, 70.2, 70.1]
     df = candles_from_prices(prices)
     atr = average_true_range(df)
@@ -260,11 +265,90 @@ def test_short_after_large_dump_is_rejected_as_exhausted():
         bearish_sweep=None,
     )
 
-    assert quality["status"] == "REJECTED_EXHAUSTED"
+    assert quality["status"] == "WAIT_FOR_RETEST"
     assert quality["risk"] == "High"
     assert quality["maturity"] == "Exhausted"
     assert quality["score"] <= 65
     assert any("ATR" in reason or "RSI" in reason for reason in quality["reasons"])
+
+
+def test_wait_no_trade_near_edge_with_evidence_can_build_confirmed_setup():
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = []
+    for idx in range(84):
+        price = 100 + idx * 0.02
+        rows.append(
+            {
+                "timestamp": started + timedelta(hours=idx * 4),
+                "open": price - 0.1,
+                "high": price + 0.5,
+                "low": price - 0.5,
+                "close": price,
+                "volume": 1_000,
+            }
+        )
+    for offset, price in enumerate([100.8, 100.4, 99.5, 100.8, 102.2, 104.0]):
+        rows.append(
+            {
+                "timestamp": started + timedelta(hours=(84 + offset) * 4),
+                "open": price - 0.4,
+                "high": price + 0.6,
+                "low": 98.8 if offset == 3 else price - 0.6,
+                "close": price,
+                "volume": 3_000 if offset >= 3 else 1_200,
+            }
+        )
+    df = pd.DataFrame(rows)
+    snapshot = MarketRegimeSnapshot(
+        score=5,
+        label="Low Confidence Range",
+        regime_type="RANGE_BOUND",
+        confidence_score=58,
+        confidence_breakdown={"range": 58},
+        structure="Range",
+        is_transition=False,
+        trade_decision="NO_TRADE",
+        bias="Balanced",
+        long_bias="Range longs need support confirmation",
+        short_bias="Range shorts need resistance confirmation",
+        updated_at=datetime.now(UTC),
+        components={
+            "bearish_structure_active": False,
+            "bullish_structure_active": False,
+            "structure_reclaimed_bullish": False,
+            "structure_reclaimed_bearish": False,
+        },
+    )
+    sweep = LiquiditySweep(
+        direction="bullish",
+        swept_level=98,
+        candle_time=df["timestamp"].iloc[-3],
+        reclaim_price=100.8,
+        strength=0.8,
+        confirmation_status="confirmed",
+        sweep_quality_score=80,
+    )
+
+    ideas, warning, reviews = build_trade_ideas(
+        "TESTUSDT",
+        "4h",
+        "hyperliquid",
+        df,
+        Zone(type="support", lower=98, upper=100, strength=0.95, touches=5, strength_score=95),
+        Zone(type="resistance", lower=125, upper=127, strength=0.8, touches=4, strength_score=80),
+        [sweep],
+        RiskSettings(min_rr=2),
+        "RANGE_BOUND",
+        "HTF_BULLISH",
+        snapshot,
+    )
+
+    assert warning is None
+    assert ideas
+    assert ideas[0].entry_status == "READY"
+    assert ideas[0].setup_score >= 65
+    assert ideas[0].risk_reward_ratio >= 2
+    assert any(review.accepted for review in reviews)
 
 
 def test_downside_liquidity_sweep_reclaim_blocks_short_chase():

@@ -111,7 +111,7 @@ def test_telegram_does_not_call_cached_top_ideas(monkeypatch, tmp_path):
     assert result["sent"] == 1
 
 
-def test_telegram_sends_limit_order_setups(monkeypatch, tmp_path):
+def test_telegram_only_sends_ready_confirmed_setups(monkeypatch, tmp_path):
     from bot.alerts import run_alert_scan
 
     configure_independent_scan(
@@ -128,12 +128,12 @@ def test_telegram_sends_limit_order_setups(monkeypatch, tmp_path):
     result = asyncio.run(run_alert_scan(bot))
 
     assert result["ideas"] == 3
-    assert result["eligible"] == 2
-    assert result["sent"] == 2
-    assert len(bot.messages) == 2
+    assert result["eligible"] == 1
+    assert result["sent"] == 1
+    assert len(bot.messages) == 1
     sent_text = "\n".join(message for _, message in bot.messages)
     assert "SOLUSDT" in sent_text
-    assert "ETHUSDT" in sent_text
+    assert "ETHUSDT" not in sent_text
     assert "DOGEUSDT" not in sent_text
 
 

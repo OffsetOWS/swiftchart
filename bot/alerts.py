@@ -31,7 +31,7 @@ def alert_key(idea: TradeIdea) -> str:
 
 
 def is_limit_order_alertable(idea: TradeIdea) -> bool:
-    return idea.entry_status != "REJECTED_EXHAUSTED"
+    return idea.entry_status == "READY"
 
 
 async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
