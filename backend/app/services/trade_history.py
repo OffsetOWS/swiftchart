@@ -211,7 +211,7 @@ def save_signal_reviews(reviews: Iterable[SignalReview]) -> int:
 
 def row_to_dict(row) -> dict:
     data = dict(row)
-    for key in ("created_at", "outcome_checked_at", "entry_triggered_at", "closed_at"):
+    for key in ("created_at", "outcome_checked_at", "entry_triggered_at", "tp1_hit_at", "tp2_hit_at", "sl_hit_at", "expired_at", "closed_at"):
         if data.get(key) and isinstance(data[key], str):
             data[key] = _parse_dt(data[key])
     return data
@@ -298,11 +298,43 @@ def _expiry_time(row: dict) -> datetime:
     return _parse_dt(row["created_at"]) + timedelta(minutes=minutes * bars)
 
 
+def _entry_price(row: dict) -> float:
+    return (float(row["entry_zone_low"]) + float(row["entry_zone_high"])) / 2
+
+
+def _tp1_r(row: dict) -> float:
+    risk = abs(_entry_price(row) - float(row["stop_loss"]))
+    if risk <= 0:
+        return 0.0
+    return abs(float(row["take_profit_1"]) - _entry_price(row)) / risk
+
+
+def _partial_r(row: dict, runner_r: float) -> float:
+    return (_tp1_r(row) * 0.5) + (runner_r * 0.5)
+
+
+def _result_for_r(value: float) -> str:
+    if value > 0:
+        return "PARTIAL_WIN"
+    if value < 0:
+        return "PARTIAL_LOSS"
+    return "BREAK_EVEN"
+
+
 def _r_result(row: dict, status: str) -> tuple[str, float | None]:
     if status == "TP2_HIT":
         return "WIN", float(row["risk_reward"])
+    if status == "BREAK_EVEN":
+        return "BREAK_EVEN", round(_partial_r(row, 0.0), 4)
+    if status == "CLOSED_AFTER_TP1":
+        pnl = round(_partial_r(row, -1.0), 4)
+        return _result_for_r(pnl), pnl
+    if status == "PARTIAL_WIN":
+        return "PARTIAL_WIN", round(_partial_r(row, 0.0), 4)
+    if status == "PARTIAL_LOSS":
+        return "PARTIAL_LOSS", round(_partial_r(row, -1.0), 4)
     if status == "TP1_HIT":
-        return "PARTIAL_WIN", max(0.0, float(row["risk_reward"]) / 2)
+        return "OPEN", None
     if status == "SL_HIT":
         return "LOSS", -1.0
     if status == "EXPIRED":
@@ -312,52 +344,155 @@ def _r_result(row: dict, status: str) -> tuple[str, float | None]:
     return "OPEN", None
 
 
-def evaluate_trade(row: dict, candles: pd.DataFrame) -> dict:
-    created_at = _parse_dt(row["created_at"])
-    later = candles[candles["timestamp"].apply(_parse_dt) > created_at].copy()
-    status = row["status"]
-    entry_time = row.get("entry_triggered_at")
-    closed_at = row.get("closed_at")
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
 
-    for _, candle in later.iterrows():
+
+def _stop_hit(row: dict, candle: pd.Series, stop_price: float) -> bool:
+    high = float(candle["high"])
+    low = float(candle["low"])
+    return low <= stop_price if row["direction"] == "LONG" else high >= stop_price
+
+
+def evaluate_trade(row: dict, candles: pd.DataFrame, *, expiry_bars: int | None = None, move_stop_to_entry_after_tp1: bool | None = None) -> dict:
+    created_at = _parse_dt(row["created_at"])
+    later = candles[candles["timestamp"].apply(_parse_dt) > created_at].copy().sort_values("timestamp")
+    max_bars = int(expiry_bars or getattr(get_settings(), "trade_history_expiry_bars", 12))
+    move_to_be = bool(get_settings().trade_history_move_stop_to_entry_after_tp1 if move_stop_to_entry_after_tp1 is None else move_stop_to_entry_after_tp1)
+    status = "OPEN"
+    entry_time: datetime | None = None
+    tp1_time: datetime | None = None
+    tp2_time: datetime | None = None
+    sl_time: datetime | None = None
+    expired_time: datetime | None = None
+    closed_at: datetime | None = None
+    candles_to_resolution: int | None = None
+    lifecycle_events: list[dict] = []
+
+    for candle_index, (_, candle) in enumerate(later.iterrows(), start=1):
         candle_time = _parse_dt(candle["timestamp"])
         if entry_time is None:
             if _entry_triggered(row, candle):
-                entry_time = candle_time.isoformat()
+                entry_time = candle_time
                 status = "ENTRY_TRIGGERED"
+                lifecycle_events.append({"event": "ENTRY_TRIGGERED", "at": candle_time.isoformat(), "candle": candle_index})
             else:
+                if candle_index >= max_bars:
+                    status = "EXPIRED"
+                    expired_time = candle_time
+                    closed_at = candle_time
+                    candles_to_resolution = candle_index
+                    lifecycle_events.append({"event": "EXPIRED", "at": candle_time.isoformat(), "candle": candle_index})
+                    break
                 continue
 
         tp1_hit, tp2_hit, sl_hit = _hit_checks(row, candle)
-        if sl_hit and (tp1_hit or tp2_hit):
-            status = "AMBIGUOUS"
-            closed_at = candle_time.isoformat()
-            break
-        if tp2_hit:
-            status = "TP2_HIT"
-            closed_at = candle_time.isoformat()
-            break
-        if tp1_hit:
-            status = "TP1_HIT"
-            closed_at = candle_time.isoformat()
-            break
-        if sl_hit:
-            status = "SL_HIT"
-            closed_at = candle_time.isoformat()
+
+        if tp1_time is None:
+            if sl_hit and (tp1_hit or tp2_hit):
+                status = "AMBIGUOUS"
+                sl_time = candle_time
+                closed_at = candle_time
+                candles_to_resolution = candle_index
+                lifecycle_events.append({"event": "AMBIGUOUS", "at": candle_time.isoformat(), "candle": candle_index})
+                break
+            if tp2_hit:
+                tp1_time = candle_time
+                tp2_time = candle_time
+                status = "TP2_HIT"
+                closed_at = candle_time
+                candles_to_resolution = candle_index
+                lifecycle_events.append({"event": "TP1_HIT", "at": candle_time.isoformat(), "candle": candle_index})
+                lifecycle_events.append({"event": "TP2_HIT", "at": candle_time.isoformat(), "candle": candle_index})
+                break
+            if tp1_hit:
+                tp1_time = candle_time
+                status = "TP1_HIT"
+                lifecycle_events.append({"event": "TP1_HIT", "at": candle_time.isoformat(), "candle": candle_index})
+                if candle_index >= max_bars:
+                    status = "PARTIAL_WIN"
+                    expired_time = candle_time
+                    closed_at = candle_time
+                    candles_to_resolution = candle_index
+                    lifecycle_events.append({"event": "EXPIRED_AFTER_TP1", "at": candle_time.isoformat(), "candle": candle_index})
+                    break
+                continue
+            if sl_hit:
+                status = "SL_HIT"
+                sl_time = candle_time
+                closed_at = candle_time
+                candles_to_resolution = candle_index
+                lifecycle_events.append({"event": "SL_HIT", "at": candle_time.isoformat(), "candle": candle_index})
+                break
+        else:
+            active_stop = _entry_price(row) if move_to_be else float(row["stop_loss"])
+            runner_stop_hit = _stop_hit(row, candle, active_stop)
+            if runner_stop_hit and tp2_hit:
+                status = "AMBIGUOUS"
+                sl_time = candle_time
+                closed_at = candle_time
+                candles_to_resolution = candle_index
+                lifecycle_events.append({"event": "AMBIGUOUS_AFTER_TP1", "at": candle_time.isoformat(), "candle": candle_index})
+                break
+            if tp2_hit:
+                tp2_time = candle_time
+                status = "TP2_HIT"
+                closed_at = candle_time
+                candles_to_resolution = candle_index
+                lifecycle_events.append({"event": "TP2_HIT", "at": candle_time.isoformat(), "candle": candle_index})
+                break
+            if runner_stop_hit:
+                sl_time = candle_time
+                status = "BREAK_EVEN" if move_to_be else "CLOSED_AFTER_TP1"
+                closed_at = candle_time
+                candles_to_resolution = candle_index
+                lifecycle_events.append({"event": status, "at": candle_time.isoformat(), "candle": candle_index})
+                break
+
+        if candle_index >= max_bars:
+            expired_time = candle_time
+            closed_at = candle_time
+            candles_to_resolution = candle_index
+            if tp1_time is None:
+                status = "EXPIRED"
+                lifecycle_events.append({"event": "EXPIRED", "at": candle_time.isoformat(), "candle": candle_index})
+            else:
+                status = "PARTIAL_WIN"
+                lifecycle_events.append({"event": "EXPIRED_AFTER_TP1", "at": candle_time.isoformat(), "candle": candle_index})
             break
 
-    if entry_time is None and datetime.now(UTC) >= _expiry_time(row):
-        status = "EXPIRED"
-        closed_at = _now_iso()
+    if not later.empty and closed_at is None and len(later) >= max_bars:
+        candle = later.iloc[max_bars - 1]
+        candle_time = _parse_dt(candle["timestamp"])
+        expired_time = candle_time
+        closed_at = candle_time
+        candles_to_resolution = max_bars
+        if tp1_time is None:
+            status = "EXPIRED"
+            lifecycle_events.append({"event": "EXPIRED", "at": candle_time.isoformat(), "candle": max_bars})
+        else:
+            status = "PARTIAL_WIN"
+            lifecycle_events.append({"event": "EXPIRED_AFTER_TP1", "at": candle_time.isoformat(), "candle": max_bars})
+
+    if closed_at is None and entry_time is not None:
+        status = "TP1_HIT" if tp1_time is not None else "OPEN"
+    elif closed_at is None:
+        status = "OPEN"
 
     result, pnl = _r_result(row, status)
     return {
         "status": status,
         "result": result,
-        "entry_triggered_at": entry_time,
-        "closed_at": closed_at,
+        "entry_triggered_at": _iso(entry_time),
+        "tp1_hit_at": _iso(tp1_time),
+        "tp2_hit_at": _iso(tp2_time),
+        "sl_hit_at": _iso(sl_time),
+        "expired_at": _iso(expired_time),
+        "closed_at": _iso(closed_at),
         "outcome_checked_at": _now_iso(),
         "pnl_r_multiple": pnl,
+        "candles_to_resolution": candles_to_resolution,
+        "lifecycle_events": json.dumps(lifecycle_events),
     }
 
 
@@ -366,34 +501,49 @@ def update_outcome(trade_id: int, outcome: dict) -> None:
         connection.execute(
             """
             UPDATE trade_ideas
-            SET status = ?, result = ?, entry_triggered_at = ?, closed_at = ?,
-                outcome_checked_at = ?, pnl_r_multiple = ?
+            SET status = ?, result = ?, entry_triggered_at = ?, tp1_hit_at = ?,
+                tp2_hit_at = ?, sl_hit_at = ?, expired_at = ?, closed_at = ?,
+                outcome_checked_at = ?, pnl_r_multiple = ?, candles_to_resolution = ?,
+                lifecycle_events = ?
             WHERE id = ?
             """,
             (
                 outcome["status"],
                 outcome["result"],
                 outcome["entry_triggered_at"],
+                outcome["tp1_hit_at"],
+                outcome["tp2_hit_at"],
+                outcome["sl_hit_at"],
+                outcome["expired_at"],
                 outcome["closed_at"],
                 outcome["outcome_checked_at"],
                 outcome["pnl_r_multiple"],
+                outcome["candles_to_resolution"],
+                outcome["lifecycle_events"],
                 trade_id,
             ),
         )
         connection.execute(
             """
             INSERT INTO trade_outcomes (
-                trade_idea_id, status, result, entry_triggered_at, closed_at,
-                outcome_checked_at, pnl_r_multiple, notes
+                trade_idea_id, status, result, entry_triggered_at, tp1_hit_at,
+                tp2_hit_at, sl_hit_at, expired_at, closed_at, outcome_checked_at,
+                pnl_r_multiple, candles_to_resolution, lifecycle_events, notes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(trade_idea_id) DO UPDATE SET
                 status = excluded.status,
                 result = excluded.result,
                 entry_triggered_at = excluded.entry_triggered_at,
+                tp1_hit_at = excluded.tp1_hit_at,
+                tp2_hit_at = excluded.tp2_hit_at,
+                sl_hit_at = excluded.sl_hit_at,
+                expired_at = excluded.expired_at,
                 closed_at = excluded.closed_at,
                 outcome_checked_at = excluded.outcome_checked_at,
                 pnl_r_multiple = excluded.pnl_r_multiple,
+                candles_to_resolution = excluded.candles_to_resolution,
+                lifecycle_events = excluded.lifecycle_events,
                 notes = excluded.notes
             """,
             (
@@ -401,12 +551,45 @@ def update_outcome(trade_id: int, outcome: dict) -> None:
                 outcome["status"],
                 outcome["result"],
                 outcome["entry_triggered_at"],
+                outcome["tp1_hit_at"],
+                outcome["tp2_hit_at"],
+                outcome["sl_hit_at"],
+                outcome["expired_at"],
                 outcome["closed_at"],
                 outcome["outcome_checked_at"],
                 outcome["pnl_r_multiple"],
+                outcome["candles_to_resolution"],
+                outcome["lifecycle_events"],
                 "Checked from OHLCV candles.",
             ),
         )
+
+
+ACTIVE_TRADE_STATUSES = ("PENDING", "OPEN", "ENTRY_TRIGGERED", "TP1_HIT")
+
+
+async def _evaluate_rows(rows) -> dict:
+    checked = 0
+    changed = 0
+    errors = 0
+    candle_cache: dict[tuple[str, str, str], pd.DataFrame] = {}
+    for raw in rows:
+        row = row_to_dict(raw)
+        try:
+            cache_key = (row["exchange"], row["symbol"], row["timeframe"])
+            if cache_key not in candle_cache:
+                candle_cache[cache_key] = await get_candles_cached(row["exchange"], row["symbol"], row["timeframe"], 1000)
+            candles = candle_cache[cache_key]
+            outcome = evaluate_trade(row, candles)
+        except Exception:
+            errors += 1
+            logger.exception("Trade lifecycle evaluation failed id=%s symbol=%s timeframe=%s exchange=%s", row.get("id"), row.get("symbol"), row.get("timeframe"), row.get("exchange"))
+            continue
+        checked += 1
+        if outcome["status"] != row["status"] or outcome["result"] != row["result"]:
+            changed += 1
+        update_outcome(row["id"], outcome)
+    return {"checked": checked, "updated": changed, "errors": errors, "markets_fetched": len(candle_cache)}
 
 
 async def check_trade_outcomes() -> dict:
@@ -414,21 +597,28 @@ async def check_trade_outcomes() -> dict:
         rows = connection.execute(
             """
             SELECT * FROM trade_ideas
-            WHERE status IN ('PENDING', 'ENTRY_TRIGGERED')
+            WHERE status IN ('PENDING', 'OPEN', 'ENTRY_TRIGGERED', 'TP1_HIT')
             ORDER BY created_at ASC
             """
         ).fetchall()
-    checked = 0
-    changed = 0
-    for raw in rows:
-        row = row_to_dict(raw)
-        candles = await get_candles_cached(row["exchange"], row["symbol"], row["timeframe"], 1000)
-        outcome = evaluate_trade(row, candles)
-        checked += 1
-        if outcome["status"] != row["status"] or outcome["result"] != row["result"]:
-            changed += 1
-        update_outcome(row["id"], outcome)
-    return {"checked": checked, "updated": changed}
+    return await _evaluate_rows(rows)
+
+
+async def replay_trade_outcomes(days: int = 30) -> dict:
+    cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(days)))).replace(microsecond=0).isoformat()
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM trade_ideas
+            WHERE created_at >= ?
+            ORDER BY created_at ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+    result = await _evaluate_rows(rows)
+    result["days"] = max(1, int(days))
+    result["since"] = cutoff
+    return result
 
 
 def stats() -> dict:
@@ -438,14 +628,23 @@ def stats() -> dict:
     total = len(rows)
     entry_triggered = [row for row in rows if row.get("entry_triggered_at")]
     wins = [row for row in rows if row["result"] in {"WIN", "PARTIAL_WIN"}]
-    losses = [row for row in rows if row["result"] == "LOSS"]
+    losses = [row for row in rows if row["result"] in {"LOSS", "PARTIAL_LOSS"}]
     no_entries = [row for row in rows if row["result"] == "NO_ENTRY"]
+    break_evens = [row for row in rows if row["result"] == "BREAK_EVEN"]
     ambiguous = [row for row in rows if row["result"] == "AMBIGUOUS"]
     open_rows = [row for row in rows if row["result"] == "OPEN"]
-    tp_hits = [row for row in rows if row["status"] in {"TP1_HIT", "TP2_HIT"}]
-    sl_hits = [row for row in rows if row["status"] == "SL_HIT"]
+    tp_hits = [row for row in rows if row.get("tp1_hit_at") or row["status"] in {"TP1_HIT", "TP2_HIT", "CLOSED_AFTER_TP1", "BREAK_EVEN", "PARTIAL_WIN", "PARTIAL_LOSS"}]
+    sl_hits = [row for row in rows if row.get("sl_hit_at") or row["status"] == "SL_HIT"]
     closed_decided = len(wins) + len(losses)
     r_values = [float(row["pnl_r_multiple"]) for row in rows if row.get("pnl_r_multiple") is not None]
+    resolved_candles = [int(row["candles_to_resolution"]) for row in rows if row.get("candles_to_resolution") is not None]
+
+    def event_contains(row: dict, event: str) -> bool:
+        return event in str(row.get("lifecycle_events") or "")
+
+    tp1_then_sl = [row for row in rows if row.get("tp1_hit_at") and row.get("sl_hit_at") and not row.get("tp2_hit_at")]
+    tp1_then_tp2 = [row for row in rows if row.get("tp1_hit_at") and row.get("tp2_hit_at")]
+    tp1_then_expiry = [row for row in rows if row.get("tp1_hit_at") and row.get("expired_at") and event_contains(row, "EXPIRED_AFTER_TP1")]
 
     def grouped(field: str) -> list[dict]:
         buckets: dict[str, list[dict]] = {}
@@ -453,21 +652,19 @@ def stats() -> dict:
             buckets.setdefault(row.get(field) or "Unknown", []).append(row)
         output = []
         for key, items in buckets.items():
-            decided = [item for item in items if item["result"] in {"WIN", "PARTIAL_WIN", "LOSS"}]
+            decided = [item for item in items if item["result"] in {"WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "BREAK_EVEN"}]
             item_wins = [item for item in decided if item["result"] in {"WIN", "PARTIAL_WIN"}]
+            item_r_values = [float(item["pnl_r_multiple"]) for item in items if item.get("pnl_r_multiple") is not None]
             output.append(
                 {
                     field: key,
                     "count": len(items),
                     "win_rate": round((len(item_wins) / len(decided) * 100) if decided else 0, 2),
-                    "average_r": round(
-                        sum(float(item["pnl_r_multiple"]) for item in items if item.get("pnl_r_multiple") is not None)
-                        / max(1, len([item for item in items if item.get("pnl_r_multiple") is not None])),
-                        2,
-                    ),
+                    "average_r": round(sum(item_r_values) / len(item_r_values), 2) if item_r_values else 0,
+                    "expectancy": round(sum(item_r_values) / len(items), 2) if items else 0,
                 }
             )
-        return sorted(output, key=lambda item: (item["win_rate"], item["average_r"], item["count"]), reverse=True)[:5]
+        return sorted(output, key=lambda item: (item["expectancy"], item["win_rate"], item["count"]), reverse=True)[:5]
 
     def review_grouped() -> list[dict]:
         buckets: dict[str, list[dict]] = {"accepted": [], "rejected": []}
@@ -495,6 +692,13 @@ def stats() -> dict:
         "sl_hit_rate": round((len(sl_hits) / total * 100) if total else 0, 2),
         "win_rate": round((len(wins) / closed_decided * 100) if closed_decided else 0, 2),
         "average_r_multiple": round(sum(r_values) / len(r_values), 2) if r_values else 0,
+        "average_candles_to_resolution": round(sum(resolved_candles) / len(resolved_candles), 2) if resolved_candles else 0,
+        "expectancy_per_trade": round(sum(r_values) / total, 2) if total else 0,
+        "tp1_then_sl_count": len(tp1_then_sl),
+        "tp1_then_tp2_count": len(tp1_then_tp2),
+        "tp1_then_expiry_count": len(tp1_then_expiry),
+        "break_even_count": len(break_evens),
+        "partial_loss_count": len([row for row in rows if row["result"] == "PARTIAL_LOSS"]),
         "best_setup_grade_performance": grouped("setup_grade"),
         "best_timeframe_performance": grouped("timeframe"),
         "best_symbol_performance": grouped("symbol"),
@@ -502,4 +706,6 @@ def stats() -> dict:
         "regime_performance": grouped("regime_label"),
         "accepted_vs_rejected": review_grouped(),
         "counter_trend_performance": grouped("trend_alignment"),
+        "expectancy_by_regime": grouped("regime_label"),
+        "expectancy_by_setup_type": grouped("setup_grade"),
     }

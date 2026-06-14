@@ -1,6 +1,21 @@
 from app.models.schemas import AnalysisResponse, TradeIdea
 
 RISK_WARNING = "Not financial advice. Manage your risk."
+REMOVED_PUBLIC_FIELD_LABELS = (
+    "Source:",
+    "Market Regime:",
+    "Regime Type:",
+    "Regime Confidence:",
+    "Structure:",
+    "Transitioning:",
+    "Decision:",
+    "Move Maturity:",
+    "Exhaustion Risk:",
+    "Entry Status:",
+    "Rejected/Downgraded Reasons:",
+    "Trade Bias:",
+    "HTF Bias:",
+)
 
 
 def fmt(value: float | int | None) -> str:
@@ -13,6 +28,22 @@ def fmt_zone(zone: tuple[float, float] | None) -> str:
     if not zone:
         return "-"
     return f"{fmt(zone[0])} — {fmt(zone[1])}"
+
+
+def public_reason_summary(reason: str | None) -> str:
+    if not reason:
+        return "-"
+
+    cleaned_parts = []
+    for part in reason.replace("\n", " ").split(". "):
+        sentence = part.strip().rstrip(".")
+        if not sentence:
+            continue
+        if any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
+            continue
+        cleaned_parts.append(sentence)
+
+    return ". ".join(cleaned_parts) + "." if cleaned_parts else "-"
 
 
 def _zone_range(zones) -> str:
@@ -35,6 +66,17 @@ def source_label(idea: TradeIdea | None) -> str:
     if source == "hyperliquid":
         return "Hyperliquid"
     return source or "-"
+
+
+def alert_strength_label(timeframe: str) -> str:
+    normalized = timeframe.lower()
+    if normalized == "1h":
+        return "Fast Setup"
+    if normalized in {"2h", "3h"}:
+        return "Medium Setup"
+    if normalized in {"4h", "6h"}:
+        return "Strong Setup"
+    return "Valid Setup"
 
 
 def regime_line(idea: TradeIdea | None, analysis: AnalysisResponse | None = None) -> str:
@@ -89,10 +131,6 @@ def format_analysis(analysis: AnalysisResponse) -> str:
             "Signal: No Trade\n"
             "Setup Score: -\n"
             "Grade: No Trade\n"
-            f"Market Regime: {regime_line(None, analysis)}\n"
-            f"{regime_context(None, analysis)}\n"
-            f"{quality_context(None)}\n"
-            f"HTF Bias: {analysis.higher_timeframe_bias}\n"
             "Entry: -\n"
             "Stop Loss: -\n"
             "TP1: -\n"
@@ -105,14 +143,8 @@ def format_analysis(analysis: AnalysisResponse) -> str:
     else:
         trade_block = (
             f"Signal: {signal_label(idea)}\n"
-            f"Source: {source_label(idea)}\n"
             f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
             f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
-            f"Market Regime: {regime_line(idea)}\n"
-            f"{regime_context(idea)}\n"
-            f"{quality_context(idea)}\n"
-            f"Trade Bias: {idea.trend_alignment or '-'} | Regime Adj: {idea.regime_confidence_adjustment:+.0f}\n"
-            f"HTF Bias: {idea.higher_timeframe_bias}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"Stop Loss: {fmt(idea.stop_loss)}\n"
             f"TP1: {fmt(idea.take_profit_1)}\n"
@@ -125,11 +157,10 @@ def format_analysis(analysis: AnalysisResponse) -> str:
 
     return (
         f"SwiftChart Analysis: {analysis.symbol} — {timeframe}\n\n"
-        f"Market Regime: {regime_line(idea, analysis)}\n"
         f"Support Zone: {_zone_range(analysis.support_zones)}\n"
         f"Resistance Zone: {_zone_range(analysis.resistance_zones)}\n"
         f"{trade_block}\n\n"
-        f"Reason:\n{reason}\n\n"
+        f"Reason:\n{public_reason_summary(reason)}\n\n"
         f"Invalid if:\n{invalid}\n\n"
         f"{RISK_WARNING}"
     )
@@ -150,16 +181,11 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
         lines.append(
             "\n"
             f"{index}. {idea.symbol} — {idea.direction}\n"
-            f"Source: {source_label(idea)}\n"
             f"Score: {fmt(idea.setup_score or idea.confidence_score)}/100 | Grade: {idea.setup_grade or 'Valid Setup'}\n"
-            f"Regime: {regime_line(idea)} | Trade: {idea.trend_alignment or '-'} | HTF: {idea.higher_timeframe_bias}\n"
-            f"Move: {idea.move_maturity} | Exhaustion: {idea.exhaustion_risk} | Status: {idea.entry_status}\n"
-            f"Transitioning: {'Yes' if idea.is_regime_transition else 'No'} | Structure: {idea.regime_structure or '-'}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"SL: {fmt(idea.stop_loss)} | TP1: {fmt(idea.take_profit_1)} | TP2: {fmt(idea.take_profit_2)}\n"
             f"R:R: {fmt(idea.risk_reward_ratio)} | Confidence: {fmt(idea.confidence_score)}%\n"
-            f"Rejected/Downgraded Reasons: {'; '.join(idea.downgraded_reasons) if idea.downgraded_reasons else '-'}\n"
-            f"Reason: {idea.reason}"
+            f"Reason: {public_reason_summary(idea.reason)}"
         )
     lines.append(f"\n{RISK_WARNING}")
     return "\n".join(lines)
@@ -169,22 +195,16 @@ def format_trade_alert(idea: TradeIdea) -> str:
     return (
         f"SwiftChart Trade Alert: {idea.symbol} — {idea.timeframe.upper()}\n\n"
         f"Signal: Potential {idea.direction}\n"
-        f"Source: {source_label(idea)}\n"
+        f"Strength: {alert_strength_label(idea.timeframe)}\n"
         f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
         f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
-        f"Market Regime: {regime_line(idea)}\n"
-        f"{regime_context(idea)}\n"
-        f"{quality_context(idea)}\n"
-        f"Trade Bias: {idea.trend_alignment or '-'} | Regime Adj: {idea.regime_confidence_adjustment:+.0f}\n"
-        f"HTF Bias: {idea.higher_timeframe_bias}\n\n"
+        "\n"
         f"Entry: {fmt_zone(idea.entry_zone)}\n"
         f"Stop Loss: {fmt(idea.stop_loss)}\n"
         f"TP1: {fmt(idea.take_profit_1)}\n"
         f"TP2: {fmt(idea.take_profit_2)}\n"
         f"R:R: {fmt(idea.risk_reward_ratio)}\n\n"
-        f"Reason:\n{idea.reason}\n\n"
-        f"Invalid if:\n{idea.invalid_condition}\n\n"
-        f"{RISK_WARNING}"
+        f"Reason:\n{public_reason_summary(idea.reason)}"
     )
 
 
@@ -242,7 +262,6 @@ def help_text() -> str:
         "/subscribe — Get Telegram alerts when valid setups appear\n"
         "/unsubscribe — Stop Telegram alerts\n"
         "/history — Show latest saved trade ideas and outcomes\n"
-        "/stats — Show performance summary\n"
         "/checktrades — Manually update saved outcomes\n"
         "/strategy — Explain the strategy\n"
         "/help — Show commands\n\n"

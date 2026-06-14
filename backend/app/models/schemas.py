@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 Direction = Literal["Long", "Short"]
 TradeHistoryStatus = Literal[
     "PENDING",
+    "OPEN",
     "ENTRY_TRIGGERED",
     "TP1_HIT",
     "TP2_HIT",
@@ -14,8 +15,12 @@ TradeHistoryStatus = Literal[
     "EXPIRED",
     "INVALIDATED",
     "AMBIGUOUS",
+    "CLOSED_AFTER_TP1",
+    "BREAK_EVEN",
+    "PARTIAL_WIN",
+    "PARTIAL_LOSS",
 ]
-TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "LOSS", "NO_ENTRY", "AMBIGUOUS", "OPEN"]
+TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN"]
 MarketCondition = Literal[
     "RANGE_BOUND",
     "TRENDING_UP",
@@ -321,9 +326,15 @@ class TradeHistoryRecord(BaseModel):
     status: TradeHistoryStatus
     outcome_checked_at: datetime | None = None
     entry_triggered_at: datetime | None = None
+    tp1_hit_at: datetime | None = None
+    tp2_hit_at: datetime | None = None
+    sl_hit_at: datetime | None = None
+    expired_at: datetime | None = None
     closed_at: datetime | None = None
     result: TradeHistoryResult
     pnl_r_multiple: float | None = None
+    candles_to_resolution: int | None = None
+    lifecycle_events: str | None = None
     regime_score: float | None = None
     regime_label: str | None = None
     trend_alignment: str | None = None
@@ -345,6 +356,13 @@ class TradeStats(BaseModel):
     sl_hit_rate: float
     win_rate: float
     average_r_multiple: float
+    average_candles_to_resolution: float
+    expectancy_per_trade: float
+    tp1_then_sl_count: int = 0
+    tp1_then_tp2_count: int = 0
+    tp1_then_expiry_count: int = 0
+    break_even_count: int = 0
+    partial_loss_count: int = 0
     best_setup_grade_performance: list[dict]
     best_timeframe_performance: list[dict]
     best_symbol_performance: list[dict]
@@ -352,6 +370,8 @@ class TradeStats(BaseModel):
     regime_performance: list[dict] = Field(default_factory=list)
     accepted_vs_rejected: list[dict] = Field(default_factory=list)
     counter_trend_performance: list[dict] = Field(default_factory=list)
+    expectancy_by_regime: list[dict] = Field(default_factory=list)
+    expectancy_by_setup_type: list[dict] = Field(default_factory=list)
 
 
 class TradeHistoryPage(BaseModel):

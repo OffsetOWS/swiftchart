@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     hyperliquid_base_url: str = "https://api.hyperliquid.xyz"
     variational_api_base_url: str = "https://omni-client-api.prod.ap-northeast-1.variational.io"
     variational_api_key: str = ""
-    variational_enabled: bool = False
+    variational_enabled: bool = True
     variational_candles_path: str = "/candles"
     frontend_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
     live_trading_enabled: bool = False
@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     signal_max_age_minutes: int = Field(default=1440, ge=5)
     signal_max_entry_deviation_percent: float = Field(default=1.5, ge=0)
     trade_history_expiry_bars: int = Field(default=12, ge=1)
+    trade_history_move_stop_to_entry_after_tp1: bool = False
     execution_autotrade_enabled: bool = False
     execution_signal_webhook_url: str = ""
     execution_webhook_secret: str = ""

@@ -1,6 +1,8 @@
 import logging
 import os
 
+import pandas as pd
+
 from app.config import DEFAULT_SCAN_LIST, get_settings
 from app.exchanges.factory import get_exchange
 from app.models.schemas import RiskSettings, TradeIdea
@@ -56,6 +58,27 @@ async def _scan_symbols(exchange: str) -> list[str]:
     return DEFAULT_SCAN_LIST[:limit]
 
 
+async def _get_alert_candles(exchange: str, symbol: str, timeframe: str, limit: int):
+    if timeframe.lower() != "3h":
+        return await get_candles_cached(exchange, symbol, timeframe, limit)
+
+    df = await get_candles_cached(exchange, symbol, "1h", limit * 3)
+    if "timestamp" not in df.columns:
+        return df
+
+    candles = df.copy()
+    candles["timestamp"] = pd.to_datetime(candles["timestamp"], utc=True)
+    candles = candles.set_index("timestamp").sort_index()
+    resampled = (
+        candles.resample("3h", label="right", closed="right")
+        .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
+        .dropna()
+        .tail(limit)
+        .reset_index()
+    )
+    return resampled[["timestamp", "open", "high", "low", "close", "volume"]]
+
+
 async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[list[TradeIdea], str, dict]:
     selected_exchange = _selected_exchange(exchange)
     get_exchange(selected_exchange)
@@ -74,7 +97,7 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
 
     for symbol in symbols:
         try:
-            df = await get_candles_cached(selected_exchange, symbol, timeframe, 260)
+            df = await _get_alert_candles(selected_exchange, symbol, timeframe, 260)
             symbols_scanned += 1
             if len(df) < 80:
                 rejection_reasons["insufficient candles"] = rejection_reasons.get("insufficient candles", 0) + 1

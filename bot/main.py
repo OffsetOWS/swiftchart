@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,20 @@ from app.utils.secure_logging import install_secure_logging  # noqa: E402
 
 
 async def post_init(application: Application) -> None:
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "Open the main menu"),
+            BotCommand("analyze", "Analyze a coin and timeframe"),
+            BotCommand("top", "Show current top trade ideas"),
+            BotCommand("subscribe", "Get trade alerts"),
+            BotCommand("unsubscribe", "Stop trade alerts"),
+            BotCommand("alerts", "Show alert status"),
+            BotCommand("history", "Show saved trade ideas"),
+            BotCommand("checktrades", "Update saved outcomes"),
+            BotCommand("strategy", "Explain the strategy"),
+            BotCommand("help", "Show commands"),
+        ]
+    )
     asyncio.create_task(alert_loop(application.bot))
 
 

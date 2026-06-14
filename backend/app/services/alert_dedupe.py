@@ -22,12 +22,12 @@ def _state_path() -> Path:
 def _load() -> dict:
     path = _state_path()
     if not path.exists():
-        return DEFAULT_STATE.copy()
+        return {"alert_dedupe": {}}
     try:
         data = json.loads(path.read_text())
-        return {**DEFAULT_STATE, **data}
+        return {"alert_dedupe": {}, **data}
     except (OSError, json.JSONDecodeError):
-        return DEFAULT_STATE.copy()
+        return {"alert_dedupe": {}}
 
 
 def _save(data: dict) -> None:

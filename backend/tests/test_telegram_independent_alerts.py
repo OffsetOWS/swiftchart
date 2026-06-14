@@ -27,10 +27,10 @@ class FakeExchange:
         )
 
 
-def idea(symbol: str = "BTCUSDT", *, score: float = 80, entry_status: str = "READY") -> TradeIdea:
+def idea(symbol: str = "BTCUSDT", *, score: float = 80, entry_status: str = "READY", timeframe: str = "4h") -> TradeIdea:
     return TradeIdea(
         symbol=symbol,
-        timeframe="4h",
+        timeframe=timeframe,
         exchange="hyperliquid",
         source="hyperliquid",
         direction="Long",
@@ -54,7 +54,7 @@ def configure_independent_scan(monkeypatch, tmp_path, ideas_by_symbol: dict[str,
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "bot_state.json"))
     monkeypatch.setenv("ALERT_DEDUPE_STATE_PATH", str(tmp_path / "alert_dedupe.json"))
     monkeypatch.setenv("TELEGRAM_ALERT_CHAT_IDS", "123")
-    monkeypatch.setenv("ALERT_MIN_SCORE", "75")
+    monkeypatch.setenv("ALERT_TIMEFRAME", "4h")
     monkeypatch.setattr(telegram_scanner, "DEFAULT_SCAN_LIST", list(ideas_by_symbol))
     async def fake_scan_symbols(exchange):
         return list(ideas_by_symbol)
@@ -137,6 +137,94 @@ def test_telegram_only_sends_ready_confirmed_setups(monkeypatch, tmp_path):
     assert "DOGEUSDT" not in sent_text
 
 
+def test_telegram_alerts_require_score_75_or_higher(monkeypatch, tmp_path):
+    from bot.alerts import run_alert_scan
+
+    configure_independent_scan(
+        monkeypatch,
+        tmp_path,
+        {
+            "HIGHUSDT": [idea("HIGHUSDT", score=75, entry_status="READY")],
+            "LOWUSDT": [idea("LOWUSDT", score=74, entry_status="READY")],
+        },
+    )
+
+    bot = FakeBot()
+    result = asyncio.run(run_alert_scan(bot))
+
+    assert result["min_score"] == 75
+    assert result["ideas"] == 2
+    assert result["limit_order_ideas"] == 2
+    assert result["score_eligible_ideas"] == 1
+    assert result["eligible"] == 1
+    assert result["sent"] == 1
+    assert result["skipped_by_score"] == 1
+    assert result["skipped_low_score"] == 1
+    assert result["rejection_reasons"]["skipped_low_score"] == 1
+    sent_text = "\n".join(message for _, message in bot.messages)
+    assert "HIGHUSDT" in sent_text
+    assert "LOWUSDT" not in sent_text
+
+
+def test_telegram_alerts_skip_unsupported_timeframes(monkeypatch, tmp_path):
+    from bot.alerts import run_alert_scan
+
+    configure_independent_scan(monkeypatch, tmp_path, {"BTCUSDT": [idea("BTCUSDT", timeframe="4h")]})
+    monkeypatch.setenv("ALERT_TIMEFRAMES", "30m,4h,8h")
+
+    bot = FakeBot()
+    result = asyncio.run(run_alert_scan(bot))
+
+    assert result["timeframes"] == ["4h"]
+    assert result["skipped_timeframe"] == 2
+    assert result["rejection_reasons"]["skipped_timeframe"] == 2
+    assert result["sent"] == 1
+
+
+def test_telegram_alerts_allow_requested_timeframes(monkeypatch, tmp_path):
+    from bot.alerts import run_alert_scan
+
+    ideas_by_symbol = {
+        "BTCUSDT": [idea("BTCUSDT", timeframe="1h")],
+        "ETHUSDT": [idea("ETHUSDT", timeframe="2h")],
+        "SOLUSDT": [idea("SOLUSDT", timeframe="3h")],
+        "AVAXUSDT": [idea("AVAXUSDT", timeframe="4h")],
+        "LINKUSDT": [idea("LINKUSDT", timeframe="6h")],
+    }
+    configure_independent_scan(monkeypatch, tmp_path, ideas_by_symbol)
+    monkeypatch.setenv("ALERT_TIMEFRAMES", "1h,2h,3h,4h,6h")
+    monkeypatch.setenv("ALERT_SCAN_ALL_TIMEFRAMES_PER_RUN", "true")
+
+    bot = FakeBot()
+    result = asyncio.run(run_alert_scan(bot))
+
+    assert result["timeframes"] == ["1h", "2h", "3h", "4h", "6h"]
+    assert result["sent"] == 5
+    sent_text = "\n".join(message for _, message in bot.messages)
+    assert "BTCUSDT — 1H" in sent_text
+    assert "ETHUSDT — 2H" in sent_text
+    assert "SOLUSDT — 3H" in sent_text
+    assert "AVAXUSDT — 4H" in sent_text
+    assert "LINKUSDT — 6H" in sent_text
+    assert "Strength: Fast Setup" in sent_text
+    assert sent_text.count("Strength: Medium Setup") >= 2
+    assert sent_text.count("Strength: Strong Setup") >= 2
+
+
+def test_telegram_alerts_rotate_requested_timeframes_by_default(monkeypatch, tmp_path):
+    import bot.alerts as alerts
+    from bot.alerts import run_alert_scan
+
+    alerts._alert_timeframe_cursor = 0
+    configure_independent_scan(monkeypatch, tmp_path, {"BTCUSDT": [idea("BTCUSDT", timeframe="1h")]})
+    monkeypatch.setenv("ALERT_TIMEFRAMES", "1h,2h,3h,4h,6h")
+
+    bot = FakeBot()
+    result = asyncio.run(run_alert_scan(bot))
+
+    assert result["timeframes"] == ["1h"]
+
+
 def test_telegram_alert_dedup_is_kept(monkeypatch, tmp_path):
     from bot.alerts import run_alert_scan
 
@@ -149,6 +237,74 @@ def test_telegram_alert_dedup_is_kept(monkeypatch, tmp_path):
     assert first["sent"] == 1
     assert second["sent"] == 0
     assert len(bot.messages) == 1
+
+
+def test_trade_alert_formatter_only_includes_public_alert_fields():
+    from bot.formatter import format_trade_alert
+
+    trade_idea = idea("LDOUSDT", score=77)
+    trade_idea.direction = "Short"
+    trade_idea.entry_zone = (0.34201, 0.34512)
+    trade_idea.stop_loss = 0.352031
+    trade_idea.take_profit_1 = 0.328189
+    trade_idea.take_profit_2 = 0.315749
+    trade_idea.risk_reward_ratio = 3.29
+    trade_idea.reason = (
+        "Market structure favors trend-continuation pullbacks. Short idea has confirmed "
+        "liquidity sweep/reclaim with quality score 100. Signal aligns with active bearish conditions. "
+        "Entry Status: READY. Market Regime: Bearish trend (+42); trade is with-trend; confidence adjustment +4."
+    )
+    trade_idea.source = "hyperliquid"
+    trade_idea.regime_label = "Bearish trend"
+    trade_idea.regime_type = "TRENDING_DOWN"
+    trade_idea.regime_confidence_score = 91
+    trade_idea.regime_structure = "lower-highs"
+    trade_idea.regime_trade_decision = "TRADE_ALLOWED"
+    trade_idea.is_regime_transition = True
+    trade_idea.trend_alignment = "with-trend"
+    trade_idea.higher_timeframe_bias = "HTF_BEARISH"
+    trade_idea.move_maturity = "Mid-Trend"
+    trade_idea.exhaustion_risk = "Medium"
+    trade_idea.entry_status = "READY"
+    trade_idea.downgraded_reasons = ["debug-only reason"]
+    trade_idea.invalid_condition = "Debug-only invalidation."
+
+    message = format_trade_alert(trade_idea)
+
+    assert message == (
+        "SwiftChart Trade Alert: LDOUSDT — 4H\n\n"
+        "Signal: Potential Short\n"
+        "Strength: Strong Setup\n"
+        "Setup Score: 77/100\n"
+        "Grade: Valid Setup\n\n"
+        "Entry: 0.34201 — 0.34512\n"
+        "Stop Loss: 0.352031\n"
+        "TP1: 0.328189\n"
+        "TP2: 0.315749\n"
+        "R:R: 3.29\n\n"
+        "Reason:\n"
+        "Market structure favors trend-continuation pullbacks. Short idea has confirmed "
+        "liquidity sweep/reclaim with quality score 100. Signal aligns with active bearish conditions."
+    )
+    removed_fields = [
+        "Source:",
+        "Market Regime:",
+        "Regime Type:",
+        "Regime Confidence:",
+        "Structure:",
+        "Transitioning:",
+        "Decision:",
+        "Move Maturity:",
+        "Exhaustion Risk:",
+        "Entry Status:",
+        "Rejected/Downgraded Reasons:",
+        "Trade Bias:",
+        "HTF Bias:",
+        "Invalid if:",
+        "Not financial advice.",
+    ]
+    for field in removed_fields:
+        assert field not in message
 
 
 def test_telegram_market_discovery_does_not_filter_low_liquidity(monkeypatch):

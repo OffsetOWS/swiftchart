@@ -118,7 +118,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "Alerts enabled.\n\n"
         "SwiftChart will notify this chat when a new valid setup appears. "
-        "Only setups scoring 75/100 or higher are eligible.\n\n"
+        "Only READY 1H, 2H, 3H, 4H, and 6H setups scoring 75/100 or higher are eligible.\n\n"
         "Use /unsubscribe to stop alerts.\n\n"
         "Not financial advice. Manage your risk."
     )

@@ -117,6 +117,12 @@ def init_db() -> None:
             "ALTER TABLE trade_ideas ADD COLUMN signal_fingerprint TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active'",
             "ALTER TABLE trade_ideas ADD COLUMN expires_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN tp1_hit_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN tp2_hit_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN sl_hit_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN expired_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN candles_to_resolution INTEGER",
+            "ALTER TABLE trade_ideas ADD COLUMN lifecycle_events TEXT",
         ):
             try:
                 connection.execute(statement)
@@ -133,11 +139,29 @@ def init_db() -> None:
                 closed_at TEXT,
                 outcome_checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 pnl_r_multiple REAL,
+                tp1_hit_at TEXT,
+                tp2_hit_at TEXT,
+                sl_hit_at TEXT,
+                expired_at TEXT,
+                candles_to_resolution INTEGER,
+                lifecycle_events TEXT,
                 notes TEXT,
                 FOREIGN KEY (trade_idea_id) REFERENCES trade_ideas(id)
             )
             """
         )
+        for statement in (
+            "ALTER TABLE trade_outcomes ADD COLUMN tp1_hit_at TEXT",
+            "ALTER TABLE trade_outcomes ADD COLUMN tp2_hit_at TEXT",
+            "ALTER TABLE trade_outcomes ADD COLUMN sl_hit_at TEXT",
+            "ALTER TABLE trade_outcomes ADD COLUMN expired_at TEXT",
+            "ALTER TABLE trade_outcomes ADD COLUMN candles_to_resolution INTEGER",
+            "ALTER TABLE trade_outcomes ADD COLUMN lifecycle_events TEXT",
+        ):
+            try:
+                connection.execute(statement)
+            except sqlite3.OperationalError:
+                pass
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS signal_reviews (

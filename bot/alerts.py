@@ -15,9 +15,36 @@ from bot.storage import get_subscribers
 
 logger = logging.getLogger(__name__)
 
+ALERT_TIMEFRAMES = ("1h", "2h", "3h", "4h", "6h")
+_alert_timeframe_cursor = 0
+
 
 def alert_min_score() -> float:
     return float(os.getenv("ALERT_MIN_SCORE", "75"))
+
+
+def alert_timeframes() -> list[str]:
+    configured = os.getenv("ALERT_TIMEFRAMES") or os.getenv("ALERT_TIMEFRAME")
+    if not configured:
+        return list(ALERT_TIMEFRAMES)
+    return [part.strip().lower() for part in configured.split(",") if part.strip()]
+
+
+def alert_scan_all_timeframes_per_run() -> bool:
+    return os.getenv("ALERT_SCAN_ALL_TIMEFRAMES_PER_RUN", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def alert_timeframes_for_run() -> tuple[list[str], list[str]]:
+    global _alert_timeframe_cursor
+    configured = alert_timeframes()
+    valid = [timeframe for timeframe in configured if timeframe in ALERT_TIMEFRAMES]
+    skipped = [timeframe for timeframe in configured if timeframe not in ALERT_TIMEFRAMES]
+    if alert_scan_all_timeframes_per_run() or len(valid) <= 1:
+        return valid, skipped
+
+    selected = valid[_alert_timeframe_cursor % len(valid)]
+    _alert_timeframe_cursor += 1
+    return [selected], skipped
 
 
 def idea_score(idea: TradeIdea) -> float:
@@ -29,7 +56,6 @@ def is_limit_order_alertable(idea: TradeIdea) -> bool:
 
 
 async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
-    timeframe = os.getenv("ALERT_TIMEFRAME", get_settings().default_timeframe)
     exchange = os.getenv("ALERT_EXCHANGE", get_settings().default_exchange)
     min_score = alert_min_score()
     rejection_reasons: Counter[str] = Counter()
@@ -37,19 +63,37 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     if not subscribers:
         rejection_reasons["missing subscribers"] += 1
         logger.info(
-            "telegram_alert_scan_complete subscribers=0 symbols_scanned=0 valid_ideas_found=0 eligible_alerts=0 sent_alerts=0 rejection_reasons=%s",
+            "telegram_alert_scan_complete subscribers=0 symbols_scanned=0 valid_ideas_found=0 eligible_alerts=0 alerts_sent=0 rejection_reasons=%s",
             dict(rejection_reasons),
         )
-        return {"status": "ok", "subscribers": 0, "ideas": 0, "eligible": 0, "sent": 0, "rejection_reasons": dict(rejection_reasons)}
+        return {"status": "ok", "subscribers": 0, "ideas": 0, "eligible": 0, "sent": 0, "alerts_sent": 0, "rejection_reasons": dict(rejection_reasons)}
 
-    ideas, selected_exchange, scan_meta = await scan_top_ideas(timeframe, exchange)
-    rejection_reasons.update(scan_meta.get("rejection_reasons", {}))
+    selected_exchange = exchange
+    symbols_scanned = 0
+    valid_ideas_found = 0
+    all_ideas = []
+    skipped_timeframes = 0
+    scanned_timeframes = []
+    timeframes_to_scan, skipped = alert_timeframes_for_run()
+    for timeframe in skipped:
+        skipped_timeframes += 1
+        rejection_reasons["skipped_timeframe"] += 1
+        logger.info("skipped_timeframe timeframe=%s allowed_timeframes=%s", timeframe, ",".join(ALERT_TIMEFRAMES))
+
+    for timeframe in timeframes_to_scan:
+        ideas, selected_exchange, scan_meta = await scan_top_ideas(timeframe, exchange)
+        all_ideas.extend(ideas)
+        scanned_timeframes.append(timeframe)
+        symbols_scanned += int(scan_meta.get("symbols_scanned", 0) or 0)
+        valid_ideas_found += int(scan_meta.get("valid_ideas_found", len(ideas)) or 0)
+        rejection_reasons.update(scan_meta.get("rejection_reasons", {}))
+
     eligible_ideas = []
     limit_order_ideas = 0
     score_eligible_ideas = 0
     skipped_by_score = 0
     skipped_by_entry_status = 0
-    for idea in ideas:
+    for idea in all_ideas:
         score_ok = idea_score(idea) >= min_score
         limit_order_ok = is_limit_order_alertable(idea)
         if score_ok:
@@ -58,7 +102,16 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             limit_order_ideas += 1
         if not score_ok:
             skipped_by_score += 1
-            rejection_reasons["score below ALERT_MIN_SCORE"] += 1
+            rejection_reasons["skipped_low_score"] += 1
+            logger.info(
+                "skipped_low_score symbol=%s timeframe=%s exchange=%s score=%s min_score=%s entry_status=%s",
+                idea.symbol,
+                idea.timeframe,
+                idea.exchange,
+                idea_score(idea),
+                min_score,
+                idea.entry_status,
+            )
             continue
         if not limit_order_ok:
             skipped_by_entry_status += 1
@@ -84,14 +137,14 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
 
     logger.info(
         (
-            "telegram_alert_scan_complete exchange=%s timeframe=%s symbols_scanned=%s valid_ideas_found=%s "
-            "limit_order_ideas=%s score_eligible_ideas=%s eligible_alerts=%s sent_alerts=%s "
-            "skipped_by_dedup=%s skipped_by_score=%s skipped_by_entry_status=%s rejection_reasons=%s"
+            "telegram_alert_scan_complete exchange=%s timeframes=%s symbols_scanned=%s valid_ideas_found=%s "
+            "limit_order_ideas=%s score_eligible_ideas=%s eligible_alerts=%s alerts_sent=%s "
+            "skipped_by_dedup=%s skipped_low_score=%s skipped_by_entry_status=%s skipped_timeframe=%s rejection_reasons=%s"
         ),
         selected_exchange,
-        timeframe,
-        scan_meta.get("symbols_scanned", 0),
-        scan_meta.get("valid_ideas_found", len(ideas)),
+        ",".join(scanned_timeframes),
+        symbols_scanned,
+        valid_ideas_found,
         limit_order_ideas,
         score_eligible_ideas,
         len(eligible_ideas),
@@ -99,23 +152,27 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         skipped_by_dedup,
         skipped_by_score,
         skipped_by_entry_status,
+        skipped_timeframes,
         dict(rejection_reasons),
     )
     return {
         "status": "ok",
         "exchange": selected_exchange,
-        "timeframe": timeframe,
+        "timeframes": scanned_timeframes,
         "subscribers": len(subscribers),
-        "ideas": len(ideas),
-        "symbols_scanned": scan_meta.get("symbols_scanned", 0),
-        "valid_ideas_found": scan_meta.get("valid_ideas_found", len(ideas)),
+        "ideas": len(all_ideas),
+        "symbols_scanned": symbols_scanned,
+        "valid_ideas_found": valid_ideas_found,
         "limit_order_ideas": limit_order_ideas,
         "score_eligible_ideas": score_eligible_ideas,
         "eligible": len(eligible_ideas),
         "min_score": min_score,
         "sent": sent,
+        "alerts_sent": sent,
         "skipped_by_dedup": skipped_by_dedup,
         "skipped_by_score": skipped_by_score,
+        "skipped_low_score": skipped_by_score,
+        "skipped_timeframe": skipped_timeframes,
         "skipped_by_entry_status": skipped_by_entry_status,
         "rejection_reasons": dict(rejection_reasons),
     }

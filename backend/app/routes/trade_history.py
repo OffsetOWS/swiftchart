@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import TradeHistoryPage, TradeHistoryRecord, TradeIdea, TradeStats
-from app.services.trade_history import check_trade_outcomes, get_trade_history, query_trade_history, save_trade_ideas, stats
+from app.services.trade_history import check_trade_outcomes, get_trade_history, query_trade_history, replay_trade_outcomes, save_trade_ideas, stats
 
 router = APIRouter()
 
@@ -54,6 +54,11 @@ async def trade_history_detail(trade_id: int):
 @router.post("/trade-history/check")
 async def trade_history_check():
     return await check_trade_outcomes()
+
+
+@router.post("/trade-history/replay")
+async def trade_history_replay(days: int = Query(default=30, ge=1, le=365)):
+    return await replay_trade_outcomes(days=days)
 
 
 @router.get("/trade-stats", response_model=TradeStats)
