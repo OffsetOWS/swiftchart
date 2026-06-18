@@ -1,5 +1,7 @@
 # SwiftChart — Trading Infra Submission
 
+**Hackathon track:** Trading Infra
+
 ## Project description
 
 SwiftChart is regime-aware signal infrastructure for crypto perpetual markets. It converts exchange candles and market metadata into ranked, risk-defined trade ideas that can be consumed from a web dashboard, API, Telegram bot, validation service, or paper-execution worker.
@@ -46,36 +48,38 @@ flowchart TB
 
 Operational safeguards include bounded concurrency, rotating market windows, data caching, minimum-liquidity checks, API rate limiting, webhook authentication, duplicate alert fingerprints, stale-signal controls, explicit invalidation, and `LIVE_TRADING_ENABLED=false` by default.
 
-## Usage records summary
+## Verifiable sample input-output records
 
-The submission includes linked deterministic demo records generated to match the current SwiftChart schema and rules.
+The repository includes deterministic, synthetic sample records generated to match SwiftChart's current schemas, scoring rules, risk controls, alert format, and lifecycle vocabulary. They are provided so judges can inspect and reproduce the relationship between scanner inputs, signal outputs, product events, alerts, and recorded result states.
+
+These files are **not live user activity, audited production usage, or live trading performance**. Prices, timestamps, users, and outcomes are synthetic demonstration data. Each artifact is explicitly labeled `synthetic_demo`, and stable `scan_id` values make the sample input-output relationships verifiable across files.
 
 | Artifact | Records | Purpose |
 |---|---:|---|
-| `docs/sample_scan_logs.json` | 50 | Timestamped scans with pair, score, side, timeframe, regime, RR, and result |
-| `docs/sample_signal_outputs.json` | 10 | Full risk-defined signal payloads |
-| `docs/sample_user_activity.json` | 30 | Privacy-safe web, API, and Telegram interaction events |
-| `docs/sample_telegram_alerts.md` | 6 | Human-readable examples linked to scan IDs |
+| [`docs/sample_scan_logs.json`](docs/sample_scan_logs.json) | 50 | Synthetic scan/result records with timestamp, pair, score, side, timeframe, regime, RR, lifecycle status, and result |
+| [`docs/sample_signal_outputs.json`](docs/sample_signal_outputs.json) | 10 | Complete risk-defined sample outputs linked to scan records |
+| [`docs/sample_user_activity.json`](docs/sample_user_activity.json) | 30 | Synthetic, privacy-safe web/API/Telegram events linked to sample signals |
+| [`docs/sample_telegram_alerts.md`](docs/sample_telegram_alerts.md) | 6 | Rendered sample alerts linked to the same stable scan IDs |
 
-Dataset controls:
+Verification controls:
 
 - all timestamps are UTC ISO 8601 values;
 - accepted setup scores are at least 65;
 - every published idea meets or exceeds 2.0R;
-- signal and alert examples reference stable scan IDs;
+- signal outputs, activity events, and alerts reference stable scan IDs;
+- RR values recompute from entry midpoint, stop, and TP2;
+- position sizes recompute from the stated fixed sample risk amount;
 - outcome records use SwiftChart lifecycle/result vocabulary;
 - ambiguous same-candle outcomes are not represented as wins;
-- fixtures are explicitly marked synthetic and are not claimed as live performance.
+- every JSON artifact is machine-parseable and explicitly marked synthetic.
 
 ## Links
 
-- **Live application:** `[ADD LIVE APP URL]`
-- **Public repository:** `[ADD GITHUB REPOSITORY URL]`
-- **Demo video:** `[ADD DEMO VIDEO URL]`
-- **Telegram bot:** `[ADD TELEGRAM BOT URL]`
-- **API documentation:** `[ADD API DOCS URL]`
-- **Architecture / pitch deck:** `[ADD DECK URL]`
-- **Team contact:** `[ADD CONTACT URL OR EMAIL]`
+- **Live application:** [swiftchart.vercel.app](https://swiftchart.vercel.app/)
+- **Public GitHub repository:** [github.com/OffsetOWS/swiftchart](https://github.com/OffsetOWS/swiftchart)
+- **Submission document:** [SUBMISSION.md](https://github.com/OffsetOWS/swiftchart/blob/main/SUBMISSION.md)
+- **Sample evidence directory:** [docs/](https://github.com/OffsetOWS/swiftchart/tree/main/docs)
+- **Telegram bot:** [@SwiftChartBot](https://t.me/SwiftChartBot)
 
 ## Reviewer quick start
 
@@ -98,4 +102,4 @@ npm install
 VITE_API_BASE=http://localhost:8000 npm run dev
 ```
 
-SwiftChart is analysis software, not financial advice. The included evidence is demo data for product review.
+SwiftChart is analysis software, not financial advice. The included sample evidence is synthetic input-output data for technical review and must not be interpreted as live trading performance.
