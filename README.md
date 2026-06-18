@@ -1,481 +1,231 @@
 # SwiftChart
 
-SwiftChart is a crypto market analysis dashboard that detects support/resistance, liquidity sweeps, range conditions, breakouts, and top trade ideas.
+> Regime-aware crypto signal infrastructure that turns noisy perpetual-futures market data into ranked, risk-defined trade ideas.
 
-It is a full-stack, paper-first trading analysis app built with a FastAPI backend and a React/Vite frontend. SwiftChart does not place real trades by default.
+SwiftChart is a mobile-first market intelligence platform for crypto traders. It continuously scans liquid perpetual markets, classifies the current market regime, evaluates long and short candidates, and publishes only setups that satisfy its quality and risk/reward controls.
+
+The project is paper-first: signals are analysis outputs, not promises of profit, and live execution is disabled by default.
+
+## The problem
+
+Crypto traders often stitch together charts, screeners, alerts, spreadsheets, and exchange terminals while making time-sensitive decisions. Raw indicator alerts also tend to ignore context: the same pattern behaves differently in a trend, a range, a breakout, or exhausted price action.
+
+SwiftChart solves this by providing one reproducible pipeline for:
+
+- discovering liquid markets;
+- separating actionable locations from mid-range noise;
+- detecting regime and higher-timeframe bias before scoring a setup;
+- producing explicit entry, stop, targets, invalidation, score, and position sizing;
+- delivering the same analysis through web, API, Telegram, and paper-execution interfaces;
+- preserving immutable signal records for outcome tracking.
+
+## How SwiftChart works
+
+1. **Discover markets.** Exchange adapters load active perpetual markets from Hyperliquid and, when configured, Variational.
+2. **Filter for tradability.** Markets below the configured 24-hour perpetual-volume floor are excluded.
+3. **Run the fast prefilter.** Volume, ATR-normalized volatility, range position, and chop checks reduce the market universe.
+4. **Build market structure.** SwiftChart identifies swing highs/lows, support and resistance zones, range boundaries, EMA structure, and liquidity sweeps.
+5. **Classify the regime.** The engine combines structure, trend strength, momentum, volatility, breadth, and score changes.
+6. **Score both sides.** Candidate longs and shorts are evaluated for regime fit, zone quality, liquidity behavior, higher-timeframe alignment, RR, momentum, volume, and location.
+7. **Apply quality controls.** Extended moves, momentum decay, distance from equilibrium, RSI exhaustion, and trap sweeps can reduce, defer, or reject a setup.
+8. **Publish and track.** Qualifying ideas are ranked, cached, delivered to clients, saved as immutable history, deduplicated, and checked against later candles.
+
+## Scoring system
+
+Every candidate receives a normalized setup score from 0–100. The current scoring model allocates points across:
+
+| Component | Maximum | What it measures |
+|---|---:|---|
+| Regime alignment | 18 | Whether the side fits the detected environment |
+| Zone quality | 20 | Strength, reactions, touches, and recency |
+| Liquidity sweep | 20 | Confirmed sweep/reclaim quality or trend continuation evidence |
+| Higher-timeframe alignment | 15 | Agreement with 4H/1D context |
+| Risk/reward | 10 | Reward available relative to invalidation distance |
+| Momentum and volume | 10 | Follow-through and participation |
+| Range location | 5 | Distance from low-quality mid-range entries |
+
+Only ideas scoring **65/100 or higher** reach normal signal output. Scores of 80+ receive an `A+ Setup` grade. Automated Telegram subscriptions use a stricter 75+ threshold and require a `READY` entry state.
+
+The score is not static. Regime confidence and exhaustion controls may penalize or cap a candidate, while counter-trend ideas require stronger reversal evidence. The default minimum RR is **2.0R**.
+
+## Market regime detection
+
+SwiftChart evaluates recent price structure alongside EMA alignment and slope, RSI, ADX, ATR, range compression, breakout confirmation, market breadth when available, and the change in regime score over the previous 12 candles.
+
+The engine distinguishes:
+
+- `RANGE_BOUND`
+- `TRENDING_UP`
+- `TRENDING_DOWN`
+- `BREAKOUT`
+- `BREAKDOWN`
+- `CHOP`
+- `TRANSITION_TO_BULLISH`
+- `TRANSITION_TO_BEARISH`
+
+Each regime snapshot includes a signed score, confidence, structure label, directional bias, transition state, explanation, bias-flip trigger, and one of `TRADE_ALLOWED`, `WAIT`, or `NO_TRADE`. Transition regimes deliberately require confirmation so the engine can react to structural change without flipping direction on every candle.
+
+## Mobile-first design
+
+SwiftChart is designed around the information a trader needs while away from a desktop:
+
+- compact ranked opportunity cards;
+- large direction, score, RR, and regime labels;
+- entry, stop, and target levels readable without opening a chart;
+- responsive navigation and dark mode;
+- freshness, liquidity, maturity, and invalidation states;
+- Telegram analysis and alert delivery using the same backend engine.
+
+The desktop experience adds chart context and deeper history without changing the underlying signal model.
 
 ## Features
 
-- Binance OHLCV market data connector
-- Hyperliquid OHLCV market data connector
-- Modular exchange layer for future sources
-- Swing high and swing low detection
-- Scored support and resistance zones with touches, reaction strength, volume response, and recency
-- Confirmed liquidity sweep / stop-hunt detection
-- RANGE_BOUND, TRENDING_UP, TRENDING_DOWN, BREAKOUT, BREAKDOWN, CHOP, and NO_TRADE regime classification
-- Multi-timeframe bias filter
-- Setup scoring and grading; only 65/100+ trade ideas are shown
-- Top 5 trade idea scanner across liquid crypto pairs
-- Exchange filter for Binance, Hyperliquid, or all supported exchanges
-- Cached OHLCV/market data and a background scanner so Top Ideas can load quickly
-- Risk settings for account size, risk per trade, max open trades, and minimum R:R
-- Paper-trading ledger backed by SQLite
-- Dark, responsive, Apple-inspired dashboard UI
-- Telegram bot for analysis, top trade ideas, and strategy education
+- Dynamic multi-exchange perpetual-market discovery
+- Liquidity-aware universe filtering
+- Two-stage cached scanner with rotating market windows
+- Support/resistance zone scoring
+- Liquidity sweep and reclaim detection
+- Eight-state market regime engine
+- Multi-timeframe confirmation using 4H and/or 1D context
+- Long and short setup scoring with explicit reasons
+- Exhaustion and late-entry protection
+- Risk-based position sizing
+- Ranked Top Ideas API and responsive dashboard
+- Signal freshness and liquidity warnings
+- Immutable trade history with duplicate suppression
+- Outcome lifecycle: pending, entry, TP1, TP2, stop, expiry, invalidation, and ambiguity
+- Conservative same-candle TP/SL handling
+- Telegram analysis, Top 5, alerts, history, and statistics
+- Paper-trading ledger and optional paper execution service
+- GenLayer-assisted signal validation
+- Rate limiting, webhook signing, secure logging, and live-trading safety gates
 
-## Project Structure
+## Tech stack
 
-```text
-backend/
-  app/
-    main.py
-    config.py
-    exchanges/
-    strategy/
-    models/
-    routes/
-    utils/
-frontend/
-  src/
-    components/
-    pages/
-    styles/
-    lib/
-bot/
-  main.py
-  handlers.py
-  keyboards.py
-  formatter.py
-vercel.json
+| Layer | Technology |
+|---|---|
+| Frontend | React 19, Vite 6, Lightweight Charts, Lucide, MDX |
+| API | Python, FastAPI, Pydantic |
+| Analysis | pandas, NumPy, custom market-structure and risk modules |
+| Data sources | Hyperliquid; optional Variational adapter |
+| Storage | SQLite locally; Supabase/PostgreSQL-ready schemas |
+| Messaging | python-telegram-bot |
+| Validation | GenLayer JS/Python integration |
+| Deployment | Vercel frontend/serverless entry, VPS + Nginx + PM2 workflow |
+| Testing | pytest strategy, lifecycle, alert, liquidity, and execution suites |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Exchange adapters<br/>Hyperliquid / Variational"] --> B["Market discovery<br/>and liquidity filter"]
+    B --> C["Candle cache and<br/>two-stage scanner"]
+    C --> D["Structure engine<br/>zones / sweeps / ATR"]
+    D --> E["Regime engine<br/>trend / range / transition"]
+    E --> F["Signal scoring<br/>HTF / RR / momentum"]
+    F --> G["Quality control<br/>exhaustion / retest / rejection"]
+    G --> H["Ranked idea cache"]
+    H --> I["React dashboard"]
+    H --> J["Telegram alerts"]
+    H --> K["Paper execution"]
+    H --> L["GenLayer validation"]
+    H --> M["Immutable history"]
+    M --> N["Outcome checker<br/>WIN / LOSS / OPEN / NO_ENTRY"]
 ```
 
-## Local Backend Setup
+### Repository layout
+
+```text
+.
+├── api/                  # Serverless FastAPI entry
+├── backend/
+│   ├── app/
+│   │   ├── exchanges/    # Market-data adapters
+│   │   ├── routes/       # API surface
+│   │   ├── services/     # Scanner, history, validation, execution
+│   │   └── strategy/     # Regime, zones, sweeps, scoring
+│   └── tests/
+├── bot/                  # Telegram analysis and alert bot
+├── docs/                 # Hackathon evidence and demo fixtures
+├── execution_bot/        # Paper-first execution service
+├── frontend/             # React/Vite application
+├── supabase/             # Hosted database schemas
+└── SUBMISSION.md         # Trading Infra submission summary
+```
+
+## API surface
+
+```text
+GET  /health
+GET  /api/markets
+GET  /api/candles?exchange=hyperliquid&symbol=SOLUSDT&timeframe=4h
+GET  /api/analyze?exchange=hyperliquid&symbol=SOLUSDT&timeframe=4h
+GET  /api/top-ideas?exchange=all&timeframe=4h
+POST /api/top-ideas/refresh
+GET  /api/trade-history
+POST /api/trade-history/check
+GET  /api/trade-stats
+POST /api/paper-trade
+GET  /api/paper-trades
+```
+
+## Run locally
+
+Backend:
 
 ```bash
-cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --port 8000
+pip install -r backend/requirements.txt
+PYTHONPATH=backend uvicorn app.main:app --reload --port 8000
 ```
 
-Backend URL:
-
-```text
-http://localhost:8000
-```
-
-API docs:
-
-```text
-http://localhost:8000/docs
-```
-
-## Local Frontend Setup
+Frontend:
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env
-npm run dev
+VITE_API_BASE=http://localhost:8000 npm run dev
 ```
 
-Frontend URL:
+Open `http://localhost:5173`; API documentation is available at `http://localhost:8000/docs`.
 
-```text
-http://localhost:5173
-```
+For production deployment and the paper/live execution safety model, see [DEPLOYMENT.md](DEPLOYMENT.md) and [EXECUTION_BOT.md](EXECUTION_BOT.md).
 
-## Environment Variables
+## Submission evidence
 
-Frontend:
+The [`docs/`](docs/) directory contains deterministic, realistic demo fixtures shaped exactly like SwiftChart's current outputs:
 
-```text
-VITE_API_BASE=http://localhost:8000
-VITE_HYPERLIQUID_REFERRAL_URL=
-```
+- [`sample_scan_logs.json`](docs/sample_scan_logs.json): 50 timestamped usage records;
+- [`sample_signal_outputs.json`](docs/sample_signal_outputs.json): complete API-style signal payloads;
+- [`sample_user_activity.json`](docs/sample_user_activity.json): privacy-safe product events;
+- [`sample_telegram_alerts.md`](docs/sample_telegram_alerts.md): representative bot delivery.
 
-Backend:
+These fixtures are labeled demo data and should not be interpreted as audited live trading performance.
 
-```text
-APP_NAME=SwiftChart
-ENVIRONMENT=development
-DATABASE_URL=sqlite:///./swiftchart.db
-HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
-SUPABASE_JWT_SECRET=
-WEBHOOK_SIGNING_SECRET=
-WEBHOOK_NONCE_TTL_SECONDS=900
-WEBHOOK_CLOCK_SKEW_SECONDS=300
-INTERNAL_API_SECRET=
-VARIATIONAL_ENABLED=true
-VARIATIONAL_API_BASE_URL=https://omni-client-api.prod.ap-northeast-1.variational.io
-VARIATIONAL_API_KEY=
-VARIATIONAL_CANDLES_PATH=/candles
-FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-LIVE_TRADING_ENABLED=false
-DEFAULT_EXCHANGE=all
-DEFAULT_TIMEFRAME=4h
-DEFAULT_ACCOUNT_SIZE=10000
-DEFAULT_RISK_PER_TRADE=1
-DEFAULT_MIN_RR=2
-DEFAULT_MAX_OPEN_TRADES=3
-MIN_PERP_VOLUME_24H=100000
-TRADE_HISTORY_EXPIRY_BARS=12
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_WEBHOOK_URL=
-TELEGRAM_WEBHOOK_SECRET=
-HYPERLIQUID_API_KEY=
-```
+## Screenshots
 
-## API Endpoints
+| Surface | Placeholder |
+|---|---|
+| Mobile opportunity feed | [`docs/screenshots/mobile-opportunities.png`](docs/screenshots/README.md) |
+| Signal detail and chart | [`docs/screenshots/signal-detail.png`](docs/screenshots/README.md) |
+| Market regime dashboard | [`docs/screenshots/regime-dashboard.png`](docs/screenshots/README.md) |
+| Telegram alert | [`docs/screenshots/telegram-alert.png`](docs/screenshots/README.md) |
+| Trade history | [`docs/screenshots/trade-history.png`](docs/screenshots/README.md) |
 
-```text
-GET  /api/markets
-GET  /api/candles?exchange=hyperliquid&symbol=SOLUSDT&timeframe=4h
-GET  /api/analyze?symbol=SOLUSDT&timeframe=4h
-GET  /api/top-ideas?timeframe=4h
-POST /api/paper-trade
-GET  /api/paper-trades
-GET  /api/trade-history
-GET  /api/trade-history/{id}
-POST /api/trade-history/check
-GET  /api/trade-stats
-```
+## Roadmap
 
-## Performance and Market Scanning
+- Durable hosted event and signal storage with public read-only proof endpoints
+- Historical replay and reproducible strategy-version backtests
+- Exchange websocket ingestion and lower-latency incremental scans
+- User watchlists, alert routing, quiet hours, and timeframe preferences
+- Portfolio-level exposure, correlation, and drawdown controls
+- Explainable score breakdowns in every client
+- Additional exchange and non-crypto adapters
+- Signed signal attestations and externally verifiable outcome snapshots
+- Native mobile push notifications
+- Controlled live execution after extended paper validation and safety review
 
-SwiftChart caches candles per `exchange + symbol + timeframe` and caches exchange market lists to avoid repeated API hits. Short timeframes refresh faster, while higher timeframes stay cached longer.
+## Risk notice
 
-Top Ideas uses a two-stage pipeline:
-
-1. Fast prefilter for volume, volatility, range position, and obvious chop.
-2. Full strategy scoring only on markets that pass the prefilter.
-
-The scanner discovers Hyperliquid markets dynamically, combines supported exchanges when `exchange=all`, excludes perp markets below `MIN_PERP_VOLUME_24H`, scans large market universes in rotating batches to avoid API rate limits, skips failed or incomplete markets safely, and logs scan metrics such as total markets, scan window size, filtered markets, analyzed markets, valid setups, and duration.
-
-Fast cached scan:
-
-```text
-GET /api/top-ideas?exchange=all&timeframe=4h
-```
-
-The FastAPI backend starts a background scanner on startup. Telegram `/top` also reads from the same cached scanner path, so repeated requests return much faster.
-
-## Trade History and Outcome Tracking
-
-SwiftChart saves every generated trade idea as an immutable historical analysis record. Saved records keep the original entry zone, stop, targets, score, reason, and invalidation even if the strategy changes later.
-
-Generated trade ideas are saved automatically from website analysis, website Top 5 scans, Telegram `/analyze`, and Telegram `/top`. Duplicates with the same symbol, timeframe, direction, entry, stop, and targets generated within 30 minutes are skipped.
-
-Trade history is paginated and sorted newest-first by default:
-
-```text
-GET /api/trade-history?page=1&limit=20&sort=desc
-```
-
-Optional filters include `symbol`, `exchange`, `timeframe`, `direction`, `status`, `result`, `date_from`, and `date_to`. Empty filters do not hide old, pending, open, expired, or no-entry records.
-
-Outcome checking fetches later candles and updates:
-
-```text
-PENDING
-ENTRY_TRIGGERED
-TP1_HIT
-TP2_HIT
-SL_HIT
-EXPIRED
-INVALIDATED
-AMBIGUOUS
-```
-
-Results are:
-
-```text
-WIN
-PARTIAL_WIN
-LOSS
-NO_ENTRY
-AMBIGUOUS
-OPEN
-```
-
-If TP and SL occur inside the same candle, SwiftChart marks the result `AMBIGUOUS` unless lower-timeframe data is available to resolve order. Ambiguous outcomes are not counted as wins or losses.
-
-Manual outcome check:
-
-```bash
-curl -X POST http://localhost:8000/api/trade-history/check
-```
-
-If the website backend and Telegram bot are deployed as separate services, they must point at the same durable `DATABASE_URL` to share history. Local SQLite works when both run from the same project machine. Vercel `/tmp` SQLite and Render local SQLite are separate ephemeral files, so use a shared database for persistent cross-service production history.
-
-## Telegram Bot
-
-SwiftChart Bot lets users request the same analysis engine from Telegram. It is analysis-only and paper-trading only; it never places real trades.
-
-Supported commands:
-
-```text
-/start
-/analyze SOLUSDT 4h
-/top
-/subscribe
-/unsubscribe
-/alerts
-/history
-/stats
-/checktrades
-/strategy
-/help
-```
-
-Supported timeframes:
-
-```text
-30m, 1h, 2h, 4h, 6h, 8h, 12h, 1D
-```
-
-### Create the Telegram Bot
-
-1. Open Telegram and message `@BotFather`.
-2. Run `/newbot`.
-3. Set the display name to `SwiftChart Bot`.
-4. Choose a unique username ending in `bot`.
-5. Copy the bot token from BotFather.
-
-### Run the Bot Locally
-
-```bash
-cd bot
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Add your token:
-
-```text
-TELEGRAM_BOT_TOKEN=your_botfather_token
-```
-
-Run from the project root so the bot can import the existing backend strategy modules:
-
-```bash
-cd ..
-bot/.venv/bin/python -m bot.main
-```
-
-### Bot Environment Variables
-
-```text
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_WEBHOOK_URL=
-TELEGRAM_WEBHOOK_SECRET=
-TELEGRAM_ALERT_CHAT_IDS=
-ALERTS_ENABLED=true
-ALERT_EXCHANGE=all
-ALERT_TIMEFRAME=4h
-ALERT_SCAN_INTERVAL_SECONDS=1800
-ALERTS_RUN_SECRET=
-ALERTS_RUN_RATE_LIMIT_PER_MINUTE=6
-BOT_STATE_PATH=.swiftchart_bot_state.json
-HYPERLIQUID_API_KEY=
-APP_NAME=SwiftChart
-DEFAULT_EXCHANGE=hyperliquid
-DEFAULT_TIMEFRAME=4h
-DEFAULT_ACCOUNT_SIZE=10000
-DEFAULT_RISK_PER_TRADE=1
-DEFAULT_MIN_RR=2
-DEFAULT_MAX_OPEN_TRADES=3
-MIN_PERP_VOLUME_24H=100000
-API_RATE_LIMIT_PER_MINUTE=120
-SCANNER_RATE_LIMIT_PER_MINUTE=20
-HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
-VARIATIONAL_ENABLED=true
-VARIATIONAL_API_BASE_URL=https://omni-client-api.prod.ap-northeast-1.variational.io
-VARIATIONAL_API_KEY=
-VARIATIONAL_CANDLES_PATH=/candles
-```
-
-The current Hyperliquid candle connector uses public OHLCV endpoints. Variational market discovery uses the documented public `/metadata/stats` endpoint. Configure `VARIATIONAL_CANDLES_PATH` to the candle/OHLCV route available for your Variational API account; the public docs currently document market stats but not OHLCV candles.
-
-Local Variational scan smoke test:
-
-```bash
-VARIATIONAL_ENABLED=true \
-VARIATIONAL_CANDLES_PATH=/YOUR_VARIATIONAL_CANDLE_ROUTE \
-PYTHONPATH=backend bot/.venv/bin/python -c "import asyncio; from app.services.scanner import run_scan; print(asyncio.run(run_scan(exchange='all', timeframe='4h', force=True)))"
-```
-
-
-### Telegram Trade Alerts
-
-Users can subscribe from Telegram:
-
-```text
-/subscribe
-```
-
-SwiftChart scans for valid setups and sends alerts only for new ideas that pass the strategy score threshold. It deduplicates already-sent alerts with `BOT_STATE_PATH`.
-
-Useful alert settings:
-
-```text
-ALERTS_ENABLED=true
-ALERT_EXCHANGE=hyperliquid
-ALERT_TIMEFRAME=4h
-ALERT_SCAN_INTERVAL_SECONDS=1800
-ALERTS_RUN_SECRET=choose_a_long_random_string
-ALERTS_RUN_RATE_LIMIT_PER_MINUTE=6
-```
-
-You can also pin alert recipients with `TELEGRAM_ALERT_CHAT_IDS`, a comma-separated list of Telegram chat IDs. This is useful on free hosts where local state can reset.
-
-The webhook app exposes a manual scan endpoint:
-
-```text
-https://your-render-service.onrender.com/alerts/run?secret=your_alert_secret
-```
-
-Use this with an external cron/wake service if the Render free service sleeps. Render Cron Jobs are available but have a minimum monthly charge, and Render background workers are not free.
-
-### VPS Deployment
-
-SwiftChart now uses a VPS-first deployment workflow. The frontend is built with Vite and served by Nginx, the FastAPI backend runs behind Nginx on port 8000, the Telegram bot runs with PM2 in polling mode, and the separate execution bot runs behind `/execution` in paper mode by default.
-
-Use [DEPLOYMENT.md](DEPLOYMENT.md) for the full Contabo Ubuntu VPS setup.
-Use [EXECUTION_BOT.md](EXECUTION_BOT.md) for the execution webhook, risk engine, and paper/live safety setup.
-
-The VPS workflow replaces Render for the Telegram bot. Render web services and `render.yaml` are no longer required.
-
-### Legacy Render Notes
-
-These notes are kept only for historical context. Do not use Render for the current SwiftChart bot deployment.
-
-Render's free tier supports free web services. Background workers are not free, so SwiftChart Bot includes a webhook web service for Render and keeps polling available for local testing.
-
-The repo includes `render.yaml` with:
-
-```text
-Build command: pip install -r bot/requirements.txt
-Start command: uvicorn bot.webhook:app --host 0.0.0.0 --port $PORT
-Service type: Web Service
-Plan: Free
-```
-
-Recommended Render steps:
-
-1. Rotate your BotFather token before deploying if it was ever exposed in local logs.
-2. Go to Render, click **New**, then **Blueprint**.
-3. Connect the GitHub repo `OffsetOWS/swiftchart`.
-4. Select the `main` branch and let Render read `render.yaml`.
-5. Add environment variables:
-
-```text
-TELEGRAM_BOT_TOKEN=your_botfather_token
-TELEGRAM_WEBHOOK_SECRET=choose_a_long_random_string
-DEFAULT_EXCHANGE=hyperliquid
-DEFAULT_TIMEFRAME=4h
-LIVE_TRADING_ENABLED=false
-ALERTS_ENABLED=true
-ALERT_EXCHANGE=hyperliquid
-ALERT_TIMEFRAME=4h
-ALERT_SCAN_INTERVAL_SECONDS=1800
-ALERTS_RUN_SECRET=choose_a_long_random_string
-```
-
-`TELEGRAM_WEBHOOK_URL` is optional on Render because the bot uses Render's `RENDER_EXTERNAL_URL` automatically. If you set it manually, use:
-
-```text
-https://your-render-service.onrender.com/telegram/webhook
-```
-
-After the first successful deploy, open:
-
-```text
-https://your-render-service.onrender.com/health
-```
-
-It should return `{"status":"ok"}`. Then message your bot on Telegram with `/start`.
-
-Free Render web services can spin down after idle time and wake back up on the next incoming request. For truly always-on instant replies and scheduled scans, use an external cron to hit `/alerts/run`, upgrade the service, or use a paid worker/VPS.
-
-If Render logs show `can't use getUpdates method while webhook is active`, the service is running the local polling entrypoint by mistake. Update the Render service start command to:
-
-```text
-uvicorn bot.webhook:app --host 0.0.0.0 --port $PORT
-```
-
-Do not use `python -m bot.main` for the hosted Render web service. That command is only for local polling tests.
-
-## Vercel Deployment
-
-This repository is configured for Vercel to deploy the React/Vite frontend and expose the FastAPI backend through Vercel Python serverless functions.
-
-The Telegram bot is not deployed on Vercel. Run it separately as a Render web service, Railway service, Fly.io app, or VPS process.
-
-Vercel settings:
-
-```text
-Install command: cd frontend && npm install
-Build command: cd frontend && npm run build
-Output directory: frontend/dist
-```
-
-The same settings are also defined in `vercel.json`.
-
-Optional Vercel environment variable:
-
-```text
-VITE_API_BASE=
-VITE_TELEGRAM_BOT_URL=https://t.me/SwiftChartBot
-```
-
-Leave `VITE_API_BASE` empty on Vercel to use same-origin API routes such as `/api/analyze`. For local development, `frontend/.env.example` points to `http://localhost:8000`.
-
-### Vercel Analytics
-
-SwiftChart uses `@vercel/analytics` in the Vite frontend. The app includes the `<Analytics />` component at the root layout, so Vercel automatically tracks visitors, page views, referrers, countries, devices, and related web activity after deployment.
-
-Custom events are sent for:
-
-```text
-page_visit
-clicked_telegram_bot
-clicked_connect_wallet
-opened_dashboard
-viewed_signal_page
-```
-
-View analytics in the Vercel dashboard:
-
-1. Open the SwiftChart project in Vercel.
-2. Go to **Analytics**.
-3. Use **Web Analytics** for visitors, page views, referrers, countries, and devices.
-4. Use the events/custom events view to inspect SwiftChart interaction events.
-
-## Backend Notes
-
-The backend is available locally as a normal FastAPI app and in production through `api/index.py`, which imports `backend/app/main.py`.
-
-The default production SQLite path is `/tmp/swiftchart.db` on Vercel serverless functions. That is fine for demo paper trades, but it is ephemeral. Use a hosted PostgreSQL or durable database for persistent production paper-trade history.
-
-If you deploy the FastAPI backend separately, set:
-
-```text
-VITE_API_BASE=https://your-swiftchart-backend.example.com
-FRONTEND_ORIGINS=https://your-swiftchart.vercel.app
-```
-
-## Production Build Check
-
-```bash
-cd frontend
-npm run build
-```
-
-## Safety Note
-
-SwiftChart produces potential trade setups only. These are not guaranteed profits. Crypto trading carries significant risk, and users are responsible for their own risk management.
+SwiftChart provides market analysis and paper-first infrastructure. It is not financial advice, and no setup is guaranteed. Crypto derivatives involve substantial risk. Users remain responsible for position sizing, execution, and loss limits.
