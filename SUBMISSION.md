@@ -62,6 +62,10 @@ data caching, minimum-liquidity checks, API rate limiting, webhook
 authentication, duplicate alert fingerprints, stale-signal controls, explicit
 invalidation, and `LIVE_TRADING_ENABLED=false` by default.
 
+## GenLayer integration
+
+SwiftChart uses GenLayer-assisted validation as an additional review layer for high-confidence signals. Independent validators can review signal context, market regime, risk metrics, and quality controls before a signal is approved for downstream consumption. This layer is designed to improve reliability while remaining separate from the core scanning engine.
+
 ## Verifiable sample input-output records
 
 The repository includes deterministic, synthetic sample records generated to
