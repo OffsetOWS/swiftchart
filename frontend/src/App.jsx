@@ -5,8 +5,6 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
 import Watchlist from "./pages/Watchlist.jsx";
-import MobileDemo from "./components/MobileDemo.jsx";
-import AdminPayments from "./pages/AdminPayments.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
@@ -44,8 +42,6 @@ export default function App() {
   const isAppPage = path === "/app";
   const isAnalysisPage = path.startsWith("/analysis/");
   const hasWorkspaceChrome = isAppPage || isAnalysisPage;
-  const isMobileDemoPage = path === "/mobile-demo";
-  const isAdminPaymentsPage = path === "/admin/payments";
   const isAuthPage = path === "/auth" || path === "/login" || path === "/signup";
   const isDocsPage = path === "/docs" || path.startsWith("/docs/");
   const [page, setPage] = useState(isAnalysisPage ? "markets" : "dashboard");
@@ -73,12 +69,11 @@ export default function App() {
   const [aiLoadingSignalId, setAiLoadingSignalId] = useState("");
 
   function navigate(nextPath, { replace = false } = {}) {
-    const nextUrl = new URL(nextPath, window.location.origin);
-    if (`${window.location.pathname}${window.location.search}` !== `${nextUrl.pathname}${nextUrl.search}`) {
+    if (window.location.pathname !== nextPath) {
       const method = replace ? "replaceState" : "pushState";
-      window.history[method]({}, "", `${nextUrl.pathname}${nextUrl.search}`);
+      window.history[method]({}, "", nextPath);
     }
-    setPath(nextUrl.pathname);
+    setPath(nextPath);
   }
 
   async function refreshTopIdeas(options = {}) {
@@ -299,8 +294,7 @@ export default function App() {
       navigate("/launch", { replace: true });
     }
     if (isAuthPage && auth.isAuthenticated) {
-      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      navigate(returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/app", { replace: true });
+      navigate("/app", { replace: true });
     }
     if (isLaunchPage && auth.isAuthenticated) {
       navigate("/app", { replace: true });
@@ -419,35 +413,6 @@ export default function App() {
     );
   }
 
-  if (isMobileDemoPage) {
-    return (
-      <>
-        <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} mobile-demo-page`}>
-          <MobileDemo topIdeas={topIdeas} />
-        </main>
-        <Analytics />
-      </>
-    );
-  }
-
-  if (isAdminPaymentsPage) {
-    if (auth.loading) return <AuthLoading />;
-    if (!auth.isAuthenticated) {
-      return (
-        <>
-          <Auth />
-          <Analytics />
-        </>
-      );
-    }
-    return (
-      <>
-        <AdminPayments />
-        <Analytics />
-      </>
-    );
-  }
-
   if (isAppPage && (auth.loading || auth.profileLoading)) {
     return (
       <>
@@ -503,9 +468,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {isAppPage ? <MobileDemo topIdeas={topIdeas} /> : null}
-
-      <section id="terminal-workspace" className={`terminal-workspace${isAppPage ? " desktop-app-workspace" : ""}`}>
+      <section id="terminal-workspace" className="terminal-workspace">
         {!hasWorkspaceChrome ? (
           <div className="workspace-intro">
             <span>SwiftChart</span>
