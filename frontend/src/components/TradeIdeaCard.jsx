@@ -1,5 +1,6 @@
 import { Activity, BrainCircuit, CheckCircle2, Clock3, Gauge, ShieldAlert, TrendingUp, Waves, Zap } from "lucide-react";
 import { confidenceLabelForIdea, freshnessForIdea, liquidityForIdea, regimeViewForIdea, statusForIdea } from "../lib/signalQuality.js";
+import SignalMarketContext from "./SignalMarketContext.jsx";
 
 function fmt(value) {
   if (value === undefined || value === null) return "-";
@@ -34,6 +35,8 @@ export default function TradeIdeaCard({
   aiResult,
   aiError = "",
   aiLoading = false,
+  marketData = null,
+  marketDataLoading = false,
 }) {
   const directionClass = String(idea.direction || "").toLowerCase();
   const score = idea.setup_score ?? idea.confidence_score;
@@ -128,6 +131,7 @@ export default function TradeIdeaCard({
         <span>{liquidity.detail}</span>
         {volatilityWarning ? <span className="warning">Volatility caution</span> : null}
       </div>
+      <SignalMarketContext marketData={marketData} loading={marketDataLoading} />
       {idea.reversal_confirmations?.length ? (
         <p className="confirmation-list"><b>Confirmations:</b> {idea.reversal_confirmations.join(", ")}</p>
       ) : null}

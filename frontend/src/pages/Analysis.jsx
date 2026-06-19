@@ -1,6 +1,8 @@
 import { Search } from "lucide-react";
 import Chart from "../components/Chart.jsx";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
+import { marketDataForSignal } from "../lib/marketIntelligence.js";
+import useMarketIntelligence from "../lib/useMarketIntelligence.js";
 
 export default function Analysis({
   state,
@@ -20,6 +22,8 @@ export default function Analysis({
 }) {
   const { symbol, exchange, timeframe, risk } = state;
   const { setSymbol, setExchange, setTimeframe, setRisk } = setters;
+  const marketSymbols = [symbol, ...(analysis?.trade_ideas || []).map((idea) => idea.symbol)];
+  const { data: marketIntelligence, loading: marketIntelligenceLoading } = useMarketIntelligence(marketSymbols);
 
   return (
     <div className="analysis-grid">
@@ -105,6 +109,8 @@ export default function Analysis({
                     aiResult={aiResults[signalId]}
                     aiError={aiErrors[signalId]}
                     aiLoading={aiLoadingSignalId === signalId}
+                    marketData={marketDataForSignal(marketIntelligence, idea.symbol)}
+                    marketDataLoading={marketIntelligenceLoading}
                   />
                 );
               })}

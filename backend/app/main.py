@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.middleware.rate_limit import InMemoryRateLimitMiddleware
 from app.routes.genlayer import router as genlayer_router
+from app.routes.market_intelligence import router as market_intelligence_router
 from app.routes.markets import router as markets_router
 from app.routes.paper_trades import router as paper_trades_router
 from app.routes.trade_history import router as trade_history_router
@@ -46,3 +47,4 @@ app.include_router(markets_router, prefix="/api", tags=["markets"])
 app.include_router(paper_trades_router, prefix="/api", tags=["paper-trades"])
 app.include_router(trade_history_router, prefix="/api", tags=["trade-history"])
 app.include_router(genlayer_router, prefix="/api", tags=["genlayer-ai"])
+app.include_router(market_intelligence_router, prefix="/api", tags=["market-intelligence"])
