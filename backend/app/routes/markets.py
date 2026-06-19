@@ -16,6 +16,7 @@ from app.strategy.trade_ideas import analyze_dataframe
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+QUOTE_SUFFIXES = ("USDT", "USDC", "SUSD", "USD", "PERP")
 
 
 def _selected_exchange(exchange: str | None) -> str:
@@ -23,12 +24,27 @@ def _selected_exchange(exchange: str | None) -> str:
     return normalized
 
 
+def _base_asset_symbol(symbol: str) -> str:
+    normalized = "".join(character for character in str(symbol or "").upper() if character.isalnum())
+    for suffix in QUOTE_SUFFIXES:
+        if normalized.endswith(suffix) and len(normalized) > len(suffix):
+            return normalized[: -len(suffix)]
+    return normalized
+
+
+def _symbol_for_exchange(exchange: str, symbol: str) -> str:
+    base_asset = _base_asset_symbol(symbol)
+    if exchange.lower() == "hyperliquid":
+        return f"{base_asset}USDT"
+    return str(symbol or "").strip().upper()
+
+
 async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
     return await get_candles_cached(exchange, symbol, timeframe, limit)
 
 
 async def _market_for_symbol(exchange: str, symbol: str) -> dict | None:
-    normalized_symbol = symbol.upper()
+    normalized_symbol = _symbol_for_exchange(exchange, symbol)
     for market in await get_markets_cached(exchange):
         if str(market.get("symbol", "")).upper() == normalized_symbol:
             return market
@@ -106,7 +122,9 @@ async def candles(
         raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
     selected_exchange = _selected_exchange(exchange)
     try:
-        df = await _safe_candles(selected_exchange, symbol, timeframe, limit)
+        candle_exchange = "hyperliquid" if selected_exchange == "all" else selected_exchange
+        candle_symbol = _symbol_for_exchange(candle_exchange, symbol)
+        df = await _safe_candles(candle_exchange, candle_symbol, timeframe, limit)
         return df.to_dict("records")
     except MarketDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -140,22 +158,23 @@ async def analyze(
         last_error = None
         analysis = None
         for selected_exchange in exchanges:
+            selected_symbol = _symbol_for_exchange(selected_exchange, symbol)
             try:
-                if await _skip_low_volume_symbol(selected_exchange, symbol):
+                if await _skip_low_volume_symbol(selected_exchange, selected_symbol):
                     last_error = "Perp 24h volume is below the scanner liquidity minimum."
                     continue
-                df = await get_candles_cached(selected_exchange, symbol, timeframe, 320)
+                df = await get_candles_cached(selected_exchange, selected_symbol, timeframe, 320)
                 if len(df) < 80:
                     last_error = "Not enough candle history for analysis."
                     continue
                 htf_dfs = []
                 for htf in higher_timeframes_for(timeframe):
                     try:
-                        htf_dfs.append(await get_candles_cached(selected_exchange, symbol, htf, 240))
+                        htf_dfs.append(await get_candles_cached(selected_exchange, selected_symbol, htf, 240))
                     except Exception:
                         continue
                 analysis = analyze_dataframe(
-                    symbol.upper(),
+                    selected_symbol,
                     timeframe,
                     selected_exchange,
                     df,
@@ -170,7 +189,11 @@ async def analyze(
         if analysis is None:
             if isinstance(last_error, MarketDataUnavailable):
                 raise HTTPException(status_code=503, detail=str(last_error))
-            raise HTTPException(status_code=422, detail="Could not analyze symbol with the available market data.")
+            base_asset = _base_asset_symbol(symbol)
+            raise HTTPException(
+                status_code=422,
+                detail=f"{base_asset or 'This asset'} is not currently available for analysis. Try BTC, ETH, SOL, BNB, or another listed Hyperliquid market.",
+            )
         saved_ids = save_trade_ideas(analysis.trade_ideas)
         saved_reviews = save_signal_reviews(analysis.rejected_signals)
         logger.info("Analysis generated %s ideas, rejected %s, and saved %s ideas/%s reviews for %s %s on %s", len(analysis.trade_ideas), len(analysis.rejected_signals), len(saved_ids), saved_reviews, symbol, timeframe, analysis.exchange)
