@@ -21,6 +21,7 @@ export default function Dashboard({
   aiResults = {},
   aiErrors = {},
   aiLoadingSignalId = "",
+  onAnalyzeAsset,
   compact = false,
 }) {
   const marketSymbols = topIdeas.map((idea) => idea.symbol);
@@ -106,7 +107,11 @@ export default function Dashboard({
           </div>
         </section>
 
-        <MarketIntelligenceWidget intelligence={marketIntelligence} loading={marketIntelligenceLoading} />
+        <MarketIntelligenceWidget
+          intelligence={marketIntelligence}
+          loading={marketIntelligenceLoading}
+          onAnalyzeAsset={onAnalyzeAsset}
+        />
 
         <section className="panel mini-card regime-card">
           <span>Market regime</span>

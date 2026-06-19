@@ -5,6 +5,8 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
 import Watchlist from "./pages/Watchlist.jsx";
+import MobileDemo from "./components/MobileDemo.jsx";
+import AdminPayments from "./pages/AdminPayments.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
@@ -27,26 +29,38 @@ function trackEvent(name, properties = {}) {
   });
 }
 
+function analysisSymbolFromPath(pathname) {
+  const match = String(pathname || "").match(/^\/analysis\/([^/]+)$/i);
+  if (!match) return "";
+  const base = decodeURIComponent(match[1]).replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return base ? `${base.replace(/(USDT|USDC|USD|PERP)$/i, "")}USDT` : "";
+}
+
 export default function App() {
   const auth = useAuth();
   const [path, setPath] = useState(window.location.pathname);
   const isLandingPage = path === "/";
   const isLaunchPage = path === "/launch";
   const isAppPage = path === "/app";
+  const isAnalysisPage = path.startsWith("/analysis/");
+  const hasWorkspaceChrome = isAppPage || isAnalysisPage;
+  const isMobileDemoPage = path === "/mobile-demo";
+  const isAdminPaymentsPage = path === "/admin/payments";
   const isAuthPage = path === "/auth" || path === "/login" || path === "/signup";
   const isDocsPage = path === "/docs" || path.startsWith("/docs/");
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState(isAnalysisPage ? "markets" : "dashboard");
   const [nightMode, setNightMode] = useState(true);
   const [clock, setClock] = useState("");
   const [exchange, setExchange] = useState("all");
   const [timeframe, setTimeframe] = useState("4h");
-  const [symbol, setSymbol] = useState("SOLUSDT");
+  const [symbol, setSymbol] = useState(analysisSymbolFromPath(window.location.pathname) || "SOLUSDT");
   const [risk, setRisk] = useState({ accountSize: 10000, riskPerTrade: 1, minRR: 2, maxOpenTrades: 3 });
   const [topIdeas, setTopIdeas] = useState([]);
   const [pendingSetups, setPendingSetups] = useState([]);
   const [topIdeasMeta, setTopIdeasMeta] = useState({});
   const [candles, setCandles] = useState([]);
   const [analysis, setAnalysis] = useState(null);
+  const [analysisError, setAnalysisError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingTopIdeas, setLoadingTopIdeas] = useState(false);
   const [notice, setNotice] = useState("");
@@ -59,11 +73,12 @@ export default function App() {
   const [aiLoadingSignalId, setAiLoadingSignalId] = useState("");
 
   function navigate(nextPath, { replace = false } = {}) {
-    if (window.location.pathname !== nextPath) {
+    const nextUrl = new URL(nextPath, window.location.origin);
+    if (`${window.location.pathname}${window.location.search}` !== `${nextUrl.pathname}${nextUrl.search}`) {
       const method = replace ? "replaceState" : "pushState";
-      window.history[method]({}, "", nextPath);
+      window.history[method]({}, "", `${nextUrl.pathname}${nextUrl.search}`);
     }
-    setPath(nextPath);
+    setPath(nextUrl.pathname);
   }
 
   async function refreshTopIdeas(options = {}) {
@@ -94,20 +109,29 @@ export default function App() {
     }
   }
 
-  async function runAnalysis() {
+  async function runAnalysis(overrides = {}) {
+    const requestExchange = overrides.exchange || exchange;
+    const requestSymbol = overrides.symbol || symbol;
+    const requestTimeframe = overrides.timeframe || timeframe;
     setLoading(true);
     setNotice("");
     setNoticeType("info");
+    setAnalysisError("");
     try {
       const [candleData, analysisData] = await Promise.all([
-        getCandles({ exchange, symbol, timeframe }),
-        getAnalysis({ exchange, symbol, timeframe, risk }),
+        getCandles({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe }),
+        getAnalysis({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe, risk }),
       ]);
       setCandles(candleData);
       setAnalysis(analysisData);
     } catch (error) {
-      setNoticeType("error");
-      setNotice(error.message);
+      setCandles([]);
+      setAnalysis(null);
+      setAnalysisError(error.message);
+      if (!isAnalysisPage && !/not currently available for analysis/i.test(error.message)) {
+        setNoticeType("error");
+        setNotice(error.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -192,6 +216,9 @@ export default function App() {
   }
 
   function openPage(nextPage) {
+    if (isAnalysisPage) {
+      navigate(auth.isAuthenticated ? "/app" : "/preview");
+    }
     setPage(nextPage);
     if (nextPage === "dashboard") {
       trackEvent("opened_dashboard");
@@ -199,6 +226,19 @@ export default function App() {
     if (nextPage === "ideas" || nextPage === "markets") {
       trackEvent("viewed_signal_page", { page: nextPage === "ideas" ? "trade_ideas" : "markets" });
     }
+  }
+
+  function openAssetAnalysis(asset) {
+    const assetSymbol = String(asset?.symbol || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    if (!assetSymbol) return;
+    setPage("markets");
+    setExchange("hyperliquid");
+    setSymbol(`${assetSymbol.replace(/(USDT|USDC|USD|PERP)$/i, "")}USDT`);
+    setAnalysis(null);
+    setCandles([]);
+    setAnalysisError("");
+    navigate(`/analysis/${assetSymbol.toLowerCase()}`);
+    trackEvent("market_intelligence_asset_selected", { symbol: assetSymbol });
   }
 
   useEffect(() => {
@@ -232,8 +272,18 @@ export default function App() {
   }, [auth.user?.id, auth.session?.access_token, topIdeas, analysis, paperHistoryVersion]);
 
   useEffect(() => {
-    runAnalysis();
-  }, []);
+    const routeSymbol = analysisSymbolFromPath(path);
+    if (routeSymbol) {
+      setPage("markets");
+      setExchange("hyperliquid");
+      setSymbol(routeSymbol);
+      runAnalysis({ exchange: "hyperliquid", symbol: routeSymbol });
+      return;
+    }
+    if (path === "/" || path === "/preview" || path === "/app") {
+      runAnalysis();
+    }
+  }, [path]);
 
   useEffect(() => {
     function syncPath() {
@@ -249,7 +299,8 @@ export default function App() {
       navigate("/launch", { replace: true });
     }
     if (isAuthPage && auth.isAuthenticated) {
-      navigate("/app", { replace: true });
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      navigate(returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/app", { replace: true });
     }
     if (isLaunchPage && auth.isAuthenticated) {
       navigate("/app", { replace: true });
@@ -294,7 +345,7 @@ export default function App() {
   ];
 
   const nav = (
-    <nav className={isAppPage ? "nav app-nav" : "nav"} aria-label="SwiftChart sections">
+    <nav className={hasWorkspaceChrome ? "nav app-nav" : "nav"} aria-label="SwiftChart sections">
       {tabs.map(([key, label]) => (
         <button key={key} className={page === key ? "active" : ""} onClick={() => openPage(key)}>
           <span />
@@ -368,6 +419,35 @@ export default function App() {
     );
   }
 
+  if (isMobileDemoPage) {
+    return (
+      <>
+        <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} mobile-demo-page`}>
+          <MobileDemo topIdeas={topIdeas} />
+        </main>
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isAdminPaymentsPage) {
+    if (auth.loading) return <AuthLoading />;
+    if (!auth.isAuthenticated) {
+      return (
+        <>
+          <Auth />
+          <Analytics />
+        </>
+      );
+    }
+    return (
+      <>
+        <AdminPayments />
+        <Analytics />
+      </>
+    );
+  }
+
   if (isAppPage && (auth.loading || auth.profileLoading)) {
     return (
       <>
@@ -392,7 +472,7 @@ export default function App() {
       <div className="grain" />
       <div className="cursor-aura" />
 
-      {!isAppPage ? (
+      {!hasWorkspaceChrome ? (
         <section className="landing-stage" aria-label="SwiftChart terminal introduction">
           <header className="reference-header">
             <div />
@@ -423,8 +503,10 @@ export default function App() {
         </section>
       ) : null}
 
-      <section id="terminal-workspace" className="terminal-workspace">
-        {!isAppPage ? (
+      {isAppPage ? <MobileDemo topIdeas={topIdeas} /> : null}
+
+      <section id="terminal-workspace" className={`terminal-workspace${isAppPage ? " desktop-app-workspace" : ""}`}>
+        {!hasWorkspaceChrome ? (
           <div className="workspace-intro">
             <span>SwiftChart</span>
             <h1>Mysterious market structure, made readable.</h1>
@@ -432,7 +514,7 @@ export default function App() {
           </div>
         ) : null}
 
-        {isAppPage ? (
+        {hasWorkspaceChrome ? (
           <div className="app-top-controls">
             {nav}
             <div className="app-theme-control">{themeControl}</div>
@@ -462,6 +544,7 @@ export default function App() {
               aiResults={aiResults}
               aiErrors={aiErrors}
               aiLoadingSignalId={aiLoadingSignalId}
+              onAnalyzeAsset={openAssetAnalysis}
             />
           )}
           {page === "ideas" && (
@@ -482,6 +565,7 @@ export default function App() {
               aiResults={aiResults}
               aiErrors={aiErrors}
               aiLoadingSignalId={aiLoadingSignalId}
+              onAnalyzeAsset={openAssetAnalysis}
               compact
             />
           )}
@@ -501,6 +585,7 @@ export default function App() {
               aiResults={aiResults}
               aiErrors={aiErrors}
               aiLoadingSignalId={aiLoadingSignalId}
+              analysisError={analysisError}
             />
           )}
           {page === "watchlist" && (
