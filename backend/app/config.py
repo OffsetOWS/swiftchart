@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     genlayer_validator_services: str = ""
     genlayer_llm_provider: str = ""
     genlayer_intelligent_contract_address: str = ""
+    cmc_api_key: str = ""
+    cmc_api_base_url: str = "https://pro-api.coinmarketcap.com"
+    cmc_cache_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    cmc_request_timeout_seconds: float = Field(default=8.0, ge=1, le=30)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

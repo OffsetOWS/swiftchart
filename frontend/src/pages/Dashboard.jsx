@@ -1,5 +1,8 @@
 import { RefreshCcw } from "lucide-react";
+import MarketIntelligenceWidget from "../components/MarketIntelligenceWidget.jsx";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
+import { marketDataForSignal } from "../lib/marketIntelligence.js";
+import useMarketIntelligence from "../lib/useMarketIntelligence.js";
 
 export default function Dashboard({
   exchange,
@@ -20,6 +23,8 @@ export default function Dashboard({
   aiLoadingSignalId = "",
   compact = false,
 }) {
+  const marketSymbols = topIdeas.map((idea) => idea.symbol);
+  const { data: marketIntelligence, loading: marketIntelligenceLoading } = useMarketIntelligence(marketSymbols);
   const topIdea = topIdeas[0];
   const regimeLabel = topIdea?.regime_label || "Scanning";
   const regimeScore = topIdea?.regime_score;
@@ -93,11 +98,15 @@ export default function Dashboard({
                   aiResult={aiResults[signalId]}
                   aiError={aiErrors[signalId]}
                   aiLoading={aiLoadingSignalId === signalId}
+                  marketData={marketDataForSignal(marketIntelligence, idea.symbol)}
+                  marketDataLoading={marketIntelligenceLoading}
                 />
               );
             })}
           </div>
         </section>
+
+        <MarketIntelligenceWidget intelligence={marketIntelligence} loading={marketIntelligenceLoading} />
 
         <section className="panel mini-card regime-card">
           <span>Market regime</span>
