@@ -21,6 +21,8 @@ For each supported asset, the interface displays:
 
 The dashboard also presents CoinMarketCap trending assets, top gainers, top losers, and the highest market-quality assets.
 
+Market Intelligence is also SwiftChart's asset-discovery entry point. Every discovery row is actionable: selecting an asset opens `/analysis/[symbol]`, where SwiftChart attempts to turn the discovered market into support/resistance, regime, and trade-opportunity intelligence.
+
 ## Architecture
 
 ```text
@@ -70,6 +72,15 @@ Market cap and volume use bounded logarithmic normalization so that very large a
 
 This score is never passed into trade generation, ranking, risk sizing, paper trading, alerts, or execution.
 
+CoinMarketCap helps users discover assets through trending markets, top gainers, top losers, and high-quality assets. SwiftChart then uses its existing analysis APIs to provide:
+
+- Current market regime
+- Nearest and major support
+- Nearest and major resistance
+- Active trade opportunities when the existing signal engine produces one
+
+If SwiftChart does not currently track a discovered asset, the analysis route preserves its CoinMarketCap overview and clearly states that SwiftChart analysis is coming soon. This keeps discovery useful without pretending that aggregated CMC data is exchange-specific strategy data.
+
 ## AI Validation Context
 
 The context layer translates market intelligence into an immediately understandable validation label:
@@ -79,6 +90,24 @@ The context layer translates market intelligence into an immediately understanda
 - **Lower Liquidity Risk**: weaker capitalization, volume, or rank
 
 This validation answers “what kind of asset is behind this signal?” It does not answer “should SwiftChart generate this trade?” and cannot promote, reject, or reorder a signal.
+
+## Discovery to Analysis Workflow
+
+```text
+CoinMarketCap Market Intelligence
+        ↓
+Discover trending or high-quality asset
+        ↓
+Open /analysis/[symbol]
+        ↓
+SwiftChart exchange-specific analysis
+        ↓
+Market regime + support/resistance
+        ↓
+Trade opportunity or no-opportunity state
+```
+
+CoinMarketCap discovers and contextualizes the asset. SwiftChart turns supported assets into actionable trading intelligence using its existing market-analysis and signal systems.
 
 ## Future BNB Chain Expansion
 

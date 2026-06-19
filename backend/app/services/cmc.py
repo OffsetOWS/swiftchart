@@ -63,6 +63,7 @@ def _normalize_asset(item: dict[str, Any]) -> dict[str, Any] | None:
         "id": item.get("id"),
         "name": item.get("name") or symbol,
         "symbol": symbol,
+        "price": float(quote.get("price") or 0),
         "market_cap": market_cap,
         "volume_24h": volume_24h,
         "price_change_24h": float(quote.get("percent_change_24h") or 0),

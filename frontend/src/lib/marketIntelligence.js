@@ -31,6 +31,17 @@ export function formatCompactUsd(value) {
   }).format(amount);
 }
 
+export function formatUsdPrice(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return "-";
+  const maximumFractionDigits = amount >= 1000 ? 2 : amount >= 1 ? 4 : 8;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits,
+  }).format(amount);
+}
+
 export function formatChange(value) {
   const change = Number(value);
   if (!Number.isFinite(change)) return "-";

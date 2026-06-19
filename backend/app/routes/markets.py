@@ -157,10 +157,16 @@ async def analyze(
         exchanges = scan_selected_exchanges(_selected_exchange(exchange))
         last_error = None
         analysis = None
+        found_market = False
         for selected_exchange in exchanges:
             selected_symbol = _symbol_for_exchange(selected_exchange, symbol)
             try:
-                if await _skip_low_volume_symbol(selected_exchange, selected_symbol):
+                market = await _market_for_symbol(selected_exchange, selected_symbol)
+                if market is None:
+                    last_error = f"{selected_symbol} is not listed on {selected_exchange}."
+                    continue
+                found_market = True
+                if skip_low_volume_market(market):
                     last_error = "Perp 24h volume is below the scanner liquidity minimum."
                     continue
                 df = await get_candles_cached(selected_exchange, selected_symbol, timeframe, 320)
@@ -187,6 +193,12 @@ async def analyze(
                 last_error = exc
                 continue
         if analysis is None:
+            if not found_market:
+                base_asset = _base_asset_symbol(symbol)
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{base_asset or 'This asset'} is not currently available for analysis. Try BTC, ETH, SOL, BNB, or another listed Hyperliquid market.",
+                )
             if isinstance(last_error, MarketDataUnavailable):
                 raise HTTPException(status_code=503, detail=str(last_error))
             base_asset = _base_asset_symbol(symbol)
