@@ -10,14 +10,14 @@ const API_BASE = configuredApiBase && (!isLocalApiBase || isLocalApp)
     ? "http://127.0.0.1:8000"
     : "";
 
-function friendlyErrorMessage(message) {
+function friendlyErrorMessage(message, timeoutMessage = "SwiftChart scanner took too long to finish. Please try again in a moment.") {
   const text = String(message || "").trim();
   if (!text) return "Request failed. Please try again.";
   if (/api\.hyperliquid\.xyz|Internal Server Error|Server error '500'|HTTPStatusError/i.test(text)) {
     return "Hyperliquid market data is temporarily unavailable. Please try again shortly.";
   }
   if (/FUNCTION_INVOCATION_TIMEOUT|Gateway Timeout|504/i.test(text)) {
-    return "SwiftChart scanner took too long to finish. Please try again in a moment.";
+    return timeoutMessage;
   }
   if (/Failed to fetch|NetworkError|Load failed/i.test(text)) {
     return "Could not reach SwiftChart market data. Please check the backend and try again.";
@@ -26,7 +26,7 @@ function friendlyErrorMessage(message) {
 }
 
 async function request(path, options = {}) {
-  const { accessToken, ...fetchOptions } = options;
+  const { accessToken, timeoutMessage, ...fetchOptions } = options;
   const headers = { "Content-Type": "application/json", ...(fetchOptions.headers || {}) };
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
@@ -45,16 +45,18 @@ async function request(path, options = {}) {
           return text;
         }
       });
-      throw new Error(friendlyErrorMessage(detail || response.statusText || `Request failed (${response.status})`));
+      throw new Error(friendlyErrorMessage(detail || response.statusText || `Request failed (${response.status})`, timeoutMessage));
     }
     return response.json();
   } catch (error) {
-    throw new Error(friendlyErrorMessage(error.message));
+    throw new Error(friendlyErrorMessage(error.message, timeoutMessage));
   }
 }
 
 export function getCandles({ exchange, symbol, timeframe }) {
-  return request(`/api/candles?exchange=${exchange}&symbol=${symbol}&timeframe=${timeframe}&limit=240`);
+  return request(`/api/candles?exchange=${exchange}&symbol=${symbol}&timeframe=${timeframe}&limit=240`, {
+    timeoutMessage: "The price chart is taking longer than expected. SwiftChart analysis can still continue.",
+  });
 }
 
 export function getAnalysis({ exchange, symbol, timeframe, risk }) {
@@ -67,7 +69,9 @@ export function getAnalysis({ exchange, symbol, timeframe, risk }) {
     min_rr: risk.minRR,
     max_open_trades: risk.maxOpenTrades,
   });
-  return request(`/api/analyze?${params.toString()}`);
+  return request(`/api/analyze?${params.toString()}`, {
+    timeoutMessage: "SwiftChart analysis is taking longer than expected. Please try this asset again in a moment.",
+  });
 }
 
 export function getTopIdeas({ exchange, timeframe }) {
