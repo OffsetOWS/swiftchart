@@ -113,12 +113,15 @@ export default function App() {
     setNoticeType("info");
     setAnalysisError("");
     try {
-      const [candleData, analysisData] = await Promise.all([
-        getCandles({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe }),
+      const [analysisResult, candleResult] = await Promise.allSettled([
         getAnalysis({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe, risk }),
+        getCandles({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe }),
       ]);
-      setCandles(candleData);
-      setAnalysis(analysisData);
+      if (analysisResult.status === "rejected") {
+        throw analysisResult.reason;
+      }
+      setAnalysis(analysisResult.value);
+      setCandles(candleResult.status === "fulfilled" ? candleResult.value : []);
     } catch (error) {
       setCandles([]);
       setAnalysis(null);
@@ -237,8 +240,9 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (isAnalysisPage) return;
     refreshTopIdeas();
-  }, [exchange, timeframe]);
+  }, [exchange, timeframe, isAnalysisPage]);
 
   useEffect(() => {
     if (!auth.user?.id) {
