@@ -9,9 +9,11 @@ from app.config import get_settings
 from app.models.schemas import TradeIdea
 from app.services.alert_dedupe import mark_alert_sent as mark_dedupe_sent
 from app.services.alert_dedupe import should_skip_alert
+from app.services.execution_signals import execution_signal_id
 from bot.formatter import format_trade_alert
+from bot.keyboards import trade_alert_keyboard
 from bot.scanner import scan_top_ideas
-from bot.storage import get_subscribers
+from bot.storage import get_subscribers, save_signal
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +128,26 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             rejection_reasons["duplicate alert"] += 1
             continue
         message = format_trade_alert(idea)
+        signal_id = execution_signal_id(idea)
+        entry = sum(idea.entry_zone) / 2
+        save_signal(
+            signal_id,
+            {
+                "signal_id": signal_id,
+                "pair": idea.symbol.upper(),
+                "side": idea.direction.lower(),
+                "entry": entry,
+                "stop_loss": idea.stop_loss,
+                "tp1": idea.take_profit_1,
+                "tp2": idea.take_profit_2,
+                "exchange": idea.exchange,
+                "timeframe": idea.timeframe,
+                "analysis": message,
+            },
+        )
         for chat_id in subscribers:
             try:
-                await bot.send_message(chat_id=chat_id, text=message)
+                await bot.send_message(chat_id=chat_id, text=message, reply_markup=trade_alert_keyboard(signal_id))
                 sent += 1
             except Exception as exc:
                 rejection_reasons["send error"] += 1

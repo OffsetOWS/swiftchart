@@ -8,10 +8,11 @@ from app.models.schemas import RiskSettings
 from app.services.market_data import get_candles_cached
 from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas, stats
 from app.strategy.trade_ideas import analyze_dataframe
-from bot.formatter import format_analysis, format_history, format_stats, format_top_ideas, help_text, strategy_text
+from bot.formatter import format_analysis, format_history, format_paper_trades, format_stats, format_top_ideas, help_text, strategy_text
 from bot.keyboards import command_keyboard, main_menu_keyboard
+from bot.paper_trading import create_paper_trade, list_open_paper_trades, list_paper_trades, supabase_enabled
 from bot.scanner import scan_top_ideas
-from bot.storage import add_subscriber, get_subscribers, remove_subscriber
+from bot.storage import add_subscriber, get_latest_signal, get_signal, get_subscribers, remove_subscriber
 
 logger = logging.getLogger(__name__)
 
@@ -167,16 +168,78 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_message.reply_text(help_text(), reply_markup=command_keyboard())
 
 
+async def my_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not supabase_enabled():
+        await update.effective_message.reply_text("Paper trading is temporarily unavailable.")
+        return
+    try:
+        records = await list_paper_trades(update.effective_user.id)
+        await update.effective_message.reply_text(format_paper_trades(records))
+    except Exception:
+        logger.exception("Could not list Telegram paper trades")
+        await update.effective_message.reply_text("Could not load your paper trades right now.")
+
+
+async def open_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not supabase_enabled():
+        await update.effective_message.reply_text("Paper trading is temporarily unavailable.")
+        return
+    try:
+        records = await list_open_paper_trades(update.effective_user.id)
+        await update.effective_message.reply_text(format_paper_trades(records, open_only=True))
+    except Exception:
+        logger.exception("Could not list open Telegram paper trades")
+        await update.effective_message.reply_text("Could not load your open paper trades right now.")
+
+
+async def signal_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = getattr(context, "args", None) or []
+    selector = args[0] if args else None
+    signal = get_latest_signal(selector)
+    if not signal:
+        if selector:
+            await update.effective_message.reply_text(
+                f"No stored signal analysis found for {selector}.\n"
+                "Use /analysis for the latest signal, or /analysis BTCUSDT for a pair."
+            )
+        else:
+            await update.effective_message.reply_text("No stored signal analysis yet. Wait for the next trade alert.")
+        return
+    await update.effective_message.reply_text(
+        f"{signal['analysis']}\n\nSignal ID: {signal['signal_id']}\n\nNot financial advice. Manage your risk."
+    )
+
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    if query.data == "analyze_help":
+    data = query.data or ""
+    if data.startswith("paper:"):
+        signal = get_signal(data.removeprefix("paper:"))
+        if not signal:
+            await query.message.reply_text("This signal has expired. Wait for the next alert.")
+            return
+        if not supabase_enabled():
+            await query.message.reply_text("Paper trading is temporarily unavailable.")
+            return
+        try:
+            trade, already_exists = await create_paper_trade(query.from_user.id, signal)
+            prefix = "Already paper trading" if already_exists else "Paper trade opened"
+            await query.message.reply_text(
+                f"🧪 {prefix}: {trade['pair']} {str(trade['side']).upper()}\n"
+                f"Entry {trade['entry']} | SL {trade['stop_loss']} | TP1 {trade['tp1']} | TP2 {trade['tp2']}\n\n"
+                "Simulated only. No real order was placed."
+            )
+        except Exception:
+            logger.exception("Could not create Telegram paper trade")
+            await query.message.reply_text("Could not open that paper trade right now.")
+    elif data == "analyze_help":
         await query.message.reply_text("Type /analyze SOLUSDT 4h to analyze a coin.")
-    elif query.data == "top":
+    elif data == "top":
         await top(update, context)
-    elif query.data == "subscribe":
+    elif data == "subscribe":
         await subscribe(update, context)
-    elif query.data == "strategy":
+    elif data == "strategy":
         await query.message.reply_text(strategy_text())
-    elif query.data == "help":
+    elif data == "help":
         await query.message.reply_text(help_text(), reply_markup=command_keyboard())

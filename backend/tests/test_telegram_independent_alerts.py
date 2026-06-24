@@ -9,9 +9,11 @@ from app.models.schemas import TradeIdea
 class FakeBot:
     def __init__(self) -> None:
         self.messages: list[tuple[int, str]] = []
+        self.reply_markups = []
 
-    async def send_message(self, chat_id: int, text: str) -> None:
+    async def send_message(self, chat_id: int, text: str, reply_markup=None) -> None:
         self.messages.append((chat_id, text))
+        self.reply_markups.append(reply_markup)
 
 
 class FakeExchange:
@@ -93,6 +95,8 @@ def test_telegram_alert_loop_works_when_website_ideas_are_empty(monkeypatch, tmp
     assert result["eligible"] == 1
     assert result["sent"] == 1
     assert len(bot.messages) == 1
+    buttons = [button.text for row in bot.reply_markups[0].inline_keyboard for button in row]
+    assert buttons == ["🧪 Paper Trade"]
 
 
 def test_telegram_does_not_call_cached_top_ideas(monkeypatch, tmp_path):
@@ -284,7 +288,7 @@ def test_trade_alert_formatter_only_includes_public_alert_fields():
         "R:R: 3.29\n\n"
         "Reason:\n"
         "Market structure favors trend-continuation pullbacks. Short idea has confirmed "
-        "liquidity sweep/reclaim with quality score 100. Signal aligns with active bearish conditions."
+        "liquidity sweep/reclaim with quality score 100."
     )
     removed_fields = [
         "Source:",

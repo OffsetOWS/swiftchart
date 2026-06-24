@@ -468,6 +468,97 @@ def _regime_adjustment(direction: str, score: float, market_regime: MarketRegime
     return adjusted, penalty, f"Counter-trend {direction.lower()} allowed with {len(confirmations)} strong reversal confirmations."
 
 
+def _btc_regime_label(btc_context: dict | None) -> str:
+    return str((btc_context or {}).get("regime") or "unknown").lower()
+
+
+def _exceptional_reversal(direction: str, score: float, market_regime: MarketRegimeSnapshot, confirmations: list[str]) -> bool:
+    reclaim_key = "structure_reclaimed_bullish" if direction == "Long" else "structure_reclaimed_bearish"
+    return score >= 92 and len(confirmations) >= 4 and bool(market_regime.components.get(reclaim_key))
+
+
+def _context_gate(
+    *,
+    symbol: str,
+    direction: str,
+    score: float,
+    market_regime: MarketRegimeSnapshot,
+    confirmations: list[str],
+    btc_context: dict | None,
+) -> tuple[float, float, str | None, str | None]:
+    bias = market_regime.bias.lower()
+    btc_regime = _btc_regime_label(btc_context)
+    adjusted = score
+    adjustment = 0.0
+    note: str | None = None
+    rejected_reason: str | None = None
+    exceptional = _exceptional_reversal(direction, score, market_regime, confirmations)
+
+    if direction == "Long" and bias == "short bias" and not exceptional:
+        adjustment -= 45
+        adjusted += adjustment
+        rejected_reason = (
+            f"Long signal rejected because local bias is Short bias; score {score:.0f}, "
+            f"reversal confirmations {len(confirmations)}, exceptional reversal required."
+        )
+    elif direction == "Short" and bias == "long bias" and not exceptional:
+        adjustment -= 45
+        adjusted += adjustment
+        rejected_reason = (
+            f"Short signal rejected because local bias is Long bias; score {score:.0f}, "
+            f"reversal confirmations {len(confirmations)}, exceptional reversal required."
+        )
+    elif direction == "Long" and bias == "bearish transition" and not exceptional:
+        adjustment -= 50
+        adjusted += adjustment
+        rejected_reason = (
+            f"Long signal rejected because local bias is Bearish transition; score {score:.0f}, "
+            f"reversal confirmations {len(confirmations)}, exceptional reversal required."
+        )
+    elif direction == "Short" and bias == "bullish transition" and not exceptional:
+        adjustment -= 50
+        adjusted += adjustment
+        rejected_reason = (
+            f"Short signal rejected because local bias is Bullish transition; score {score:.0f}, "
+            f"reversal confirmations {len(confirmations)}, exceptional reversal required."
+        )
+
+    is_btc = symbol.upper().startswith("BTC")
+    if rejected_reason is None and not is_btc:
+        if direction == "Long" and btc_regime == "bearish":
+            penalty = -28
+            adjusted += penalty
+            adjustment += penalty
+            if not exceptional or adjusted < MIN_SETUP_SCORE:
+                rejected_reason = (
+                    f"Long signal rejected because BTC 4H/1D regime is bearish; adjusted score {adjusted:.0f}."
+                )
+            else:
+                note = "Long heavily penalized by bearish BTC 4H/1D regime but allowed by exceptional reversal evidence."
+        elif direction == "Short" and btc_regime == "bullish":
+            penalty = -28
+            adjusted += penalty
+            adjustment += penalty
+            if not exceptional or adjusted < MIN_SETUP_SCORE:
+                rejected_reason = (
+                    f"Short signal rejected because BTC 4H/1D regime is bullish; adjusted score {adjusted:.0f}."
+                )
+            else:
+                note = "Short heavily penalized by bullish BTC 4H/1D regime but allowed by exceptional reversal evidence."
+
+    if rejected_reason:
+        logger.info(
+            "Signal rejected pair=%s direction=%s bias=%s btc_regime=%s confidence=%.1f rejection_reason=%s",
+            symbol,
+            direction,
+            market_regime.bias,
+            btc_regime,
+            score,
+            rejected_reason,
+        )
+    return max(0.0, adjusted), adjustment, rejected_reason, note
+
+
 def _clone_regime_for_setup(
     market_regime: MarketRegimeSnapshot,
     *,
@@ -596,6 +687,7 @@ def _build_idea(
     resistance: Zone | None,
     bullish_sweep: LiquiditySweep | None,
     bearish_sweep: LiquiditySweep | None,
+    btc_context: dict | None = None,
 ) -> tuple[TradeIdea | None, SignalReview | None]:
     entry = (entry_low + entry_high) / 2
     rr = _rr(entry, stop, tp2, direction)
@@ -674,6 +766,22 @@ def _build_idea(
         adjusted_score = quality_score
     if rejected_reason is None and entry_status == "REJECTED_EXHAUSTED":
         rejected_reason = "Signal rejected because exhaustion filters show the move is already too mature. " + " ".join(quality_reasons)
+    if rejected_reason is None:
+        context_score, context_adjustment, context_rejection, context_note = _context_gate(
+            symbol=symbol,
+            direction=direction,
+            score=adjusted_score,
+            market_regime=market_regime_data,
+            confirmations=confirmations,
+            btc_context=btc_context,
+        )
+        if context_adjustment:
+            adjusted_score = context_score
+            confidence_adjustment += context_adjustment
+        if context_rejection:
+            rejected_reason = context_rejection
+        elif context_note:
+            regime_note = f"{regime_note} {context_note}" if regime_note else context_note
     if rejected_reason is None and adjusted_score < MIN_SETUP_SCORE:
         if quality_reasons:
             rejected_reason = "Signal rejected because setup score is below 65 after exhaustion quality control. " + " ".join(quality_reasons)
@@ -801,6 +909,7 @@ def build_trade_ideas(
     regime: str,
     htf_bias: str,
     market_regime_data: MarketRegimeSnapshot,
+    btc_context: dict | None = None,
 ) -> tuple[list[TradeIdea], str | None, list[SignalReview]]:
     if support is None or resistance is None:
         return [], "NO TRADE: not enough clean support/resistance structure.", []
@@ -1006,6 +1115,7 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    btc_context=btc_context,
                 )
             )
         elif position is not None and position >= 0.65 and short_evidence_ready:
@@ -1035,6 +1145,7 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    btc_context=btc_context,
                 )
             )
 
@@ -1068,6 +1179,7 @@ def build_trade_ideas(
                 resistance=resistance,
                 bullish_sweep=bullish_sweep,
                 bearish_sweep=bearish_sweep,
+                btc_context=btc_context,
             )
         )
 
@@ -1107,6 +1219,7 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    btc_context=btc_context,
                 )
             )
         else:
@@ -1145,6 +1258,7 @@ def build_trade_ideas(
                 resistance=resistance,
                 bullish_sweep=bullish_sweep,
                 bearish_sweep=bearish_sweep,
+                btc_context=btc_context,
             )
         )
 
@@ -1175,6 +1289,7 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    btc_context=btc_context,
                 )
             )
         else:
@@ -1199,6 +1314,7 @@ def analyze_dataframe(
     htf_dfs: list[pd.DataFrame] | None = None,
     global_regime_score: float | None = None,
     breadth_above_ma_pct: float | None = None,
+    btc_context: dict | None = None,
 ) -> AnalysisResponse:
     supports, resistances = find_support_resistance(df)
     support, resistance = nearest_range(float(df["close"].iloc[-1]), supports, resistances)
@@ -1218,6 +1334,7 @@ def analyze_dataframe(
         regime,
         htf_bias,
         market_regime_data,
+        btc_context,
     )
     warning = no_trade_reason if not ideas else None
 

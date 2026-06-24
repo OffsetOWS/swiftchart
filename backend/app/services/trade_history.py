@@ -44,6 +44,93 @@ def _parse_dt(value: str | datetime) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _timeframe_minutes(timeframe: str) -> int:
+    return TIMEFRAME_MINUTES.get(str(timeframe).lower(), 240)
+
+
+def _market_structure_changed_after_sl(row: dict, idea: TradeIdea) -> bool:
+    previous_score = row.get("regime_score")
+    current_score = idea.regime_score
+    if previous_score is not None and current_score is not None and abs(float(current_score) - float(previous_score)) >= 30:
+        return True
+    if row.get("regime_label") and idea.regime_label and str(row["regime_label"]) != str(idea.regime_label):
+        return True
+    if idea.trend_alignment == "with-trend" and row.get("trend_alignment") != "with-trend":
+        return True
+    if (idea.setup_score or idea.confidence_score) >= 88 and len(idea.reversal_confirmations) >= 3:
+        return True
+    return False
+
+
+def same_direction_sl_cooldown_review(idea: TradeIdea, *, candles: int = 6, now: datetime | None = None) -> SignalReview | None:
+    signal_time = idea.signal_candle_time or now or datetime.now(UTC)
+    signal_time = signal_time if signal_time.tzinfo else signal_time.replace(tzinfo=UTC)
+    cutoff = signal_time - timedelta(minutes=_timeframe_minutes(idea.timeframe) * candles)
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT * FROM trade_ideas
+            WHERE symbol = ?
+              AND timeframe = ?
+              AND exchange = ?
+              AND direction = ?
+              AND (status = 'SL_HIT' OR sl_hit_at IS NOT NULL)
+              AND COALESCE(sl_hit_at, closed_at, outcome_checked_at, created_at) >= ?
+            ORDER BY COALESCE(sl_hit_at, closed_at, outcome_checked_at, created_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (
+                idea.symbol.upper(),
+                idea.timeframe,
+                idea.exchange,
+                idea.direction.upper(),
+                cutoff.isoformat(),
+            ),
+        ).fetchone()
+    if row is None:
+        return None
+    previous = dict(row)
+    if _market_structure_changed_after_sl(previous, idea):
+        logger.info(
+            "SL cooldown bypassed pair=%s direction=%s bias=%s confidence=%.1f reason=market_structure_changed previous_regime=%s current_regime=%s",
+            idea.symbol,
+            idea.direction,
+            idea.regime_bias,
+            idea.confidence_score,
+            previous.get("regime_label"),
+            idea.regime_label,
+        )
+        return None
+    reason = (
+        f"{idea.direction} signal rejected because {idea.symbol.upper()} hit SL on the same direction "
+        f"within the last {candles} {idea.timeframe} candles and market structure has not changed."
+    )
+    logger.info(
+        "Signal rejected pair=%s direction=%s bias=%s btc_regime=%s confidence=%.1f rejection_reason=%s",
+        idea.symbol,
+        idea.direction,
+        idea.regime_bias or "-",
+        "n/a",
+        idea.confidence_score,
+        reason,
+    )
+    return SignalReview(
+        symbol=idea.symbol,
+        timeframe=idea.timeframe,
+        exchange=idea.exchange,
+        direction=idea.direction,
+        accepted=False,
+        reason=reason,
+        base_score=idea.setup_score,
+        adjusted_score=max(0.0, (idea.setup_score or idea.confidence_score) - 60),
+        confidence_adjustment=-60,
+        regime_score=idea.regime_score or 0,
+        regime_label=idea.regime_label or "Unknown",
+        trend_alignment=idea.trend_alignment or "range-trade",
+        reversal_confirmations=idea.reversal_confirmations,
+    )
+
+
 def _signal_expires_at(idea: TradeIdea) -> str:
     candle_time = idea.signal_candle_time
     if candle_time is None:
@@ -90,6 +177,34 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
     with get_connection() as connection:
         for idea in ideas:
             try:
+                cooldown_review = same_direction_sl_cooldown_review(idea)
+                if cooldown_review is not None:
+                    connection.execute(
+                        """
+                        INSERT INTO signal_reviews (
+                            symbol, timeframe, exchange, direction, accepted, reason,
+                            base_score, adjusted_score, confidence_adjustment,
+                            regime_score, regime_label, trend_alignment, reversal_confirmations
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            cooldown_review.symbol.upper(),
+                            cooldown_review.timeframe,
+                            cooldown_review.exchange,
+                            cooldown_review.direction.upper(),
+                            0,
+                            cooldown_review.reason,
+                            cooldown_review.base_score,
+                            cooldown_review.adjusted_score,
+                            cooldown_review.confidence_adjustment,
+                            cooldown_review.regime_score,
+                            cooldown_review.regime_label,
+                            cooldown_review.trend_alignment,
+                            json.dumps(cooldown_review.reversal_confirmations),
+                        ),
+                    )
+                    continue
                 if should_skip_alert(idea, namespace="history"):
                     continue
                 duplicate_id = _recent_duplicate_id(connection, idea)

@@ -30,7 +30,7 @@ def fmt_zone(zone: tuple[float, float] | None) -> str:
     return f"{fmt(zone[0])} — {fmt(zone[1])}"
 
 
-def public_reason_summary(reason: str | None) -> str:
+def public_reason_summary(reason: str | None, max_sentences: int | None = None) -> str:
     if not reason:
         return "-"
 
@@ -42,6 +42,8 @@ def public_reason_summary(reason: str | None) -> str:
         if any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
             continue
         cleaned_parts.append(sentence)
+        if max_sentences is not None and len(cleaned_parts) >= max_sentences:
+            break
 
     return ". ".join(cleaned_parts) + "." if cleaned_parts else "-"
 
@@ -204,7 +206,7 @@ def format_trade_alert(idea: TradeIdea) -> str:
         f"TP1: {fmt(idea.take_profit_1)}\n"
         f"TP2: {fmt(idea.take_profit_2)}\n"
         f"R:R: {fmt(idea.risk_reward_ratio)}\n\n"
-        f"Reason:\n{public_reason_summary(idea.reason)}"
+        f"Reason:\n{public_reason_summary(idea.reason, max_sentences=2)}"
     )
 
 
@@ -241,6 +243,27 @@ def format_stats(data: dict) -> str:
     )
 
 
+def format_paper_trades(records: list[dict], *, open_only: bool = False) -> str:
+    title = "SwiftChart Open Paper Trades" if open_only else "SwiftChart Paper Trades"
+    if not records:
+        empty = "No open paper trades." if open_only else "No paper trades yet. Tap 🧪 Paper Trade on a signal to start one."
+        return f"{title}\n\n{empty}"
+
+    lines = [title]
+    for record in records:
+        lines.append(
+            "\n"
+            f"{record.get('pair', '-')} — {str(record.get('side', '-')).upper()}\n"
+            f"Entry: {fmt(record.get('entry'))} | SL: {fmt(record.get('stop_loss'))}\n"
+            f"TP1: {fmt(record.get('tp1'))} | TP2: {fmt(record.get('tp2'))}\n"
+            f"Status: {record.get('status', '-')} | PnL: {fmt(record.get('pnl_r'))}R\n"
+            f"Opened: {record.get('opened_at') or '-'}\n"
+            f"Closed: {record.get('closed_at') or '-'}"
+        )
+    lines.append("\nSimulated trades only. No real orders are placed.")
+    return "\n".join(lines)
+
+
 def strategy_text() -> str:
     return (
         "SwiftChart Strategy\n\n"
@@ -262,6 +285,9 @@ def help_text() -> str:
         "/subscribe — Get Telegram alerts when valid setups appear\n"
         "/unsubscribe — Stop Telegram alerts\n"
         "/history — Show latest saved trade ideas and outcomes\n"
+        "/analysis [pair or signal ID] — View latest or selected signal analysis\n"
+        "/mytrades — Show your Telegram paper trades\n"
+        "/open — Show your open paper trades\n"
         "/checktrades — Manually update saved outcomes\n"
         "/strategy — Explain the strategy\n"
         "/help — Show commands\n\n"

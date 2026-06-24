@@ -20,6 +20,9 @@ from bot.handlers import (  # noqa: E402
     check_trades,
     help_command,
     history,
+    my_trades,
+    open_trades,
+    signal_analysis,
     start,
     stats_command,
     strategy,
@@ -28,6 +31,7 @@ from bot.handlers import (  # noqa: E402
     unsubscribe,
 )
 from bot.alerts import alert_loop  # noqa: E402
+from bot.paper_trading import paper_trade_worker  # noqa: E402
 from app.utils.database import init_db  # noqa: E402
 from app.utils.secure_logging import install_secure_logging  # noqa: E402
 
@@ -37,17 +41,21 @@ async def post_init(application: Application) -> None:
         [
             BotCommand("start", "Open the main menu"),
             BotCommand("analyze", "Analyze a coin and timeframe"),
+            BotCommand("analysis", "View latest or selected signal analysis"),
             BotCommand("top", "Show current top trade ideas"),
             BotCommand("subscribe", "Get trade alerts"),
             BotCommand("unsubscribe", "Stop trade alerts"),
             BotCommand("alerts", "Show alert status"),
             BotCommand("history", "Show saved trade ideas"),
+            BotCommand("mytrades", "Show your paper trades"),
+            BotCommand("open", "Show open paper trades"),
             BotCommand("checktrades", "Update saved outcomes"),
             BotCommand("strategy", "Explain the strategy"),
             BotCommand("help", "Show commands"),
         ]
     )
     asyncio.create_task(alert_loop(application.bot))
+    asyncio.create_task(paper_trade_worker())
 
 
 def build_application() -> Application:
@@ -61,11 +69,14 @@ def build_application() -> Application:
     application = Application.builder().token(token).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("analyze", analyze))
+    application.add_handler(CommandHandler("analysis", signal_analysis))
     application.add_handler(CommandHandler("top", top))
     application.add_handler(CommandHandler("subscribe", subscribe))
     application.add_handler(CommandHandler("unsubscribe", unsubscribe))
     application.add_handler(CommandHandler("alerts", alerts_status))
     application.add_handler(CommandHandler("history", history))
+    application.add_handler(CommandHandler("mytrades", my_trades))
+    application.add_handler(CommandHandler("open", open_trades))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("checktrades", check_trades))
     application.add_handler(CommandHandler("strategy", strategy))
