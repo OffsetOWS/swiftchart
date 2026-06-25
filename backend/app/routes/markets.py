@@ -7,7 +7,7 @@ from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
 from app.services.liquidity_filter import skip_low_volume_market
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.scanner import btc_market_context, cached_top_ideas
+from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.scanner import trigger_top_ideas_refresh
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
@@ -187,7 +187,6 @@ async def analyze(
                     risk,
                     htf_dfs,
                     global_regime_score=await global_regime_score(selected_exchange, timeframe),
-                    btc_context=await btc_market_context(selected_exchange),
                 )
                 break
             except Exception as exc:

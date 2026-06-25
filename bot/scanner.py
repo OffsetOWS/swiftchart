@@ -8,6 +8,8 @@ from app.exchanges.factory import get_exchange
 from app.models.schemas import RiskSettings, TradeIdea
 from app.services.liquidity_filter import perp_volume_24h
 from app.services.market_data import get_candles_cached, get_markets_cached
+from app.services.scanner import btc_regime_from_scores
+from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.trade_ideas import analyze_dataframe
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,22 @@ async def _get_alert_candles(exchange: str, symbol: str, timeframe: str, limit: 
     return resampled[["timestamp", "open", "high", "low", "close", "volume"]]
 
 
+async def _btc_context(exchange: str) -> dict | None:
+    score_4h: float | None = None
+    score_1d: float | None = None
+    try:
+        score_4h = regime_score_from_dataframe(await get_candles_cached(exchange, "BTCUSDT", "4h", 220))
+    except Exception as exc:
+        logger.info("Telegram BTC 4H context unavailable exchange=%s error=%s", exchange, exc)
+    try:
+        score_1d = regime_score_from_dataframe(await get_candles_cached(exchange, "BTCUSDT", "1d", 220))
+    except Exception as exc:
+        logger.info("Telegram BTC 1D context unavailable exchange=%s error=%s", exchange, exc)
+    if score_4h is None and score_1d is None:
+        return None
+    return btc_regime_from_scores(score_4h, score_1d)
+
+
 async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[list[TradeIdea], str, dict]:
     selected_exchange = _selected_exchange(exchange)
     get_exchange(selected_exchange)
@@ -87,6 +105,7 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
     rejection_reasons: dict[str, int] = {}
     symbols_scanned = 0
     symbols = await _scan_symbols(selected_exchange)
+    btc_context = await _btc_context(selected_exchange)
 
     logger.info(
         "telegram_independent_scan_started exchange=%s timeframe=%s symbols=%s",
@@ -136,4 +155,5 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
         "symbols_scanned": symbols_scanned,
         "valid_ideas_found": len(ranked),
         "rejection_reasons": rejection_reasons,
+        "btc_context": btc_context,
     }

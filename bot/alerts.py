@@ -84,7 +84,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
 
     for timeframe in timeframes_to_scan:
         ideas, selected_exchange, scan_meta = await scan_top_ideas(timeframe, exchange)
-        all_ideas.extend(ideas)
+        all_ideas.extend((idea, scan_meta.get("btc_context")) for idea in ideas)
         scanned_timeframes.append(timeframe)
         symbols_scanned += int(scan_meta.get("symbols_scanned", 0) or 0)
         valid_ideas_found += int(scan_meta.get("valid_ideas_found", len(ideas)) or 0)
@@ -95,7 +95,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     score_eligible_ideas = 0
     skipped_by_score = 0
     skipped_by_entry_status = 0
-    for idea in all_ideas:
+    for idea, btc_context in all_ideas:
         score_ok = idea_score(idea) >= min_score
         limit_order_ok = is_limit_order_alertable(idea)
         if score_ok:
@@ -119,15 +119,15 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             skipped_by_entry_status += 1
             rejection_reasons["entry_status rejected/exhausted"] += 1
             continue
-        eligible_ideas.append(idea)
+        eligible_ideas.append((idea, btc_context))
     sent = 0
     skipped_by_dedup = 0
-    for idea in eligible_ideas:
+    for idea, btc_context in eligible_ideas:
         if should_skip_alert(idea, namespace="telegram"):
             skipped_by_dedup += 1
             rejection_reasons["duplicate alert"] += 1
             continue
-        message = format_trade_alert(idea)
+        message = format_trade_alert(idea, btc_context)
         signal_id = execution_signal_id(idea)
         entry = sum(idea.entry_zone) / 2
         save_signal(

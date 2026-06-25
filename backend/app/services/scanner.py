@@ -14,7 +14,7 @@ from app.services.execution_signals import dispatch_trade_ideas_to_execution
 from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.pending_setups import build_pending_setup
-from app.services.trade_history import same_direction_sl_cooldown_review, save_signal_reviews, save_trade_ideas
+from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.support_resistance import average_true_range
 from app.strategy.trade_ideas import MIN_SETUP_SCORE, analyze_dataframe
@@ -279,7 +279,6 @@ async def _analyze_candidate(
     risk: RiskSettings,
     semaphore: asyncio.Semaphore,
     stats: ScanFetchStats,
-    btc_context: dict | None = None,
 ) -> list[TradeIdea]:
     async with semaphore:
         try:
@@ -292,18 +291,9 @@ async def _analyze_candidate(
                     htf_dfs.append(await _scan_candles(candidate.exchange, candidate.fetch_symbol, htf, 220, stats))
                 except Exception:
                     continue
-            analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs, btc_context=btc_context)
-            cooldown_reviews = []
-            valid_ideas = []
-            for idea in analysis.trade_ideas:
-                review = same_direction_sl_cooldown_review(idea)
-                if review is not None:
-                    cooldown_reviews.append(review)
-                    continue
-                if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE:
-                    valid_ideas.append(idea)
-            save_signal_reviews([*analysis.rejected_signals, *cooldown_reviews])
-            return valid_ideas
+            analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
+            save_signal_reviews(analysis.rejected_signals)
+            return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
         except Exception as exc:
             logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
             return []
@@ -350,7 +340,6 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         breadth_above_ma_pct = round(sum(1 for value in breadth_values if value) / len(breadth_values) * 100, 1) if breadth_values else None
         global_score = round(sum(global_scores) / len(global_scores), 1) if global_scores else None
         risk = _risk(timeframe)
-        btc_context = await btc_market_context(selected_exchange, fetch_stats)
 
         async def analyze_with_context(candidate: Candidate) -> tuple[list[TradeIdea], PendingSetup | None]:
             async with semaphore:
@@ -373,18 +362,9 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                         htf_dfs,
                         global_regime_score=global_score,
                         breadth_above_ma_pct=breadth_above_ma_pct,
-                        btc_context=btc_context,
                     )
-                    cooldown_reviews = []
-                    valid_ideas = []
-                    for idea in analysis.trade_ideas:
-                        review = same_direction_sl_cooldown_review(idea)
-                        if review is not None:
-                            cooldown_reviews.append(review)
-                            continue
-                        if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE:
-                            valid_ideas.append(idea)
-                    save_signal_reviews([*analysis.rejected_signals, *cooldown_reviews])
+                    save_signal_reviews(analysis.rejected_signals)
+                    valid_ideas = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
                     pending_setup = None if valid_ideas else build_pending_setup(analysis, df)
                     return valid_ideas, pending_setup
                 except Exception as exc:

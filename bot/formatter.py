@@ -81,6 +81,33 @@ def alert_strength_label(timeframe: str) -> str:
     return "Valid Setup"
 
 
+def direction_conflicts_bias(direction: str | None, bias: str | None) -> bool:
+    normalized_direction = str(direction or "").lower()
+    normalized_bias = str(bias or "").lower()
+    if normalized_direction == "long":
+        return "short bias" in normalized_bias or "bearish transition" in normalized_bias
+    if normalized_direction == "short":
+        return "long bias" in normalized_bias or "bullish transition" in normalized_bias
+    return False
+
+
+def btc_context_line(btc_context: dict | None) -> str:
+    if not btc_context:
+        return "BTC Context: -"
+    regime = btc_context.get("regime") or "-"
+    score_4h = btc_context.get("score_4h")
+    score_1d = btc_context.get("score_1d")
+    score = btc_context.get("score")
+    parts = [str(regime).title()]
+    if score is not None:
+        parts.append(f"score {fmt(score)}")
+    if score_4h is not None:
+        parts.append(f"4H {fmt(score_4h)}")
+    if score_1d is not None:
+        parts.append(f"1D {fmt(score_1d)}")
+    return f"BTC Context: {' | '.join(parts)}"
+
+
 def regime_line(idea: TradeIdea | None, analysis: AnalysisResponse | None = None) -> str:
     regime = idea.regime_label if idea else analysis.market_regime_data.label if analysis and analysis.market_regime_data else None
     confidence = idea.regime_confidence_score if idea else analysis.market_regime_data.confidence_score if analysis and analysis.market_regime_data else None
@@ -193,7 +220,9 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
     return "\n".join(lines)
 
 
-def format_trade_alert(idea: TradeIdea) -> str:
+def format_trade_alert(idea: TradeIdea, btc_context: dict | None = None) -> str:
+    bias = idea.regime_bias or idea.regime_label or idea.higher_timeframe_bias or "-"
+    warning = "\n⚠️ Direction conflicts with market bias." if direction_conflicts_bias(idea.direction, bias) else ""
     return (
         f"SwiftChart Trade Alert: {idea.symbol} — {idea.timeframe.upper()}\n\n"
         f"Signal: Potential {idea.direction}\n"
@@ -205,7 +234,11 @@ def format_trade_alert(idea: TradeIdea) -> str:
         f"Stop Loss: {fmt(idea.stop_loss)}\n"
         f"TP1: {fmt(idea.take_profit_1)}\n"
         f"TP2: {fmt(idea.take_profit_2)}\n"
-        f"R:R: {fmt(idea.risk_reward_ratio)}\n\n"
+        f"R:R: {fmt(idea.risk_reward_ratio)}\n"
+        f"Confidence: {fmt(idea.confidence_score)}%\n"
+        f"Bias: {bias}\n"
+        f"{btc_context_line(btc_context)}"
+        f"{warning}\n\n"
         f"Reason:\n{public_reason_summary(idea.reason, max_sentences=2)}"
     )
 

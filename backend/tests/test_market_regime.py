@@ -76,7 +76,7 @@ def test_transition_regime_requires_confirmation_before_trading():
     assert note and "only long setups" in note
 
 
-def test_context_gate_rejects_long_against_short_bias_without_exceptional_reversal():
+def test_context_gate_is_warning_only_for_long_against_short_bias():
     snapshot = MarketRegimeSnapshot(
         score=-64,
         label="Strong Bearish",
@@ -103,13 +103,13 @@ def test_context_gate_rejects_long_against_short_bias_without_exceptional_revers
         btc_context={"regime": "ranging"},
     )
 
-    assert adjusted == 41
-    assert penalty == -45
-    assert rejected and "Short bias" in rejected
+    assert adjusted == 86
+    assert penalty == 0
+    assert rejected is None
     assert note is None
 
 
-def test_context_gate_penalizes_alt_longs_when_btc_is_bearish():
+def test_context_gate_does_not_penalize_alt_longs_when_btc_is_bearish():
     snapshot = MarketRegimeSnapshot(
         score=42,
         label="Weak Bullish",
@@ -135,9 +135,9 @@ def test_context_gate_penalizes_alt_longs_when_btc_is_bearish():
         btc_context={"regime": "bearish", "score_4h": -55, "score_1d": -35},
     )
 
-    assert adjusted == 54
-    assert penalty == -28
-    assert rejected and "BTC 4H/1D regime is bearish" in rejected
+    assert adjusted == 82
+    assert penalty == 0
+    assert rejected is None
 
 
 def test_btc_ranging_context_allows_normal_scoring():

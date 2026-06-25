@@ -4,7 +4,7 @@ import pandas as pd
 
 from app.config import get_settings
 from app.models.schemas import TradeIdea
-from app.services.trade_history import evaluate_trade, same_direction_sl_cooldown_review
+from app.services.trade_history import evaluate_trade, save_trade_ideas
 from app.utils import database
 
 
@@ -85,8 +85,9 @@ def test_lifecycle_can_move_stop_to_break_even_after_tp1():
     assert outcome["sl_hit_at"] is not None
 
 
-def test_same_direction_sl_blocks_next_six_candles(monkeypatch, tmp_path):
+def test_recent_same_direction_sl_does_not_block_saving(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'swiftchart.db'}")
+    monkeypatch.setenv("ALERT_DEDUPE_STATE_PATH", str(tmp_path / "alert_dedupe.json"))
     get_settings.cache_clear()
     database._INITIALIZED = False
     try:
@@ -138,10 +139,10 @@ def test_same_direction_sl_blocks_next_six_candles(monkeypatch, tmp_path):
             higher_timeframe_bias="HTF_BULLISH",
             setup_score=84,
             setup_grade="Valid Setup",
-            entry_zone=(100, 101),
+            entry_zone=(102, 103),
             stop_loss=96,
-            take_profit_1=110,
-            take_profit_2=118,
+            take_profit_1=112,
+            take_profit_2=120,
             risk_reward_ratio=2.5,
             reason="New setup",
             confidence_score=84,
@@ -152,11 +153,9 @@ def test_same_direction_sl_blocks_next_six_candles(monkeypatch, tmp_path):
             signal_candle_time=datetime(2026, 5, 1, 20, 0, tzinfo=UTC),
         )
 
-        review = same_direction_sl_cooldown_review(idea)
+        ids = save_trade_ideas([idea])
 
-        assert review is not None
-        assert review.accepted is False
-        assert "last 6 4h candles" in review.reason
+        assert len(ids) == 1
     finally:
         database._INITIALIZED = False
         get_settings.cache_clear()

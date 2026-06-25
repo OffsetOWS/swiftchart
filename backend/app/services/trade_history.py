@@ -177,34 +177,6 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
     with get_connection() as connection:
         for idea in ideas:
             try:
-                cooldown_review = same_direction_sl_cooldown_review(idea)
-                if cooldown_review is not None:
-                    connection.execute(
-                        """
-                        INSERT INTO signal_reviews (
-                            symbol, timeframe, exchange, direction, accepted, reason,
-                            base_score, adjusted_score, confidence_adjustment,
-                            regime_score, regime_label, trend_alignment, reversal_confirmations
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            cooldown_review.symbol.upper(),
-                            cooldown_review.timeframe,
-                            cooldown_review.exchange,
-                            cooldown_review.direction.upper(),
-                            0,
-                            cooldown_review.reason,
-                            cooldown_review.base_score,
-                            cooldown_review.adjusted_score,
-                            cooldown_review.confidence_adjustment,
-                            cooldown_review.regime_score,
-                            cooldown_review.regime_label,
-                            cooldown_review.trend_alignment,
-                            json.dumps(cooldown_review.reversal_confirmations),
-                        ),
-                    )
-                    continue
                 if should_skip_alert(idea, namespace="history"):
                     continue
                 duplicate_id = _recent_duplicate_id(connection, idea)
