@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from app.models.schemas import AnalysisResponse, Direction, PendingSetup, PendingSetupStatus, Zone
+from app.models.schemas import AnalysisResponse, Direction, PendingSetup, PendingSetupStatus, TradeIdea, Zone
 from app.strategy.market_structure import momentum_confirmation, range_position, volume_confirmation
 from app.strategy.support_resistance import average_true_range, nearest_range
 
@@ -254,4 +254,29 @@ def build_pending_setup(analysis: AnalysisResponse, df: pd.DataFrame) -> Pending
         timeframe=analysis.timeframe,
         exchange=analysis.exchange,
         created_at=datetime.now(UTC),
+    )
+
+
+def pending_setup_from_trade_idea(idea: TradeIdea) -> PendingSetup:
+    """Expose a persisted WAIT_FOR_RETEST idea as a non-actionable watch item."""
+    entry_mid = sum(idea.entry_zone) / 2
+    return PendingSetup(
+        symbol=idea.symbol,
+        direction=idea.direction,
+        regime=idea.regime_label or str(idea.market_regime or "Pending retest"),
+        status="WAITING_FOR_RETEST",
+        reason=idea.reason,
+        price=round(float(idea.signal_candle_close or entry_mid), 8),
+        entry_zone=idea.entry_zone,
+        invalidation_level=idea.stop_loss,
+        trigger_hints=["setup detected; retest not yet confirmed"],
+        confirmation_needed=["Later candle touches the original entry zone", "Directional confirmation close", "Setup quality returns READY"],
+        estimated_rr=idea.risk_reward_ratio,
+        score_preview=float(idea.setup_score or idea.confidence_score),
+        timeframe=idea.timeframe,
+        exchange=idea.exchange,
+        created_at=datetime.now(UTC),
+        setup_family=idea.setup_family,
+        opportunity_key=idea.opportunity_key,
+        signal_candle_time=idea.signal_candle_time,
     )

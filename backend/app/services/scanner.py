@@ -13,7 +13,7 @@ from app.models.schemas import PendingSetup, RiskSettings, TradeIdea
 from app.services.execution_signals import dispatch_trade_ideas_to_execution
 from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.pending_setups import build_pending_setup
+from app.services.pending_setups import build_pending_setup, pending_setup_from_trade_idea
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.support_resistance import average_true_range
@@ -388,21 +388,28 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             reverse=True,
         )[:5]
         save_trade_ideas(ranked)
-        await dispatch_trade_ideas_to_execution(ranked)
+        executable_ranked = [idea for idea in ranked if idea.entry_status == "READY"]
+        retest_pending = [pending_setup_from_trade_idea(idea) for idea in ranked if idea.entry_status == "WAIT_FOR_RETEST"]
+        pending_setups = sorted(
+            [*pending_setups, *retest_pending],
+            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
+            reverse=True,
+        )[:20]
+        await dispatch_trade_ideas_to_execution(executable_ranked)
         duration = round(monotonic() - started, 2)
         result = {
             "timeframe": timeframe,
             "exchange": selected_exchange,
-            "ideas": ranked,
+            "ideas": executable_ranked,
             "pending_setups": pending_setups,
             "errors": [],
-            "message": None if len(ranked) >= 5 else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
+            "message": None if len(executable_ranked) >= 5 else f"Only {len(executable_ranked)} executable setups found. Retest setups remain pending.",
             "scan_stats": {
                 "markets": len(markets),
                 "scan_window": len(scan_markets),
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
-                "valid_setups": len(ranked),
+                "valid_setups": len(executable_ranked),
                 "pending_setups": len(pending_setups),
                 "successful_candle_fetches": fetch_stats.successful_candle_fetches,
                 "failed_candle_fetches": fetch_stats.failed_candle_fetches,
