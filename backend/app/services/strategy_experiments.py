@@ -58,7 +58,11 @@ def strict_trend_short_shadow_report() -> dict:
                   AND production_rule_accepted = 1
                   AND strict_trend_short_eligible IS NOT NULL
                   AND COALESCE(entry_status, 'READY') = 'READY'
-                  AND (opportunity_key IS NULL OR executable_at IS NOT NULL)
+                  AND (
+                        opportunity_key IS NULL
+                        OR executable_at IS NOT NULL
+                        OR outcome_tracking_mode = 'SHADOW'
+                      )
                 ORDER BY created_at ASC, id ASC
                 """
             ).fetchall()
@@ -70,7 +74,7 @@ def strict_trend_short_shadow_report() -> dict:
     return {
         "experiment": "strict_trend_short_shadow",
         "generated_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
-        "scope": "instrumented executable TRENDING_DOWN / SHORT opportunities only",
+        "scope": "instrumented TRENDING_DOWN / SHORT reference opportunities, including V2 theoretical shadow outcomes",
         "current_production_rule": _performance(current_rows, 100.0 if current_rows else 0.0),
         "experimental_strict_rule": _performance(strict_rows, retained),
     }

@@ -131,6 +131,7 @@ def opportunity_dedupe_key(idea: TradeIdea) -> str | None:
         timeframe=idea.timeframe,
         direction=idea.direction,
         setup_family=family,
+        strategy_version=idea.strategy_version,
         signal_candle_time=idea.signal_candle_time,
     )
 

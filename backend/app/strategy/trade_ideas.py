@@ -12,6 +12,7 @@ from app.strategy.market_structure import (
 )
 from app.strategy.support_resistance import average_true_range, find_support_resistance, nearest_range
 from app.strategy.strict_trend_short import StrictTrendShortResult, evaluate_strict_trend_short
+from app.strategy.decision_engine import evaluate_strategy_decision
 from app.utils.opportunities import canonical_opportunity_key, setup_family_from_regime
 from app.strategy.market_regime import detect_market_regime
 
@@ -902,6 +903,7 @@ def build_trade_ideas(
                 idea.strict_confirmation_type = strict_trend_short_shadow.confirmation_type
                 idea.strict_trigger_candle_time = strict_trend_short_shadow.trigger_candle_time
                 idea.strict_trigger_candle_completed = strict_trend_short_shadow.trigger_candle_completed
+            evaluate_strategy_decision(idea)
             ideas.append(idea)
 
     def reject_short(reason: str, missing_condition: str) -> None:

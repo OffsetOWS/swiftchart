@@ -125,6 +125,16 @@ def init_db() -> None:
             "ALTER TABLE trade_ideas ADD COLUMN lifecycle_events TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN entry_status TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN setup_family TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strategy_version TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN edge_status TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strategy_decision TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN v2_decision_reason TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN regime_confidence REAL",
+            "ALTER TABLE trade_ideas ADD COLUMN entry_quality_status TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN entry_quality_score REAL",
+            "ALTER TABLE trade_ideas ADD COLUMN entry_quality_reason TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN outcome_tracking_mode TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN v2_evaluated_at TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN opportunity_key TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN retest_confirmed_at TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN executable_at TEXT",
@@ -228,6 +238,7 @@ def init_db() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_dedupe ON trade_ideas(symbol, timeframe, exchange, direction, entry_zone_low, entry_zone_high, stop_loss, take_profit_1, take_profit_2, created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_fingerprint ON trade_ideas(signal_fingerprint)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_lifecycle ON trade_ideas(lifecycle_status)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_v2_strategy ON trade_ideas(setup_family, strategy_version, edge_status, strategy_decision)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_created_at ON signal_reviews(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_regime ON signal_reviews(regime_label)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_created_at ON genlayer_ai_scans(created_at)")

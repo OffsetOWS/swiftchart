@@ -65,6 +65,10 @@ PendingSetupStatus = Literal[
 GenLayerDecision = Literal["APPROVE", "REJECT", "WAIT", "REDUCE_SIZE"]
 GenLayerRiskLevel = Literal["Low", "Medium", "High"]
 GenLayerPaperExecutionStatus = Literal["NOT_EXECUTED", "PAPER_EXECUTED"]
+StrategyEdgeStatus = Literal["VALIDATED", "EXPERIMENTAL", "UNVALIDATED", "DISABLED"]
+StrategyDecision = Literal["TRADE", "SHADOW", "NO_TRADE", "WAIT_FOR_RETEST"]
+EntryQualityStatus = Literal["PASS", "WAIT_FOR_RETEST", "REJECTED", "UNKNOWN"]
+OutcomeTrackingMode = Literal["PRODUCTION", "SHADOW", "NONE"]
 
 
 class Candle(BaseModel):
@@ -149,6 +153,16 @@ class TradeIdea(BaseModel):
     downgraded_reasons: list[str] = Field(default_factory=list)
     signal_candle_time: datetime | None = None
     setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    v2_decision_reason: str | None = None
+    regime_confidence: float | None = None
+    entry_quality_status: EntryQualityStatus | None = None
+    entry_quality_score: float | None = None
+    entry_quality_reason: str | None = None
+    outcome_tracking_mode: OutcomeTrackingMode | None = None
+    v2_evaluated_at: datetime | None = None
     opportunity_key: str | None = None
     retest_confirmed_at: datetime | None = None
     executable_at: datetime | None = None
@@ -183,6 +197,9 @@ class PendingSetup(BaseModel):
     exchange: str
     created_at: datetime
     setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
     opportunity_key: str | None = None
     signal_candle_time: datetime | None = None
 
@@ -362,6 +379,16 @@ class TradeHistoryRecord(BaseModel):
     signal_candle_time: datetime | None = None
     entry_status: EntryStatus | None = None
     setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    v2_decision_reason: str | None = None
+    regime_confidence: float | None = None
+    entry_quality_status: EntryQualityStatus | None = None
+    entry_quality_score: float | None = None
+    entry_quality_reason: str | None = None
+    outcome_tracking_mode: OutcomeTrackingMode | None = None
+    v2_evaluated_at: datetime | None = None
     opportunity_key: str | None = None
     retest_confirmed_at: datetime | None = None
     executable_at: datetime | None = None

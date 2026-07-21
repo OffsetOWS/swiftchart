@@ -46,18 +46,20 @@ def canonical_opportunity_key(
     timeframe: str,
     direction: str,
     setup_family: SetupFamily | None,
+    strategy_version: str | None = None,
     signal_candle_time: datetime | str | None,
 ) -> str | None:
     candle = canonical_candle_time(signal_candle_time)
     if setup_family is None or candle is None:
         return None
-    return "|".join(
-        [
-            exchange.lower(),
-            symbol.upper(),
-            timeframe.lower(),
-            direction.upper(),
-            setup_family,
-            candle,
-        ]
-    )
+    parts = [
+        exchange.lower(),
+        symbol.upper(),
+        timeframe.lower(),
+        direction.upper(),
+        setup_family,
+    ]
+    if strategy_version:
+        parts.append(strategy_version.lower())
+    parts.append(candle)
+    return "|".join(parts)

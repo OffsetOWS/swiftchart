@@ -12,7 +12,8 @@ from app.utils import database
 from app.utils.opportunities import canonical_opportunity_key
 
 
-SIGNAL_TIME = datetime(2026, 7, 20, 8, 0, tzinfo=UTC)
+# Keep retest-promotion fixtures inside the configured opportunity expiry window.
+SIGNAL_TIME = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=4)
 
 
 def idea(
@@ -263,3 +264,8 @@ def test_existing_historical_row_remains_readable_after_migration(monkeypatch, t
     assert validated.opportunity_key is None
     assert validated.strict_trend_short_eligible is None
     assert validated.strict_trigger_type is None
+    assert validated.strategy_version is None
+    assert validated.edge_status is None
+    assert validated.strategy_decision is None
+    assert validated.regime_confidence is None
+    assert validated.entry_quality_status is None

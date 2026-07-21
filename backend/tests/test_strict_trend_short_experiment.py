@@ -242,6 +242,9 @@ def test_existing_production_path_still_accepts_position_plus_htf_momentum(monke
     assert ideas[0].strict_trend_short_eligible is False
     assert ideas[0].strict_trigger_type is None
     assert ideas[0].strict_confirmation_type == "htf_bearish_alignment"
+    assert ideas[0].strategy_version == "v1"
+    assert ideas[0].edge_status == "EXPERIMENTAL"
+    assert ideas[0].strategy_decision == "SHADOW"
 
 
 def test_shadow_metadata_does_not_change_auto_execution(monkeypatch, tmp_path):

@@ -167,7 +167,7 @@ def format_analysis(analysis: AnalysisResponse) -> str:
             "R:R: -\n"
             "Confidence: -"
         )
-        reason = analysis.warning or "Price is mid-range or the setup is unclear."
+        reason = analysis.no_trade_reason or analysis.warning or "Price is mid-range or the setup is unclear."
         invalid = "Wait for a clean range edge, sweep reclaim, or confirmed breakout."
     else:
         trade_block = (

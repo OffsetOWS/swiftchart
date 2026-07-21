@@ -54,7 +54,11 @@ def idea_score(idea: TradeIdea) -> float:
 
 
 def is_limit_order_alertable(idea: TradeIdea) -> bool:
-    return idea.entry_status == "READY"
+    if idea.entry_status != "READY":
+        return False
+    # Legacy/manual ideas without V2 metadata retain their prior behavior.
+    # Every strategy-engine idea is V2-evaluated before this boundary.
+    return idea.strategy_version is None or idea.strategy_decision == "TRADE"
 
 
 async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
@@ -95,12 +99,14 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     score_eligible_ideas = 0
     skipped_by_score = 0
     skipped_by_entry_status = 0
+    skipped_by_v2_decision = 0
     for idea, btc_context in all_ideas:
         score_ok = idea_score(idea) >= min_score
+        entry_ready = idea.entry_status == "READY"
         limit_order_ok = is_limit_order_alertable(idea)
         if score_ok:
             score_eligible_ideas += 1
-        if limit_order_ok:
+        if entry_ready:
             limit_order_ideas += 1
         if not score_ok:
             skipped_by_score += 1
@@ -115,9 +121,13 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
                 idea.entry_status,
             )
             continue
-        if not limit_order_ok:
+        if not entry_ready:
             skipped_by_entry_status += 1
             rejection_reasons["entry_status rejected/exhausted"] += 1
+            continue
+        if not limit_order_ok:
+            skipped_by_v2_decision += 1
+            rejection_reasons[f"V2 decision {idea.strategy_decision or 'missing'}"] += 1
             continue
         eligible_ideas.append((idea, btc_context))
     sent = 0
@@ -158,7 +168,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         (
             "telegram_alert_scan_complete exchange=%s timeframes=%s symbols_scanned=%s valid_ideas_found=%s "
             "limit_order_ideas=%s score_eligible_ideas=%s eligible_alerts=%s alerts_sent=%s "
-            "skipped_by_dedup=%s skipped_low_score=%s skipped_by_entry_status=%s skipped_timeframe=%s rejection_reasons=%s"
+            "skipped_by_dedup=%s skipped_low_score=%s skipped_by_entry_status=%s skipped_by_v2_decision=%s skipped_timeframe=%s rejection_reasons=%s"
         ),
         selected_exchange,
         ",".join(scanned_timeframes),
@@ -171,6 +181,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         skipped_by_dedup,
         skipped_by_score,
         skipped_by_entry_status,
+        skipped_by_v2_decision,
         skipped_timeframes,
         dict(rejection_reasons),
     )
@@ -193,6 +204,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         "skipped_low_score": skipped_by_score,
         "skipped_timeframe": skipped_timeframes,
         "skipped_by_entry_status": skipped_by_entry_status,
+        "skipped_by_v2_decision": skipped_by_v2_decision,
         "rejection_reasons": dict(rejection_reasons),
     }
 

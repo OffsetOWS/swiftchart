@@ -181,6 +181,7 @@ def _prepare_opportunity_identity(idea: TradeIdea) -> tuple[str | None, str | No
         timeframe=idea.timeframe,
         direction=idea.direction,
         setup_family=family,
+        strategy_version=idea.strategy_version,
         signal_candle_time=idea.signal_candle_time,
     )
     idea.setup_family = family
@@ -227,13 +228,15 @@ def _find_pending_retest(connection, idea: TradeIdea, family: str) -> dict | Non
         SELECT * FROM trade_ideas
         WHERE exchange = ? AND symbol = ? AND timeframe = ? AND direction = ?
           AND setup_family = ? AND entry_status = 'WAIT_FOR_RETEST'
+          AND COALESCE(strategy_version, '') = COALESCE(?, '')
+          AND (strategy_version IS NULL OR strategy_decision = 'WAIT_FOR_RETEST')
           AND result = 'OPEN' AND entry_triggered_at IS NULL AND closed_at IS NULL
           AND status IN ('PENDING', 'OPEN')
           AND (expires_at IS NULL OR expires_at >= ?)
         ORDER BY created_at DESC, id DESC
         LIMIT 1
         """,
-        (idea.exchange, idea.symbol.upper(), idea.timeframe, idea.direction.upper(), family, _now_iso()),
+        (idea.exchange, idea.symbol.upper(), idea.timeframe, idea.direction.upper(), family, idea.strategy_version, _now_iso()),
     ).fetchone()
     return dict(row) if row else None
 
@@ -247,12 +250,13 @@ def _find_promoted_confirmation(connection, idea: TradeIdea, family: str) -> dic
         SELECT * FROM trade_ideas
         WHERE exchange = ? AND symbol = ? AND timeframe = ? AND direction = ?
           AND setup_family = ? AND entry_status = 'READY' AND retest_confirmed_at = ?
+          AND COALESCE(strategy_version, '') = COALESCE(?, '')
           AND result = 'OPEN' AND entry_triggered_at IS NULL AND closed_at IS NULL
           AND status IN ('PENDING', 'OPEN')
         ORDER BY created_at DESC, id DESC
         LIMIT 1
         """,
-        (idea.exchange, idea.symbol.upper(), idea.timeframe, idea.direction.upper(), family, confirmation_candle),
+        (idea.exchange, idea.symbol.upper(), idea.timeframe, idea.direction.upper(), family, confirmation_candle, idea.strategy_version),
     ).fetchone()
     return dict(row) if row else None
 
@@ -265,8 +269,16 @@ def _update_opportunity(
     entry_status: str,
     retest_confirmed_at: str | None = None,
 ) -> int:
-    executable_at = _now_iso() if entry_status == "READY" else None
-    lifecycle_status = "active" if entry_status == "READY" else "pending_retest"
+    actionable = entry_status == "READY" and (idea.strategy_version is None or idea.strategy_decision == "TRADE")
+    executable_at = _now_iso() if actionable else None
+    if idea.strategy_decision == "SHADOW":
+        lifecycle_status = "shadow"
+    elif idea.strategy_decision == "NO_TRADE":
+        lifecycle_status = "no_trade"
+    elif entry_status == "WAIT_FOR_RETEST":
+        lifecycle_status = "pending_retest"
+    else:
+        lifecycle_status = "active"
     connection.execute(
         """
         UPDATE trade_ideas
@@ -276,8 +288,11 @@ def _update_opportunity(
             regime_score = ?, regime_label = ?, trend_alignment = ?, regime_confidence_adjustment = ?,
             reversal_confirmations = ?, regime_explanation = ?, signal_fingerprint = ?,
             entry_status = ?, setup_family = ?, lifecycle_status = ?, expires_at = ?,
+            strategy_version = ?, edge_status = ?, strategy_decision = ?, v2_decision_reason = ?,
+            regime_confidence = ?, entry_quality_status = ?, entry_quality_score = ?,
+            entry_quality_reason = ?, outcome_tracking_mode = ?, v2_evaluated_at = ?,
             retest_confirmed_at = COALESCE(?, retest_confirmed_at),
-            executable_at = COALESCE(executable_at, ?),
+            executable_at = ?,
             production_rule_accepted = ?, strict_trend_short_eligible = ?,
             strict_trigger_type = ?, strict_confirmation_type = ?,
             strict_trigger_candle_time = ?, strict_trigger_candle_completed = ?
@@ -308,6 +323,16 @@ def _update_opportunity(
             idea.setup_family,
             lifecycle_status,
             _signal_expires_at(idea),
+            idea.strategy_version,
+            idea.edge_status,
+            idea.strategy_decision,
+            idea.v2_decision_reason,
+            idea.regime_confidence,
+            idea.entry_quality_status,
+            idea.entry_quality_score,
+            idea.entry_quality_reason,
+            idea.outcome_tracking_mode,
+            canonical_candle_time(idea.v2_evaluated_at),
             retest_confirmed_at,
             executable_at,
             int(idea.production_rule_accepted) if idea.production_rule_accepted is not None else None,
@@ -350,6 +375,9 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                             continue
                         if existing.get("entry_status") == "WAIT_FOR_RETEST" and idea.entry_status == "READY":
                             idea.entry_status = "WAIT_FOR_RETEST"
+                            if idea.strategy_version is not None:
+                                idea.strategy_decision = "WAIT_FOR_RETEST"
+                                idea.outcome_tracking_mode = "NONE"
                             _adopt_existing_identity(idea, existing)
                             logger.info(
                                 "opportunity_skipped reason=same_candle_is_not_retest opportunity_key=%s id=%s",
@@ -368,7 +396,8 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         )
                         continue
 
-                if family and idea.entry_status == "READY":
+                can_promote = idea.strategy_version is None or idea.strategy_decision in {"TRADE", "SHADOW"}
+                if family and idea.entry_status == "READY" and can_promote:
                     promoted = _find_promoted_confirmation(connection, idea, family)
                     if promoted is not None:
                         confirmation_candle = canonical_candle_time(idea.signal_candle_time)
@@ -415,7 +444,7 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                             ids.append(trade_id)
                         _adopt_existing_identity(idea, pending)
                         idea.retest_confirmed_at = original_confirmation_time
-                        idea.executable_at = datetime.now(UTC).replace(microsecond=0)
+                        idea.executable_at = datetime.now(UTC).replace(microsecond=0) if idea.strategy_decision in {None, "TRADE"} else None
                         logger.info(
                             "opportunity_updated reason=retest_promoted opportunity_key=%s id=%s retest_confirmed_at=%s",
                             pending.get("opportunity_key"),
@@ -439,11 +468,14 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         reversal_confirmations, regime_explanation, signal_candle_time,
                         signal_fingerprint, lifecycle_status, expires_at, entry_status,
                         setup_family, opportunity_key, retest_confirmed_at, executable_at,
+                        strategy_version, edge_status, strategy_decision, v2_decision_reason,
+                        regime_confidence, entry_quality_status, entry_quality_score,
+                        entry_quality_reason, outcome_tracking_mode, v2_evaluated_at,
                         production_rule_accepted, strict_trend_short_eligible,
                         strict_trigger_type, strict_confirmation_type,
                         strict_trigger_candle_time, strict_trigger_candle_completed
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         idea.symbol.upper(),
@@ -471,13 +503,32 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         idea.regime_explanation,
                         idea.signal_candle_time.isoformat() if idea.signal_candle_time else None,
                         setup_fingerprint(idea),
-                        "active" if idea.entry_status == "READY" else "pending_retest",
+                        (
+                            "shadow"
+                            if idea.strategy_decision == "SHADOW"
+                            else "no_trade"
+                            if idea.strategy_decision == "NO_TRADE"
+                            else "active"
+                            if idea.entry_status == "READY"
+                            else "pending_retest"
+                        ),
                         _signal_expires_at(idea),
                         idea.entry_status,
                         family,
                         opportunity_key,
                         canonical_candle_time(idea.retest_confirmed_at),
-                        canonical_candle_time(idea.executable_at) or (_now_iso() if idea.entry_status == "READY" else None),
+                        canonical_candle_time(idea.executable_at)
+                        or (_now_iso() if idea.entry_status == "READY" and idea.strategy_decision in {None, "TRADE"} else None),
+                        idea.strategy_version,
+                        idea.edge_status,
+                        idea.strategy_decision,
+                        idea.v2_decision_reason,
+                        idea.regime_confidence,
+                        idea.entry_quality_status,
+                        idea.entry_quality_score,
+                        idea.entry_quality_reason,
+                        idea.outcome_tracking_mode,
+                        canonical_candle_time(idea.v2_evaluated_at),
                         int(idea.production_rule_accepted) if idea.production_rule_accepted is not None else None,
                         int(idea.strict_trend_short_eligible) if idea.strict_trend_short_eligible is not None else None,
                         idea.strict_trigger_type,
@@ -487,7 +538,7 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                     ),
                 )
                 trade_id = int(cursor.lastrowid)
-                if idea.entry_status == "READY" and idea.executable_at is None:
+                if idea.entry_status == "READY" and idea.strategy_decision in {None, "TRADE"} and idea.executable_at is None:
                     idea.executable_at = datetime.now(UTC).replace(microsecond=0)
                 connection.execute(
                     """
@@ -503,8 +554,8 @@ def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
                         idea.timeframe,
                         idea.exchange,
                         idea.direction.upper(),
-                        1,
-                        "Signal accepted and saved as a trade idea.",
+                        0 if idea.strategy_decision == "NO_TRADE" else 1,
+                        idea.v2_decision_reason or "Signal accepted and saved as a trade idea.",
                         None,
                         idea.confidence_score,
                         idea.regime_confidence_adjustment,
@@ -713,9 +764,16 @@ def _stop_hit(row: dict, candle: pd.Series, stop_price: float) -> bool:
 
 
 def evaluate_trade(row: dict, candles: pd.DataFrame, *, expiry_bars: int | None = None, move_stop_to_entry_after_tp1: bool | None = None) -> dict:
-    if row.get("entry_status") == "WAIT_FOR_RETEST" or (
-        row.get("opportunity_key") and not row.get("executable_at")
-    ):
+    v2_non_trackable = bool(
+        row.get("strategy_version")
+        and row.get("outcome_tracking_mode") not in {"PRODUCTION", "SHADOW"}
+    )
+    legacy_non_executable = bool(
+        not row.get("strategy_version")
+        and row.get("opportunity_key")
+        and not row.get("executable_at")
+    )
+    if row.get("entry_status") == "WAIT_FOR_RETEST" or v2_non_trackable or legacy_non_executable:
         return {
             "status": row.get("status") or "PENDING",
             "result": "OPEN",
@@ -974,7 +1032,10 @@ async def check_trade_outcomes() -> dict:
             SELECT * FROM trade_ideas
             WHERE status IN ('PENDING', 'OPEN', 'ENTRY_TRIGGERED', 'TP1_HIT')
               AND COALESCE(entry_status, 'READY') = 'READY'
-              AND (opportunity_key IS NULL OR executable_at IS NOT NULL)
+              AND (
+                    (strategy_version IS NULL AND (opportunity_key IS NULL OR executable_at IS NOT NULL))
+                    OR outcome_tracking_mode IN ('PRODUCTION', 'SHADOW')
+                  )
             ORDER BY created_at ASC
             """
         ).fetchall()
@@ -989,7 +1050,10 @@ async def replay_trade_outcomes(days: int = 30) -> dict:
             SELECT * FROM trade_ideas
             WHERE created_at >= ?
               AND COALESCE(entry_status, 'READY') = 'READY'
-              AND (opportunity_key IS NULL OR executable_at IS NOT NULL)
+              AND (
+                    (strategy_version IS NULL AND (opportunity_key IS NULL OR executable_at IS NOT NULL))
+                    OR outcome_tracking_mode IN ('PRODUCTION', 'SHADOW')
+                  )
             ORDER BY created_at ASC
             """,
             (cutoff,),
@@ -1005,9 +1069,21 @@ def stats() -> dict:
         rows = [dict(row) for row in connection.execute("SELECT * FROM trade_ideas").fetchall()]
         review_rows = [dict(row) for row in connection.execute("SELECT * FROM signal_reviews").fetchall()]
     detected_total = len(rows)
-    pending_rows = [row for row in rows if row.get("entry_status") == "WAIT_FOR_RETEST" or (row.get("opportunity_key") and not row.get("executable_at"))]
+    pending_rows = [
+        row
+        for row in rows
+        if row.get("entry_status") == "WAIT_FOR_RETEST" or row.get("strategy_decision") == "WAIT_FOR_RETEST"
+    ]
     pending_ids = {row["id"] for row in pending_rows}
-    performance_rows = [row for row in rows if row["id"] not in pending_ids]
+    performance_rows = [
+        row
+        for row in rows
+        if row["id"] not in pending_ids
+        and (
+            row.get("strategy_version") is None
+            or row.get("strategy_decision") == "TRADE"
+        )
+    ]
     total = len(performance_rows)
     entry_triggered = [row for row in performance_rows if row.get("entry_triggered_at")]
     wins = [row for row in performance_rows if row["result"] in {"WIN", "PARTIAL_WIN"}]

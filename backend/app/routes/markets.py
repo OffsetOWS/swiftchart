@@ -206,8 +206,12 @@ async def analyze(
                 status_code=422,
                 detail=f"{base_asset or 'This asset'} is not currently available for analysis. Try BTC, ETH, SOL, BNB, or another listed Hyperliquid market.",
             )
-        saved_ids = save_trade_ideas(analysis.trade_ideas)
+        detected_ideas = list(analysis.trade_ideas)
+        saved_ids = save_trade_ideas(detected_ideas)
         saved_reviews = save_signal_reviews(analysis.rejected_signals)
+        analysis.trade_ideas = [idea for idea in detected_ideas if idea.strategy_decision == "TRADE"]
+        if detected_ideas and not analysis.trade_ideas:
+            analysis.no_trade_reason = detected_ideas[0].v2_decision_reason or "The selected strategy is not actionable under V2."
         logger.info("Analysis generated %s ideas, rejected %s, and saved %s ideas/%s reviews for %s %s on %s", len(analysis.trade_ideas), len(analysis.rejected_signals), len(saved_ids), saved_reviews, symbol, timeframe, analysis.exchange)
         return analysis
     except HTTPException:

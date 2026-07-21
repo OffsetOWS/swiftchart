@@ -51,6 +51,10 @@ def trade_idea_to_execution_signal(idea: TradeIdea) -> dict:
         "move_maturity": idea.move_maturity,
         "exhaustion_risk": idea.exhaustion_risk,
         "entry_status": idea.entry_status,
+        "strategy_family": idea.setup_family,
+        "strategy_version": idea.strategy_version,
+        "edge_status": idea.edge_status,
+        "strategy_decision": idea.strategy_decision,
         "downgraded_reasons": idea.downgraded_reasons,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -75,6 +79,17 @@ async def dispatch_trade_ideas_to_execution(ideas: list[TradeIdea]) -> None:
 
     async with httpx.AsyncClient(timeout=20) as client:
         for idea in ideas:
+            if idea.strategy_version is not None and idea.strategy_decision != "TRADE":
+                logger.info(
+                    "V2 execution signal skipped symbol=%s timeframe=%s strategy=%s:%s decision=%s edge_status=%s",
+                    idea.symbol,
+                    idea.timeframe,
+                    idea.setup_family,
+                    idea.strategy_version,
+                    idea.strategy_decision,
+                    idea.edge_status,
+                )
+                continue
             if should_skip_alert(idea, namespace="execution"):
                 continue
             if idea.entry_status != "READY":

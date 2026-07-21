@@ -16,6 +16,7 @@ from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.pending_setups import build_pending_setup, pending_setup_from_trade_idea
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
+from app.strategy.decision_engine import evaluate_strategy_decision, is_actionable_v2
 from app.strategy.support_resistance import average_true_range
 from app.strategy.trade_ideas import MIN_SETUP_SCORE, analyze_dataframe
 
@@ -293,7 +294,10 @@ async def _analyze_candidate(
                     continue
             analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
             save_signal_reviews(analysis.rejected_signals)
-            return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+            valid = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+            for idea in valid:
+                evaluate_strategy_decision(idea)
+            return valid
         except Exception as exc:
             logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
             return []
@@ -365,6 +369,8 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     )
                     save_signal_reviews(analysis.rejected_signals)
                     valid_ideas = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+                    for idea in valid_ideas:
+                        evaluate_strategy_decision(idea)
                     pending_setup = None if valid_ideas else build_pending_setup(analysis, df)
                     return valid_ideas, pending_setup
                 except Exception as exc:
@@ -378,7 +384,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
             reverse=True,
         )[:20]
-        ranked = sorted(
+        ranked_all = sorted(
             ideas,
             key=lambda idea: (
                 idea.setup_score or idea.confidence_score,
@@ -386,10 +392,21 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 idea.rank_score,
             ),
             reverse=True,
-        )[:5]
+        )
+        # Disabled or shadow candidates must never crowd a validated strategy
+        # out of the actionable top five. Persist bounded cohorts separately so
+        # forward analytics remain useful without producing normal trade volume.
+        executable_ranked = [idea for idea in ranked_all if is_actionable_v2(idea)][:5]
+        shadow_ranked = [idea for idea in ranked_all if idea.strategy_decision == "SHADOW"][:5]
+        wait_ranked = [idea for idea in ranked_all if idea.strategy_decision == "WAIT_FOR_RETEST"][:5]
+        no_trade_ranked = [idea for idea in ranked_all if idea.strategy_decision == "NO_TRADE"][:3]
+        ranked = [*executable_ranked, *shadow_ranked, *wait_ranked, *no_trade_ranked]
         save_trade_ideas(ranked)
-        executable_ranked = [idea for idea in ranked if idea.entry_status == "READY"]
-        retest_pending = [pending_setup_from_trade_idea(idea) for idea in ranked if idea.entry_status == "WAIT_FOR_RETEST"]
+        retest_pending = [
+            pending_setup_from_trade_idea(idea)
+            for idea in wait_ranked
+            if idea.entry_status == "WAIT_FOR_RETEST" and idea.strategy_decision == "WAIT_FOR_RETEST"
+        ]
         pending_setups = sorted(
             [*pending_setups, *retest_pending],
             key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
@@ -403,13 +420,15 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             "ideas": executable_ranked,
             "pending_setups": pending_setups,
             "errors": [],
-            "message": None if len(executable_ranked) >= 5 else f"Only {len(executable_ranked)} executable setups found. Retest setups remain pending.",
+            "message": None if len(executable_ranked) >= 5 else f"Only {len(executable_ranked)} validated executable setups found. Shadow and retest decisions remain non-actionable.",
             "scan_stats": {
                 "markets": len(markets),
                 "scan_window": len(scan_markets),
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
                 "valid_setups": len(executable_ranked),
+                "shadow_setups": len(shadow_ranked),
+                "no_trade_decisions": len(no_trade_ranked),
                 "pending_setups": len(pending_setups),
                 "successful_candle_fetches": fetch_stats.successful_candle_fetches,
                 "failed_candle_fetches": fetch_stats.failed_candle_fetches,
@@ -421,7 +440,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     current_exchange: {
                         "markets": len([market for market in markets if market["exchange"] == current_exchange]),
                         "scan_window": len([market for market in scan_markets if market["exchange"] == current_exchange]),
-                        "valid_setups": len([idea for idea in ranked if idea.exchange == current_exchange]),
+                        "valid_setups": len([idea for idea in executable_ranked if idea.exchange == current_exchange]),
                     }
                     for current_exchange in selected_exchanges(selected_exchange)
                 },

@@ -59,7 +59,11 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
         preferred_timeframe=timeframe,
     )
     analysis = analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
-    save_trade_ideas(analysis.trade_ideas)
+    detected_ideas = list(analysis.trade_ideas)
+    save_trade_ideas(detected_ideas)
+    analysis.trade_ideas = [idea for idea in detected_ideas if idea.strategy_decision == "TRADE"]
+    if detected_ideas and not analysis.trade_ideas:
+        analysis.no_trade_reason = detected_ideas[0].v2_decision_reason or "The selected strategy is not actionable under V2."
     return analysis
 
 
