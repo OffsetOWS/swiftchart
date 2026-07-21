@@ -174,15 +174,18 @@ def configure_db(monkeypatch, tmp_path):
     database._INITIALIZED = False
 
 
-def test_shadow_metadata_does_not_change_production_or_telegram_eligibility():
+def test_shadow_metadata_does_not_change_v2_shadow_or_telegram_eligibility():
     from bot.alerts import is_limit_order_alertable
+    from app.strategy.decision_engine import evaluate_strategy_decision
 
     strict_false = sample_idea(candle_time=START, strict=False)
     strict_true = sample_idea(candle_time=START, strict=True)
 
     assert strict_false.entry_status == strict_true.entry_status == "READY"
-    assert is_limit_order_alertable(strict_false) is True
-    assert is_limit_order_alertable(strict_true) is True
+    assert evaluate_strategy_decision(strict_false) == "SHADOW"
+    assert evaluate_strategy_decision(strict_true) == "SHADOW"
+    assert is_limit_order_alertable(strict_false) is False
+    assert is_limit_order_alertable(strict_true) is False
 
 
 def test_existing_production_path_still_accepts_position_plus_htf_momentum(monkeypatch):

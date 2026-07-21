@@ -98,6 +98,11 @@ async def _btc_context(exchange: str) -> dict | None:
 
 
 async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[list[TradeIdea], str, dict]:
+    """Non-authoritative crypto scan retained for manual commands and diagnostics.
+
+    Actionable Telegram alerts consume persisted canonical V2 opportunities through
+    ``bot.alerts.run_alert_scan`` and must never dispatch from this result.
+    """
     selected_exchange = _selected_exchange(exchange)
     get_exchange(selected_exchange)
     risk = _risk(timeframe)

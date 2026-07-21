@@ -1,143 +1,72 @@
 import asyncio
 import logging
 import os
-from collections import Counter
 
 from telegram import Bot
 
-from app.config import get_settings
 from app.models.schemas import TradeIdea
 from app.services.alert_dedupe import mark_alert_sent as mark_dedupe_sent
-from app.services.alert_dedupe import should_skip_alert
+from app.services.alert_dedupe import should_skip_canonical_alert
 from app.services.execution_signals import execution_signal_id
+from app.services.telegram_dispatch import (
+    DISPATCH_SUCCEEDED,
+    claim_telegram_dispatches,
+    mark_telegram_recipient_failure,
+    mark_telegram_recipient_success,
+    suppress_telegram_dispatch_for_dedupe,
+)
 from bot.formatter import format_trade_alert
 from bot.keyboards import trade_alert_keyboard
-from bot.scanner import scan_top_ideas
 from bot.storage import get_subscribers, save_signal
 
 logger = logging.getLogger(__name__)
 
-ALERT_TIMEFRAMES = ("1h", "2h", "3h", "4h", "6h")
-_alert_timeframe_cursor = 0
-
-
-def alert_min_score() -> float:
-    return float(os.getenv("ALERT_MIN_SCORE", "75"))
-
-
-def alert_timeframes() -> list[str]:
-    configured = os.getenv("ALERT_TIMEFRAMES") or os.getenv("ALERT_TIMEFRAME")
-    if not configured:
-        return list(ALERT_TIMEFRAMES)
-    return [part.strip().lower() for part in configured.split(",") if part.strip()]
-
-
-def alert_scan_all_timeframes_per_run() -> bool:
-    return os.getenv("ALERT_SCAN_ALL_TIMEFRAMES_PER_RUN", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def alert_timeframes_for_run() -> tuple[list[str], list[str]]:
-    global _alert_timeframe_cursor
-    configured = alert_timeframes()
-    valid = [timeframe for timeframe in configured if timeframe in ALERT_TIMEFRAMES]
-    skipped = [timeframe for timeframe in configured if timeframe not in ALERT_TIMEFRAMES]
-    if alert_scan_all_timeframes_per_run() or len(valid) <= 1:
-        return valid, skipped
-
-    selected = valid[_alert_timeframe_cursor % len(valid)]
-    _alert_timeframe_cursor += 1
-    return [selected], skipped
-
-
-def idea_score(idea: TradeIdea) -> float:
-    return float(idea.setup_score or idea.confidence_score or 0)
-
 
 def is_limit_order_alertable(idea: TradeIdea) -> bool:
-    if idea.entry_status != "READY":
-        return False
-    # Legacy/manual ideas without V2 metadata retain their prior behavior.
-    # Every strategy-engine idea is V2-evaluated before this boundary.
-    return idea.strategy_version is None or idea.strategy_decision == "TRADE"
+    return bool(
+        idea.strategy_version
+        and idea.opportunity_key
+        and idea.strategy_decision == "TRADE"
+        and idea.entry_status == "READY"
+        and idea.executable_at is not None
+    )
+
+
+def _crypto_subscribers() -> set[int]:
+    """Use production market preferences when present without coupling to Forex code."""
+    try:
+        return {int(chat_id) for chat_id in get_subscribers("crypto")}
+    except TypeError:
+        return {int(chat_id) for chat_id in get_subscribers()}
 
 
 async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
-    exchange = os.getenv("ALERT_EXCHANGE", get_settings().default_exchange)
-    min_score = alert_min_score()
-    rejection_reasons: Counter[str] = Counter()
-    subscribers = get_subscribers()
-    if not subscribers:
-        rejection_reasons["missing subscribers"] += 1
-        logger.info(
-            "telegram_alert_scan_complete subscribers=0 symbols_scanned=0 valid_ideas_found=0 eligible_alerts=0 alerts_sent=0 rejection_reasons=%s",
-            dict(rejection_reasons),
-        )
-        return {"status": "ok", "subscribers": 0, "ideas": 0, "eligible": 0, "sent": 0, "alerts_sent": 0, "rejection_reasons": dict(rejection_reasons)}
-
-    selected_exchange = exchange
-    symbols_scanned = 0
-    valid_ideas_found = 0
-    all_ideas = []
-    skipped_timeframes = 0
-    scanned_timeframes = []
-    timeframes_to_scan, skipped = alert_timeframes_for_run()
-    for timeframe in skipped:
-        skipped_timeframes += 1
-        rejection_reasons["skipped_timeframe"] += 1
-        logger.info("skipped_timeframe timeframe=%s allowed_timeframes=%s", timeframe, ",".join(ALERT_TIMEFRAMES))
-
-    for timeframe in timeframes_to_scan:
-        ideas, selected_exchange, scan_meta = await scan_top_ideas(timeframe, exchange)
-        all_ideas.extend((idea, scan_meta.get("btc_context")) for idea in ideas)
-        scanned_timeframes.append(timeframe)
-        symbols_scanned += int(scan_meta.get("symbols_scanned", 0) or 0)
-        valid_ideas_found += int(scan_meta.get("valid_ideas_found", len(ideas)) or 0)
-        rejection_reasons.update(scan_meta.get("rejection_reasons", {}))
-
-    eligible_ideas = []
-    limit_order_ideas = 0
-    score_eligible_ideas = 0
-    skipped_by_score = 0
-    skipped_by_entry_status = 0
-    skipped_by_v2_decision = 0
-    for idea, btc_context in all_ideas:
-        score_ok = idea_score(idea) >= min_score
-        entry_ready = idea.entry_status == "READY"
-        limit_order_ok = is_limit_order_alertable(idea)
-        if score_ok:
-            score_eligible_ideas += 1
-        if entry_ready:
-            limit_order_ideas += 1
-        if not score_ok:
-            skipped_by_score += 1
-            rejection_reasons["skipped_low_score"] += 1
-            logger.info(
-                "skipped_low_score symbol=%s timeframe=%s exchange=%s score=%s min_score=%s entry_status=%s",
-                idea.symbol,
-                idea.timeframe,
-                idea.exchange,
-                idea_score(idea),
-                min_score,
+    subscribers = _crypto_subscribers()
+    candidates = claim_telegram_dispatches(subscribers)
+    sent = 0
+    failed = 0
+    skipped_by_dedup = 0
+    recipients_pending = sum(len(candidate.recipient_chat_ids) for candidate in candidates)
+    for candidate in candidates:
+        idea = candidate.idea
+        if not is_limit_order_alertable(idea):
+            logger.error(
+                "canonical_dispatch_rejected trade_idea_id=%s opportunity_key=%s decision=%s entry_status=%s executable_at=%s",
+                candidate.trade_idea_id,
+                candidate.opportunity_key,
+                idea.strategy_decision,
                 idea.entry_status,
+                idea.executable_at,
             )
             continue
-        if not entry_ready:
-            skipped_by_entry_status += 1
-            rejection_reasons["entry_status rejected/exhausted"] += 1
-            continue
-        if not limit_order_ok:
-            skipped_by_v2_decision += 1
-            rejection_reasons[f"V2 decision {idea.strategy_decision or 'missing'}"] += 1
-            continue
-        eligible_ideas.append((idea, btc_context))
-    sent = 0
-    skipped_by_dedup = 0
-    for idea, btc_context in eligible_ideas:
-        if should_skip_alert(idea, namespace="telegram"):
+        if candidate.first_attempt and should_skip_canonical_alert(idea, namespace="telegram"):
             skipped_by_dedup += 1
-            rejection_reasons["duplicate alert"] += 1
+            suppress_telegram_dispatch_for_dedupe(
+                candidate.dispatch_id,
+                "Canonical opportunity already exists in the legacy Telegram final-safety dedupe state.",
+            )
             continue
-        message = format_trade_alert(idea, btc_context)
+        message = format_trade_alert(idea)
         signal_id = execution_signal_id(idea)
         entry = sum(idea.entry_zone) / 2
         save_signal(
@@ -155,57 +84,54 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
                 "analysis": message,
             },
         )
-        for chat_id in subscribers:
+        final_status = None
+        for chat_id in candidate.recipient_chat_ids:
             try:
-                await bot.send_message(chat_id=chat_id, text=message, reply_markup=trade_alert_keyboard(signal_id))
+                response = await bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    reply_markup=trade_alert_keyboard(signal_id),
+                )
                 sent += 1
+                final_status = mark_telegram_recipient_success(
+                    candidate.dispatch_id,
+                    chat_id,
+                    telegram_message_id=getattr(response, "message_id", None),
+                )
             except Exception as exc:
-                rejection_reasons["send error"] += 1
+                failed += 1
+                final_status = mark_telegram_recipient_failure(
+                    candidate.dispatch_id,
+                    chat_id,
+                    f"{type(exc).__name__}: {exc}",
+                )
                 logger.warning("Could not send alert to chat %s: %s", chat_id, exc)
-        mark_dedupe_sent(idea, namespace="telegram")
+        if final_status == DISPATCH_SUCCEEDED:
+            mark_dedupe_sent(idea, namespace="telegram")
 
     logger.info(
         (
-            "telegram_alert_scan_complete exchange=%s timeframes=%s symbols_scanned=%s valid_ideas_found=%s "
-            "limit_order_ideas=%s score_eligible_ideas=%s eligible_alerts=%s alerts_sent=%s "
-            "skipped_by_dedup=%s skipped_low_score=%s skipped_by_entry_status=%s skipped_by_v2_decision=%s skipped_timeframe=%s rejection_reasons=%s"
+            "telegram_canonical_dispatch_complete subscribers=%s opportunities=%s recipients_pending=%s "
+            "recipient_deliveries=%s failures=%s skipped_by_dedup=%s"
         ),
-        selected_exchange,
-        ",".join(scanned_timeframes),
-        symbols_scanned,
-        valid_ideas_found,
-        limit_order_ideas,
-        score_eligible_ideas,
-        len(eligible_ideas),
+        len(subscribers),
+        len(candidates),
+        recipients_pending,
         sent,
+        failed,
         skipped_by_dedup,
-        skipped_by_score,
-        skipped_by_entry_status,
-        skipped_by_v2_decision,
-        skipped_timeframes,
-        dict(rejection_reasons),
     )
     return {
         "status": "ok",
-        "exchange": selected_exchange,
-        "timeframes": scanned_timeframes,
+        "source": "canonical_persisted_v2_opportunities",
         "subscribers": len(subscribers),
-        "ideas": len(all_ideas),
-        "symbols_scanned": symbols_scanned,
-        "valid_ideas_found": valid_ideas_found,
-        "limit_order_ideas": limit_order_ideas,
-        "score_eligible_ideas": score_eligible_ideas,
-        "eligible": len(eligible_ideas),
-        "min_score": min_score,
+        "ideas": len(candidates),
+        "eligible": len(candidates),
+        "recipients_pending": recipients_pending,
         "sent": sent,
         "alerts_sent": sent,
+        "failed": failed,
         "skipped_by_dedup": skipped_by_dedup,
-        "skipped_by_score": skipped_by_score,
-        "skipped_low_score": skipped_by_score,
-        "skipped_timeframe": skipped_timeframes,
-        "skipped_by_entry_status": skipped_by_entry_status,
-        "skipped_by_v2_decision": skipped_by_v2_decision,
-        "rejection_reasons": dict(rejection_reasons),
     }
 
 
@@ -215,7 +141,7 @@ async def alert_loop(bot: Bot) -> None:
     while True:
         try:
             result = await run_alert_scan(bot)
-            logger.info("Alert scan complete: %s", result)
+            logger.info("Canonical Telegram dispatch poll complete: %s", result)
         except Exception:
-            logger.exception("Alert scan failed")
+            logger.exception("Canonical Telegram dispatch poll failed")
         await asyncio.sleep(max(300, interval))

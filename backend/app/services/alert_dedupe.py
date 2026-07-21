@@ -226,6 +226,26 @@ def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: dateti
     return False
 
 
+def should_skip_canonical_alert(idea: TradeIdea, *, namespace: str = "telegram") -> bool:
+    """Final compatibility guard that only considers canonical opportunity identity.
+
+    Canonical Telegram dispatch must not inherit the legacy price/cooldown rules because
+    those rules can suppress a new signal candle or treat a price update as a new alert.
+    """
+    opportunity_key = opportunity_dedupe_key(idea)
+    if not opportunity_key:
+        return False
+    data = _load()
+    bucket = _namespace(data, namespace)
+    if opportunity_key in bucket.setdefault("opportunities", {}):
+        return True
+    return any(
+        record.get("opportunity_key") == opportunity_key
+        for record in bucket.get("keys", {}).values()
+        if isinstance(record, dict)
+    )
+
+
 def mark_alert_sent(idea: TradeIdea, *, namespace: str = "alerts", status: str = "active", now: datetime | None = None) -> None:
     data = _load()
     bucket = _namespace(data, namespace)

@@ -198,18 +198,9 @@ def test_disabled_breakout_is_rejected_by_full_telegram_dispatch_boundary(monkey
         async def send_message(self, **kwargs):
             sent.append(kwargs)
 
-    async def fake_scan(*args, **kwargs):
-        return [breakout], "hyperliquid", {
-            "symbols_scanned": 1,
-            "valid_ideas_found": 1,
-            "rejection_reasons": {},
-            "btc_context": None,
-        }
-
-    monkeypatch.setattr(alerts, "get_subscribers", lambda: ["chat"])
-    monkeypatch.setattr(alerts, "scan_top_ideas", fake_scan)
+    save_trade_ideas([breakout])
+    monkeypatch.setenv("TELEGRAM_ALERT_CHAT_IDS", "123")
     monkeypatch.setattr(alerts, "save_signal", lambda *args, **kwargs: saved.append((args, kwargs)))
-    monkeypatch.setattr(alerts, "alert_timeframes_for_run", lambda: (["4h"], []))
     result = asyncio.run(alerts.run_alert_scan(FakeBot()))
     assert result["eligible"] == 0
     assert result["sent"] == 0

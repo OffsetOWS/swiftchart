@@ -142,16 +142,16 @@ def test_top_ideas_returns_confirmed_and_pending(monkeypatch):
 
 def test_pending_setup_does_not_trigger_telegram(monkeypatch, tmp_path):
     from bot.alerts import run_alert_scan
-    import bot.alerts as telegram_alerts
+    from app.config import get_settings
+    from app.utils import database
 
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'swiftchart.db'}")
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "bot_state.json"))
     monkeypatch.setenv("ALERT_DEDUPE_STATE_PATH", str(tmp_path / "alert_dedupe.json"))
     monkeypatch.setenv("TELEGRAM_ALERT_CHAT_IDS", "123")
-
-    async def fake_scan_top_ideas(*args, **kwargs):
-        return [], "hyperliquid", {"symbols_scanned": 1, "valid_ideas_found": 0}
-
-    monkeypatch.setattr(telegram_alerts, "scan_top_ideas", fake_scan_top_ideas)
+    get_settings.cache_clear()
+    database._INITIALIZED = False
+    database.init_db()
 
     class FakeBot:
         messages: list[str] = []

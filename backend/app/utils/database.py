@@ -239,12 +239,76 @@ def init_db() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_fingerprint ON trade_ideas(signal_fingerprint)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_lifecycle ON trade_ideas(lifecycle_status)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_v2_strategy ON trade_ideas(setup_family, strategy_version, edge_status, strategy_decision)")
+        _ensure_telegram_dispatch_schema(connection)
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_created_at ON signal_reviews(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_regime ON signal_reviews(regime_label)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_created_at ON genlayer_ai_scans(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_signal ON genlayer_ai_scans(symbol, timeframe, exchange, direction, created_at)")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_trades_user_signal ON paper_trades(user_id, signal_id) WHERE user_id IS NOT NULL AND signal_id IS NOT NULL")
         _INITIALIZED = True
+
+
+def _ensure_telegram_dispatch_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS telegram_dispatch_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            canonical_started_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO telegram_dispatch_config (id, canonical_started_at)
+        VALUES (1, CURRENT_TIMESTAMP)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS telegram_dispatches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_idea_id INTEGER NOT NULL UNIQUE,
+            opportunity_key TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            eligible_at TEXT NOT NULL,
+            recipients_initialized_at TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            first_attempt_at TEXT,
+            last_attempt_at TEXT,
+            dispatched_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (trade_idea_id) REFERENCES trade_ideas(id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS telegram_dispatch_recipients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dispatch_id INTEGER NOT NULL,
+            chat_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            last_attempt_at TEXT,
+            sent_at TEXT,
+            telegram_message_id INTEGER,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (dispatch_id, chat_id),
+            FOREIGN KEY (dispatch_id) REFERENCES telegram_dispatches(id)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_telegram_dispatch_status ON telegram_dispatches(status, eligible_at)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_telegram_recipient_status ON telegram_dispatch_recipients(dispatch_id, status)"
+    )
 
 
 def _ensure_paper_trade_columns(connection: sqlite3.Connection) -> None:
