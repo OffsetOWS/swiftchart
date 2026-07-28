@@ -53,10 +53,10 @@ export default function Landing() {
         </nav>
 
         <div className="landing-mobile-actions">
-          <a className="landing-mobile-launch" href="/launch">
+          <a className="landing-mobile-launch" href="/login?returnTo=%2Fapp%2Fhome">
             Launch App
           </a>
-          <a className="landing-mobile-signup" href="/auth">
+          <a className="landing-mobile-signup" href="/signup?returnTo=%2Fapp%2Fhome">
             Sign Up
           </a>
         </div>
@@ -71,7 +71,7 @@ export default function Landing() {
           now their edge is yours
         </h1>
         <p>SwiftChart turns market structure, bias, and signal history into a cleaner decision flow.</p>
-        <a className="landing-launch-button" href="/launch">
+        <a className="landing-launch-button" href="/login?returnTo=%2Fapp%2Fhome">
           Launch App
         </a>
       </section>

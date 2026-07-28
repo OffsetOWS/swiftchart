@@ -1,5 +1,6 @@
 import { Activity, BrainCircuit, CheckCircle2, Clock3, Gauge, ShieldAlert, TrendingUp, Waves, Zap } from "lucide-react";
 import { confidenceLabelForIdea, freshnessForIdea, liquidityForIdea, regimeViewForIdea, statusForIdea } from "../lib/signalQuality.js";
+import InstrumentLogo from "./InstrumentLogo.jsx";
 import SignalMarketContext from "./SignalMarketContext.jsx";
 
 function fmt(value) {
@@ -68,13 +69,16 @@ export default function TradeIdeaCard({
   return (
     <article className={`idea-card signal-card ${directionClass} status-${signalStatus}`}>
       <div className="idea-top">
-        <div className="signal-title-block">
-          <span className="exchange-label">{sourceLabel(idea.source || idea.exchange)} · {idea.timeframe}</span>
-          <h3>{idea.symbol}</h3>
-          <div className="signal-chip-row">
-            <span className={`regime-badge ${regime.tone}`}><Waves size={13} /> {regime.label}</span>
-            <span className={`freshness-pill ${freshness.status}`}><Clock3 size={13} /> {freshness.label}</span>
-            <span className={`liquidity-pill ${liquidity.status}`}><Gauge size={13} /> {liquidity.label}</span>
+        <div className="signal-title-with-logo">
+          <InstrumentLogo symbol={idea.symbol} marketType={idea.marketType || idea.market} size={46} />
+          <div className="signal-title-block">
+            <span className="exchange-label">{sourceLabel(idea.source || idea.exchange)} · {idea.timeframe}</span>
+            <h3>{idea.symbol}</h3>
+            <div className="signal-chip-row">
+              <span className={`regime-badge ${regime.tone}`}><Waves size={13} /> {regime.label}</span>
+              <span className={`freshness-pill ${freshness.status}`}><Clock3 size={13} /> {freshness.label}</span>
+              <span className={`liquidity-pill ${liquidity.status}`}><Gauge size={13} /> {liquidity.label}</span>
+            </div>
           </div>
         </div>
         <span className={`direction-badge ${directionClass}`}>

@@ -1,5 +1,6 @@
 import { RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import InstrumentLogo from "../components/InstrumentLogo.jsx";
 import { getCandles } from "../lib/api.js";
 import { listPaperTrades, updatePaperTradeStatus } from "../lib/paperTrades.js";
 import { useAuth } from "../lib/AuthContext.jsx";
@@ -169,7 +170,7 @@ export default function TradeHistory({ version = 0 }) {
               {records.map((record) => (
                 <tr key={record.id} onClick={() => setExpanded(expanded === record.id ? null : record.id)}>
                   <td>{dt(record.taken_at || record.created_at)}</td>
-                  <td>{record.symbol}</td>
+                  <td><span className="history-table-asset"><InstrumentLogo symbol={record.symbol} marketType={record.marketType || record.market} size={28} />{record.symbol}</span></td>
                   <td>{record.timeframe || "-"}</td>
                   <td>{record.direction.toUpperCase()}</td>
                   <td>{fmt(record.entry_price)}</td>

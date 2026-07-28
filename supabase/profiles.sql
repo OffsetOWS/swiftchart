@@ -6,6 +6,8 @@ create table if not exists public.profiles (
   signup_date timestamptz not null default now(),
   last_login timestamptz not null default now(),
   subscription_status text not null default 'free',
+  subscription_started_at timestamptz,
+  subscription_expires_at timestamptz,
   telegram_chat_id text unique,
   watchlists jsonb not null default '[]'::jsonb,
   signal_history jsonb not null default '[]'::jsonb,

@@ -123,11 +123,26 @@ def init_db() -> None:
             "ALTER TABLE trade_ideas ADD COLUMN expired_at TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN candles_to_resolution INTEGER",
             "ALTER TABLE trade_ideas ADD COLUMN lifecycle_events TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN entry_status TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN setup_family TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN opportunity_key TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN retest_confirmed_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN executable_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN production_rule_accepted INTEGER",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trend_short_eligible INTEGER",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_type TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_confirmation_type TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_candle_time TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_candle_completed INTEGER",
         ):
             try:
                 connection.execute(statement)
             except sqlite3.OperationalError:
                 pass
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_ideas_opportunity_key "
+            "ON trade_ideas(opportunity_key) WHERE opportunity_key IS NOT NULL"
+        )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS trade_outcomes (
@@ -206,6 +221,141 @@ def init_db() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mt5_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login INTEGER,
+                server TEXT,
+                currency TEXT NOT NULL DEFAULT 'USD',
+                balance REAL NOT NULL DEFAULT 0,
+                equity REAL NOT NULL DEFAULT 0,
+                margin_free REAL NOT NULL DEFAULT 0,
+                leverage INTEGER,
+                trade_allowed INTEGER NOT NULL DEFAULT 0,
+                connected INTEGER NOT NULL DEFAULT 0,
+                name TEXT,
+                company TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(login, server)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mt5_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL UNIQUE,
+                pair TEXT NOT NULL,
+                side TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                entry REAL NOT NULL,
+                stop_loss REAL NOT NULL,
+                tp1 REAL NOT NULL,
+                tp2 REAL,
+                confidence REAL NOT NULL,
+                risk_percent REAL NOT NULL,
+                lot_size REAL NOT NULL,
+                status TEXT NOT NULL,
+                mt5_order_id INTEGER,
+                mt5_position_id INTEGER,
+                opened_at TEXT,
+                closed_at TEXT,
+                close_reason TEXT,
+                pnl REAL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mt5_trade_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ea_clients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id TEXT NOT NULL DEFAULT 'default',
+                api_key_hash TEXT NOT NULL UNIQUE,
+                terminal_id TEXT,
+                ea_version TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ea_pending_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL UNIQUE,
+                signal_json TEXT NOT NULL,
+                validation_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'received',
+                broker_order_id TEXT,
+                broker_position_id TEXT,
+                executed_price REAL,
+                executed_volume REAL,
+                pnl REAL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                fetched_at TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ea_trade_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL,
+                api_key_hash TEXT,
+                status TEXT NOT NULL,
+                message TEXT,
+                broker_order_id TEXT,
+                broker_position_id TEXT,
+                executed_price REAL,
+                executed_volume REAL,
+                stop_loss REAL,
+                take_profit REAL,
+                pnl REAL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ea_heartbeats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id TEXT NOT NULL,
+                api_key_hash TEXT NOT NULL,
+                terminal_id TEXT,
+                ea_version TEXT,
+                broker_name TEXT,
+                account_currency TEXT NOT NULL DEFAULT 'USD',
+                balance REAL,
+                equity REAL,
+                margin_free REAL,
+                trading_allowed INTEGER NOT NULL DEFAULT 1,
+                open_positions INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_created_at ON trade_ideas(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_symbol ON trade_ideas(symbol)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_status ON trade_ideas(status)")
@@ -218,6 +368,14 @@ def init_db() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_created_at ON genlayer_ai_scans(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_signal ON genlayer_ai_scans(symbol, timeframe, exchange, direction, created_at)")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_trades_user_signal ON paper_trades(user_id, signal_id) WHERE user_id IS NOT NULL AND signal_id IS NOT NULL")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_mt5_trades_status ON mt5_trades(status)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_mt5_trades_pair ON mt5_trades(pair)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_mt5_trades_created_at ON mt5_trades(created_at)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_mt5_trade_events_trade_id ON mt5_trade_events(trade_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ea_pending_signals_status ON ea_pending_signals(status)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ea_pending_signals_created_at ON ea_pending_signals(created_at)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ea_trade_updates_trade_id ON ea_trade_updates(trade_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ea_heartbeats_client ON ea_heartbeats(client_id, created_at)")
         _INITIALIZED = True
 
 

@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.utils.opportunities import SetupFamily
+
 
 Direction = Literal["Long", "Short"]
 TradeHistoryStatus = Literal[
@@ -146,6 +148,19 @@ class TradeIdea(BaseModel):
     entry_status: EntryStatus = "READY"
     downgraded_reasons: list[str] = Field(default_factory=list)
     signal_candle_time: datetime | None = None
+    setup_family: SetupFamily | None = None
+    opportunity_key: str | None = None
+    retest_confirmed_at: datetime | None = None
+    executable_at: datetime | None = None
+    signal_candle_high: float | None = None
+    signal_candle_low: float | None = None
+    signal_candle_close: float | None = None
+    production_rule_accepted: bool | None = None
+    strict_trend_short_eligible: bool | None = None
+    strict_trigger_type: str | None = None
+    strict_confirmation_type: str | None = None
+    strict_trigger_candle_time: datetime | None = None
+    strict_trigger_candle_completed: bool | None = None
 
 
 class PendingSetup(BaseModel):
@@ -167,6 +182,9 @@ class PendingSetup(BaseModel):
     timeframe: str
     exchange: str
     created_at: datetime
+    setup_family: SetupFamily | None = None
+    opportunity_key: str | None = None
+    signal_candle_time: datetime | None = None
 
 
 class GenLayerSignalPayload(BaseModel):
@@ -342,10 +360,25 @@ class TradeHistoryRecord(BaseModel):
     reversal_confirmations: str | None = None
     regime_explanation: str | None = None
     signal_candle_time: datetime | None = None
+    entry_status: EntryStatus | None = None
+    setup_family: SetupFamily | None = None
+    opportunity_key: str | None = None
+    retest_confirmed_at: datetime | None = None
+    executable_at: datetime | None = None
+    production_rule_accepted: bool | None = None
+    strict_trend_short_eligible: bool | None = None
+    strict_trigger_type: str | None = None
+    strict_confirmation_type: str | None = None
+    strict_trigger_candle_time: datetime | None = None
+    strict_trigger_candle_completed: bool | None = None
 
 
 class TradeStats(BaseModel):
     total_ideas: int
+    detected_ideas: int = 0
+    pending_retest_count: int = 0
+    executable_ideas: int = 0
+    completed_opportunities: int = 0
     entry_triggered_count: int
     win_count: int
     loss_count: int

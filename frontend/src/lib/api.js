@@ -128,3 +128,58 @@ export function checkTradeHistory() {
 export function getTradeStats() {
   return request("/api/trade-stats");
 }
+
+export function getForexOverview() {
+  return request("/api/forex/overview");
+}
+
+export function getForexSignals() {
+  return request("/api/forex/signals");
+}
+
+export function scanForex(payload = {}) {
+  return request("/api/forex/scan", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getForexSessions() {
+  return request("/api/forex/sessions");
+}
+
+export function getForexPairs() {
+  return request("/api/forex/pairs");
+}
+
+export function getMt5Status() {
+  return request("/api/performance");
+}
+
+export function submitPaymentApi(payload, accessToken) {
+  return request("/api/payments/submissions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    accessToken,
+  });
+}
+
+export function listMyPaymentsApi(accessToken) {
+  return request("/api/payments/submissions/me", { accessToken });
+}
+
+export function paymentAdminAccessApi(accessToken) {
+  return request("/api/payments/admin/access", { accessToken });
+}
+
+export function listPendingPaymentsApi(accessToken) {
+  return request("/api/payments/admin/submissions", { accessToken });
+}
+
+export function reviewPaymentApi(submissionId, payload, accessToken) {
+  return request(`/api/payments/admin/submissions/${submissionId}/review`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    accessToken,
+  });
+}

@@ -3,9 +3,11 @@ import { createRoot } from "react-dom/client";
 import { Analytics, track } from "@vercel/analytics/react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
+import Forex from "./pages/Forex.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
 import Watchlist from "./pages/Watchlist.jsx";
 import MobileDemo from "./components/MobileDemo.jsx";
+import DesktopMobileGate from "./components/DesktopMobileGate.jsx";
 import AdminPayments from "./pages/AdminPayments.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
@@ -36,17 +38,28 @@ function analysisSymbolFromPath(pathname) {
   return base ? `${base.replace(/(USDT|USDC|USD|PERP)$/i, "")}USDT` : "";
 }
 
+function appTabFromPath(pathname) {
+  const match = String(pathname || "").match(/^\/app\/(home|scan|history|account|notifications)$/i);
+  return match ? match[1].toLowerCase() : "home";
+}
+
+function safeReturnTo(value, fallback = "/app/home") {
+  return value?.startsWith("/") && !value.startsWith("//") ? value : fallback;
+}
+
 export default function App() {
   const auth = useAuth();
   const [path, setPath] = useState(window.location.pathname);
   const isLandingPage = path === "/";
   const isLaunchPage = path === "/launch";
-  const isAppPage = path === "/app";
+  const isAppPage = path === "/app" || /^\/app\/(home|scan|history|account|notifications)$/.test(path);
   const isAnalysisPage = path.startsWith("/analysis/");
   const hasWorkspaceChrome = isAppPage || isAnalysisPage;
   const isMobileDemoPage = path === "/mobile-demo";
   const isAdminPaymentsPage = path === "/admin/payments";
-  const isAuthPage = path === "/auth" || path === "/login" || path === "/signup";
+  const isAuthPage = ["/auth", "/login", "/signup", "/forgot-password", "/reset-password"].includes(path);
+  const isCredentialEntryPage = ["/auth", "/login", "/signup"].includes(path);
+  const isProtectedPage = isAppPage || isMobileDemoPage || isAdminPaymentsPage;
   const isDocsPage = path === "/docs" || path.startsWith("/docs/");
   const [page, setPage] = useState(isAnalysisPage ? "markets" : "dashboard");
   const [nightMode, setNightMode] = useState(true);
@@ -140,7 +153,7 @@ export default function App() {
   async function paperTrade(idea) {
     if (!auth.isAuthenticated || !auth.user) {
       setNoticeType("error");
-      setNotice("Sign in to save this paper trade.");
+      setNotice("Sign in to save this trade to History.");
       navigate("/auth");
       return;
     }
@@ -187,7 +200,7 @@ export default function App() {
         return next;
       });
       setNoticeType("error");
-      setNotice(error.message || "Could not save paper trade.");
+      setNotice(error.message || "Could not save trade to History.");
     } finally {
       setPaperTradeLoadingSignalId("");
     }
@@ -295,17 +308,24 @@ export default function App() {
 
   useEffect(() => {
     if (auth.loading) return;
-    if (isAppPage && !auth.isAuthenticated && auth.isSupabaseConfigured) {
-      navigate("/launch", { replace: true });
+    if (isProtectedPage && !auth.isAuthenticated) {
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      navigate(`/login?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
+      return;
     }
-    if (isAuthPage && auth.isAuthenticated) {
+    if (isCredentialEntryPage && auth.isAuthenticated) {
       const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      navigate(returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/app", { replace: true });
+      navigate(safeReturnTo(returnTo), { replace: true });
+      return;
     }
     if (isLaunchPage && auth.isAuthenticated) {
-      navigate("/app", { replace: true });
+      navigate("/app/home", { replace: true });
+      return;
     }
-  }, [auth.loading, auth.isAuthenticated, isAppPage, isAuthPage, isLaunchPage]);
+    if (path === "/app" && auth.isAuthenticated) {
+      navigate("/app/home", { replace: true });
+    }
+  }, [auth.loading, auth.isAuthenticated, isProtectedPage, isCredentialEntryPage, isLaunchPage, path]);
 
   useEffect(() => {
     trackEvent("page_visit", { page });
@@ -336,7 +356,8 @@ export default function App() {
   }, []);
 
   const tabs = [
-    ["dashboard", "Dashboard"],
+    ["dashboard", "Crypto"],
+    ["forex", "Forex"],
     ["markets", "Markets"],
     ["ideas", "Trade Ideas"],
     ["watchlist", "Watchlist"],
@@ -374,8 +395,12 @@ export default function App() {
       <button
         type="button"
         onClick={async () => {
-          await auth.signOut();
-          navigate("/launch", { replace: true });
+          try {
+            await auth.signOut();
+            navigate("/login", { replace: true });
+          } catch {
+            // AuthContext exposes a safe, user-facing error in the account menu.
+          }
         }}
       >
         Logout
@@ -410,6 +435,15 @@ export default function App() {
     );
   }
 
+  if (isAuthPage && auth.loading) {
+    return (
+      <>
+        <AuthLoading />
+        <Analytics />
+      </>
+    );
+  }
+
   if (isAuthPage) {
     return (
       <>
@@ -419,36 +453,7 @@ export default function App() {
     );
   }
 
-  if (isMobileDemoPage) {
-    return (
-      <>
-        <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} mobile-demo-page`}>
-          <MobileDemo topIdeas={topIdeas} />
-        </main>
-        <Analytics />
-      </>
-    );
-  }
-
-  if (isAdminPaymentsPage) {
-    if (auth.loading) return <AuthLoading />;
-    if (!auth.isAuthenticated) {
-      return (
-        <>
-          <Auth />
-          <Analytics />
-        </>
-      );
-    }
-    return (
-      <>
-        <AdminPayments />
-        <Analytics />
-      </>
-    );
-  }
-
-  if (isAppPage && (auth.loading || auth.profileLoading)) {
+  if (isProtectedPage && (auth.loading || auth.profileLoading || !auth.isAuthenticated)) {
     return (
       <>
         <AuthLoading />
@@ -457,10 +462,21 @@ export default function App() {
     );
   }
 
-  if (isAppPage && !auth.isAuthenticated && auth.isSupabaseConfigured) {
+  if (isMobileDemoPage) {
     return (
       <>
-        <LaunchFlow />
+        <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} mobile-demo-page`}>
+          <MobileDemo topIdeas={topIdeas} initialConfigLoading={loadingTopIdeas} />
+        </main>
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isAdminPaymentsPage) {
+    return (
+      <>
+        <AdminPayments />
         <Analytics />
       </>
     );
@@ -468,6 +484,7 @@ export default function App() {
 
   return (
     <>
+    <DesktopMobileGate enabled={isAppPage}>
     <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"}${isAppPage ? " app-view" : ""}`}>
       <div className="grain" />
       <div className="cursor-aura" />
@@ -503,7 +520,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {isAppPage ? <MobileDemo topIdeas={topIdeas} /> : null}
+      {isAppPage ? <MobileDemo topIdeas={topIdeas} initialConfigLoading={loadingTopIdeas} initialTab={appTabFromPath(path)} /> : null}
 
       <section id="terminal-workspace" className={`terminal-workspace${isAppPage ? " desktop-app-workspace" : ""}`}>
         {!hasWorkspaceChrome ? (
@@ -588,6 +605,7 @@ export default function App() {
               analysisError={analysisError}
             />
           )}
+          {page === "forex" && <Forex />}
           {page === "watchlist" && (
             <Watchlist
               pendingSetups={pendingSetups}
@@ -623,6 +641,7 @@ export default function App() {
         </div>
       </section>
     </main>
+    </DesktopMobileGate>
     <Analytics />
     </>
   );
@@ -630,7 +649,7 @@ export default function App() {
 
 function AuthLoading() {
   return (
-    <main className="auth-shell">
+    <main className="auth-shell auth-graphite">
       <section className="auth-card auth-loading-card" aria-live="polite">
         <div className="launch-mark" aria-hidden="true">
           <img src={swiftChartLogo} alt="" />
@@ -648,7 +667,11 @@ function AuthLoading() {
   );
 }
 
-createRoot(document.getElementById("root")).render(
+const rootElement = document.getElementById("root");
+const appRoot = window.__swiftChartReactRoot || createRoot(rootElement);
+if (import.meta.env.DEV) window.__swiftChartReactRoot = appRoot;
+
+appRoot.render(
   <AuthProvider>
     <App />
   </AuthProvider>

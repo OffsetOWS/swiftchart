@@ -1,0 +1,224 @@
+.forex-page {
+  display: grid;
+  gap: 18px;
+}
+
+.forex-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 220px;
+  background:
+    radial-gradient(circle at 82% 18%, rgba(111, 208, 212, 0.18), transparent 28%),
+    linear-gradient(145deg, var(--paper-strong), var(--glass));
+}
+
+.forex-hero p {
+  max-width: 640px;
+}
+
+.forex-scan-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.forex-empty-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(128, 99, 21, 0.35);
+  border-radius: 20px;
+  color: var(--amber);
+  background: rgba(128, 99, 21, 0.08);
+}
+
+.forex-empty-state.error {
+  color: var(--red);
+  border-color: rgba(255, 138, 130, 0.32);
+  background: rgba(255, 138, 130, 0.08);
+}
+
+.forex-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.forex-overview-card {
+  display: grid;
+  gap: 8px;
+  min-height: 150px;
+}
+
+.forex-overview-card svg {
+  color: var(--cyan);
+}
+
+.forex-overview-card span,
+.forex-level-grid span,
+.forex-score-row span {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.forex-overview-card b {
+  font-family: var(--sans);
+  font-size: 22px;
+}
+
+.forex-overview-card small,
+.forex-pair-list small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.forex-supported,
+.forex-signals-section {
+  display: grid;
+  gap: 16px;
+}
+
+.forex-pair-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.forex-pair-list > span {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--glass);
+  font-weight: 800;
+}
+
+.forex-signal-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.forex-signal-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)),
+    var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.forex-signal-card.long {
+  border-color: rgba(119, 217, 154, 0.34);
+}
+
+.forex-signal-card.short {
+  border-color: rgba(255, 138, 130, 0.34);
+}
+
+.forex-signal-card.wait {
+  opacity: 0.78;
+}
+
+.forex-signal-head,
+.forex-score-row,
+.forex-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.forex-direction {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.forex-direction.long {
+  color: var(--green);
+}
+
+.forex-direction.short {
+  color: var(--red);
+}
+
+.forex-direction.wait {
+  color: var(--amber);
+}
+
+.forex-score-row {
+  flex-wrap: wrap;
+}
+
+.forex-score-row b {
+  color: var(--ink);
+}
+
+.forex-bias-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--cyan);
+  background: var(--glass);
+}
+
+.forex-level-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.forex-level-grid div {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.035);
+}
+
+.forex-level-grid b {
+  font-size: 13px;
+}
+
+@media (max-width: 980px) {
+  .forex-overview-grid,
+  .forex-pair-list,
+  .forex-signal-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .forex-hero,
+  .forex-signal-head,
+  .forex-section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .forex-overview-grid,
+  .forex-pair-list,
+  .forex-signal-list,
+  .forex-level-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .forex-page {
+    padding-bottom: 86px;
+  }
+}

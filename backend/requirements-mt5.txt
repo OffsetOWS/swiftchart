@@ -1,0 +1,4 @@
+# Legacy/optional only.
+# SwiftChart production Forex execution uses an MQL5 Expert Advisor in the user's MT5 terminal.
+# Install this only for controlled Python MetaTrader5 bridge experiments.
+MetaTrader5

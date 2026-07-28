@@ -148,7 +148,7 @@ export default function LaunchFlow() {
           <span className="eyebrow">SwiftChart account</span>
           <h1 id="unlock-title">Unlock Full Access</h1>
           <p>Sign in to access live market bias, signal history, and future alerts.</p>
-          <button className="google-auth-button" type="button" onClick={auth.signInWithGoogle} disabled={auth.loading || !auth.isSupabaseConfigured}>
+          <button className="google-auth-button" type="button" onClick={() => auth.signInWithGoogle("/app/home").catch(() => {})} disabled={auth.loading || !auth.isSupabaseConfigured}>
             <Chrome size={18} aria-hidden="true" />
             <span>{auth.loading ? "Checking session" : auth.isSupabaseConfigured ? "Continue with Google" : "Configure Supabase to sign in"}</span>
           </button>

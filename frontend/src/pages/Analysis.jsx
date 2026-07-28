@@ -1,5 +1,6 @@
 import { BarChart3, Search, ShieldCheck, Target, Waves } from "lucide-react";
 import Chart from "../components/Chart.jsx";
+import InstrumentLogo from "../components/InstrumentLogo.jsx";
 import TradeIdeaCard from "../components/TradeIdeaCard.jsx";
 import { formatCompactUsd, formatUsdPrice, marketDataForSignal } from "../lib/marketIntelligence.js";
 import useMarketIntelligence from "../lib/useMarketIntelligence.js";
@@ -72,10 +73,13 @@ export default function Analysis({
     <div className="analysis-grid">
       <section className="panel analysis-intelligence-hero">
         <div className="analysis-intelligence-heading">
-          <div>
-            <span className="eyebrow">MARKET INTELLIGENCE</span>
-            <h1>{marketData?.name || symbol.replace(/USDT$/i, "")}</h1>
-            <p>CoinMarketCap discovery enriched with SwiftChart market structure and opportunity analysis.</p>
+          <div className="analysis-asset-title">
+            <InstrumentLogo symbol={symbol} marketType={analysis?.marketType || analysis?.market} size={50} />
+            <div>
+              <span className="eyebrow">MARKET INTELLIGENCE</span>
+              <h1>{marketData?.name || symbol.replace(/USDT$/i, "")}</h1>
+              <p>CoinMarketCap discovery enriched with SwiftChart market structure and opportunity analysis.</p>
+            </div>
           </div>
           <span className="cmc-powered-badge"><BarChart3 size={14} /> Powered by CoinMarketCap Market Data</span>
         </div>
