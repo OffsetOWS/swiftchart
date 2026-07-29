@@ -11,6 +11,17 @@
   },
   "redirects": [
     {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "swiftchart.vercel.app"
+        }
+      ],
+      "destination": "https://swiftchart.xyz",
+      "permanent": true
+    },
+    {
       "source": "/:path*",
       "has": [
         {
