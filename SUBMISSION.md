@@ -29,7 +29,6 @@ published idea for later outcome evaluation.
 - Telegram alerts with eligibility gates and deduplication
 - Immutable signal history and candle-based lifecycle tracking
 - Paper-first execution with live-trading safety gates
-- GenLayer-assisted multi-validator signal review
 
 ## Infrastructure architecture
 
@@ -54,17 +53,12 @@ flowchart TB
     API --> WEB["React / Vite mobile-first UI"]
     SC --> DB["Immutable signal history"]
     DB --> OC["Outcome checker"]
-    SC --> GL["GenLayer validation"]
 ```
 
 Operational safeguards include bounded concurrency, rotating market windows,
 data caching, minimum-liquidity checks, API rate limiting, webhook
 authentication, duplicate alert fingerprints, stale-signal controls, explicit
 invalidation, and `LIVE_TRADING_ENABLED=false` by default.
-
-## GenLayer integration
-
-SwiftChart uses GenLayer-assisted validation as an additional review layer for high-confidence signals. Independent validators can review signal context, market regime, risk metrics, and quality controls before a signal is approved for downstream consumption. This layer is designed to improve reliability while remaining separate from the core scanning engine.
 
 ## Verifiable sample input-output records
 

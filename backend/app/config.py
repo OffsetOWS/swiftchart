@@ -35,13 +35,6 @@ class Settings(BaseSettings):
     execution_autotrade_enabled: bool = False
     execution_signal_webhook_url: str = ""
     execution_webhook_secret: str = ""
-    genlayer_enabled: bool = True
-    genlayer_mode: str = "mock"
-    genlayer_api_base_url: str = ""
-    genlayer_api_key: str = ""
-    genlayer_validator_services: str = ""
-    genlayer_llm_provider: str = ""
-    genlayer_intelligent_contract_address: str = ""
     cmc_api_key: str = ""
     cmc_api_base_url: str = "https://pro-api.coinmarketcap.com"
     cmc_cache_ttl_seconds: int = Field(default=300, ge=30, le=3600)

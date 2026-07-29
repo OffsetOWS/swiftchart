@@ -60,11 +60,6 @@ PendingSetupStatus = Literal[
     "NEEDS_TRIGGER",
     "CONTINUATION_WATCH",
 ]
-GenLayerDecision = Literal["APPROVE", "REJECT", "WAIT", "REDUCE_SIZE"]
-GenLayerRiskLevel = Literal["Low", "Medium", "High"]
-GenLayerPaperExecutionStatus = Literal["NOT_EXECUTED", "PAPER_EXECUTED"]
-
-
 class Candle(BaseModel):
     timestamp: datetime
     open: float
@@ -167,51 +162,6 @@ class PendingSetup(BaseModel):
     timeframe: str
     exchange: str
     created_at: datetime
-
-
-class GenLayerSignalPayload(BaseModel):
-    symbol: str
-    side: Literal["BUY", "SELL"]
-    timeframe: str
-    entry: float
-    entry_zone: tuple[float, float]
-    stop_loss: float
-    take_profits: list[float]
-    risk_to_reward: float
-    setup_score: float | None = None
-    market_regime: str | None = None
-    htf_bias: str | None = None
-    volatility_info: dict[str, Any] = Field(default_factory=dict)
-    reason: str
-    invalidation_condition: str
-    source: str
-    exchange: str
-
-
-class GenLayerValidationRequest(BaseModel):
-    signal: TradeIdea
-
-
-class GenLayerValidatorVote(BaseModel):
-    validator: str
-    vote: Literal["approve", "reject", "wait", "cautious"]
-    confidence: float
-    reason: str
-
-
-class GenLayerValidationResult(BaseModel):
-    id: int | None = None
-    signal: GenLayerSignalPayload
-    decision: GenLayerDecision
-    confidence_score: float
-    risk_level: GenLayerRiskLevel
-    validator_votes: list[GenLayerValidatorVote]
-    reasoning: str
-    recommended_position_size: float
-    warning_flags: list[str] = Field(default_factory=list)
-    paper_execution_status: GenLayerPaperExecutionStatus = "NOT_EXECUTED"
-    final_trade_outcome: str | None = None
-    created_at: datetime | None = None
 
 
 class MarketRegimeSnapshot(BaseModel):

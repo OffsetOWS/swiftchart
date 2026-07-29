@@ -76,7 +76,7 @@ export default function Docs() {
             </div>
           ) : null}
         </div>
-        <a className="docs-launch" href="/launch">Launch App</a>
+        <a className="docs-launch" href="/login?returnTo=%2Fapp%2Fhome">Launch App</a>
         <button className="docs-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open docs menu">
           <Menu size={28} />
         </button>

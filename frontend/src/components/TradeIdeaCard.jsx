@@ -1,5 +1,6 @@
-import { Activity, BrainCircuit, CheckCircle2, Clock3, Gauge, ShieldAlert, TrendingUp, Waves, Zap } from "lucide-react";
+import { Activity, CheckCircle2, Clock3, Gauge, ShieldAlert, TrendingUp, Waves, Zap } from "lucide-react";
 import { confidenceLabelForIdea, freshnessForIdea, liquidityForIdea, regimeViewForIdea, statusForIdea } from "../lib/signalQuality.js";
+import InstrumentLogo from "./InstrumentLogo.jsx";
 import SignalMarketContext from "./SignalMarketContext.jsx";
 
 function fmt(value) {
@@ -31,10 +32,6 @@ export default function TradeIdeaCard({
   onPaperTrade,
   tradeTaken = false,
   paperTradeLoading = false,
-  onAiScan,
-  aiResult,
-  aiError = "",
-  aiLoading = false,
   marketData = null,
   marketDataLoading = false,
 }) {
@@ -68,13 +65,16 @@ export default function TradeIdeaCard({
   return (
     <article className={`idea-card signal-card ${directionClass} status-${signalStatus}`}>
       <div className="idea-top">
-        <div className="signal-title-block">
-          <span className="exchange-label">{sourceLabel(idea.source || idea.exchange)} · {idea.timeframe}</span>
-          <h3>{idea.symbol}</h3>
-          <div className="signal-chip-row">
-            <span className={`regime-badge ${regime.tone}`}><Waves size={13} /> {regime.label}</span>
-            <span className={`freshness-pill ${freshness.status}`}><Clock3 size={13} /> {freshness.label}</span>
-            <span className={`liquidity-pill ${liquidity.status}`}><Gauge size={13} /> {liquidity.label}</span>
+        <div className="signal-title-with-logo">
+          <InstrumentLogo symbol={idea.symbol} marketType={idea.marketType || idea.market} size={46} />
+          <div className="signal-title-block">
+            <span className="exchange-label">{sourceLabel(idea.source || idea.exchange)} · {idea.timeframe}</span>
+            <h3>{idea.symbol}</h3>
+            <div className="signal-chip-row">
+              <span className={`regime-badge ${regime.tone}`}><Waves size={13} /> {regime.label}</span>
+              <span className={`freshness-pill ${freshness.status}`}><Clock3 size={13} /> {freshness.label}</span>
+              <span className={`liquidity-pill ${liquidity.status}`}><Gauge size={13} /> {liquidity.label}</span>
+            </div>
           </div>
         </div>
         <span className={`direction-badge ${directionClass}`}>
@@ -138,45 +138,17 @@ export default function TradeIdeaCard({
       {idea.downgraded_reasons?.length ? (
         <p className="confirmation-list"><b>Downgraded:</b> {idea.downgraded_reasons.join(" ")}</p>
       ) : null}
-      {(onAiScan || onPaperTrade) ? (
+      {onPaperTrade ? (
         <div className="trade-card-actions">
-          {onAiScan && (
-            <button className="secondary-action ai-scan-button" type="button" onClick={() => onAiScan(idea)} disabled={aiLoading}>
-              <BrainCircuit size={16} /> {aiLoading ? "Scanning with GenLayer AI..." : "Scan with AI"}
-            </button>
-          )}
-          {onPaperTrade && (
-            <button
-              className="primary take-trade-button"
-              type="button"
-              onClick={() => onPaperTrade(idea)}
-              disabled={tradeTaken || paperTradeLoading || !canTakeTrade}
-            >
-              {tradeTaken ? <CheckCircle2 size={16} /> : <Zap size={16} />} {takeTradeLabel}
-            </button>
-          )}
+          <button
+            className="primary take-trade-button"
+            type="button"
+            onClick={() => onPaperTrade(idea)}
+            disabled={tradeTaken || paperTradeLoading || !canTakeTrade}
+          >
+            {tradeTaken ? <CheckCircle2 size={16} /> : <Zap size={16} />} {takeTradeLabel}
+          </button>
         </div>
-      ) : null}
-      {(aiLoading || aiError || aiResult) ? (
-        <section className={`ai-consensus decision-${String(aiResult?.decision || "").toLowerCase()}`}>
-          <div className="ai-consensus-head">
-            <span>GenLayer AI Check</span>
-            <b>{aiLoading ? "SCANNING" : aiError ? "ERROR" : aiResult.decision}</b>
-          </div>
-          {aiLoading ? <p>Scanning with GenLayer AI...</p> : null}
-          {aiError ? <p className="ai-warning">GenLayer scan failed. Try again.</p> : null}
-          {aiResult && !aiLoading && !aiError ? (
-            <>
-              <div className="metric-grid ai-metrics">
-                <div className="metric"><span>Status</span><b>{aiResult.decision}</b></div>
-                <div className="metric"><span>Setup Score</span><b>{aiResult.input?.setup_score}</b></div>
-                <div className="metric"><span>RR</span><b>{aiResult.input?.rr}</b></div>
-                <div className="metric"><span>Source</span><b>{aiResult.source === "genlayer-studio" ? "Studio Contract" : aiResult.source === "genlayer-endpoint" ? "Endpoint" : "Mock Fallback"}</b></div>
-              </div>
-              <p><b>Input Used:</b> Setup Score {aiResult.input?.setup_score}, RR {aiResult.input?.rr}</p>
-            </>
-          ) : null}
-        </section>
       ) : null}
     </article>
   );

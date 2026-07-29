@@ -97,7 +97,6 @@ The desktop experience adds chart context and deeper history without changing th
 - Conservative same-candle TP/SL handling
 - Telegram analysis, Top 5, alerts, history, and statistics
 - Paper-trading ledger and optional paper execution service
-- GenLayer-assisted signal validation
 - Rate limiting, webhook signing, secure logging, and live-trading safety gates
 
 ## Tech stack
@@ -110,7 +109,7 @@ The desktop experience adds chart context and deeper history without changing th
 | Data sources | Hyperliquid; optional Variational adapter |
 | Storage | SQLite locally; Supabase/PostgreSQL-ready schemas |
 | Messaging | python-telegram-bot |
-| Validation | GenLayer JS/Python integration |
+| Validation | Internal strategy, regime, liquidity, and risk controls |
 | Deployment | Vercel frontend/serverless entry, VPS + Nginx + PM2 workflow |
 | Testing | pytest strategy, lifecycle, alert, liquidity, and execution suites |
 
@@ -128,7 +127,6 @@ flowchart LR
     H --> I["React dashboard"]
     H --> J["Telegram alerts"]
     H --> K["Paper execution"]
-    H --> L["GenLayer validation"]
     H --> M["Immutable history"]
     M --> N["Outcome checker<br/>WIN / LOSS / OPEN / NO_ENTRY"]
 ```

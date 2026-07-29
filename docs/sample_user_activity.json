@@ -3,7 +3,7 @@
   "generated_at": "2026-06-18T09:00:00Z",
   "data_classification": "synthetic_demo",
   "privacy": "Anonymous demo actor IDs; no names, IP addresses, wallet addresses, chat IDs, or device fingerprints.",
-  "event_count": 30,
+  "event_count": 28,
   "events": [
     {"event_id":"evt_0001","timestamp":"2026-06-03T00:06:12Z","actor_id":"demo_user_01","channel":"web","event":"page_visit","properties":{"page":"dashboard","viewport":"mobile"}},
     {"event_id":"evt_0002","timestamp":"2026-06-03T00:07:03Z","actor_id":"demo_user_01","channel":"web","event":"opened_dashboard","properties":{"exchange":"all","timeframe":"4h"}},
@@ -20,8 +20,6 @@
     {"event_id":"evt_0013","timestamp":"2026-06-07T12:04:24Z","actor_id":"demo_user_04","channel":"telegram","event":"top_ideas_delivered","properties":{"result_count":4,"top_scan_id":"scan_20260607_021"}},
     {"event_id":"evt_0014","timestamp":"2026-06-09T00:05:08Z","actor_id":"demo_user_01","channel":"web","event":"top_ideas_refreshed","properties":{"exchange":"all","timeframe":"4h","cache_hit":false}},
     {"event_id":"evt_0015","timestamp":"2026-06-09T00:05:10Z","actor_id":"demo_user_01","channel":"web","event":"viewed_signal","properties":{"scan_id":"scan_20260609_025","pair":"HYPEUSDT"}},
-    {"event_id":"evt_0016","timestamp":"2026-06-09T00:06:31Z","actor_id":"demo_user_01","channel":"web","event":"genlayer_validation_requested","properties":{"scan_id":"scan_20260609_025"}},
-    {"event_id":"evt_0017","timestamp":"2026-06-09T00:06:34Z","actor_id":"demo_user_01","channel":"api","event":"genlayer_validation_completed","properties":{"scan_id":"scan_20260609_025","decision":"APPROVE","confidence":88}},
     {"event_id":"evt_0018","timestamp":"2026-06-10T00:06:19Z","actor_id":"demo_user_05","channel":"web","event":"changed_timeframe","properties":{"from":"2h","to":"4h"}},
     {"event_id":"evt_0019","timestamp":"2026-06-10T00:06:42Z","actor_id":"demo_user_05","channel":"web","event":"viewed_signal","properties":{"scan_id":"scan_20260610_029","pair":"SOLUSDT"}},
     {"event_id":"evt_0020","timestamp":"2026-06-10T00:07:18Z","actor_id":"demo_user_05","channel":"web","event":"created_paper_trade","properties":{"scan_id":"scan_20260610_029","risk_pct":0.75}},
