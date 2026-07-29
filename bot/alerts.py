@@ -9,9 +9,11 @@ from app.config import get_settings
 from app.models.schemas import TradeIdea
 from app.services.alert_dedupe import mark_alert_sent as mark_dedupe_sent
 from app.services.alert_dedupe import should_skip_alert
+from app.services.execution_signals import execution_signal_id
 from bot.formatter import format_trade_alert
+from bot.keyboards import trade_alert_keyboard
 from bot.scanner import scan_top_ideas
-from bot.storage import get_subscribers
+from bot.storage import get_subscribers, save_signal
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
 
     for timeframe in timeframes_to_scan:
         ideas, selected_exchange, scan_meta = await scan_top_ideas(timeframe, exchange)
-        all_ideas.extend(ideas)
+        all_ideas.extend((idea, scan_meta.get("btc_context")) for idea in ideas)
         scanned_timeframes.append(timeframe)
         symbols_scanned += int(scan_meta.get("symbols_scanned", 0) or 0)
         valid_ideas_found += int(scan_meta.get("valid_ideas_found", len(ideas)) or 0)
@@ -93,7 +95,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     score_eligible_ideas = 0
     skipped_by_score = 0
     skipped_by_entry_status = 0
-    for idea in all_ideas:
+    for idea, btc_context in all_ideas:
         score_ok = idea_score(idea) >= min_score
         limit_order_ok = is_limit_order_alertable(idea)
         if score_ok:
@@ -117,18 +119,35 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             skipped_by_entry_status += 1
             rejection_reasons["entry_status rejected/exhausted"] += 1
             continue
-        eligible_ideas.append(idea)
+        eligible_ideas.append((idea, btc_context))
     sent = 0
     skipped_by_dedup = 0
-    for idea in eligible_ideas:
+    for idea, btc_context in eligible_ideas:
         if should_skip_alert(idea, namespace="telegram"):
             skipped_by_dedup += 1
             rejection_reasons["duplicate alert"] += 1
             continue
-        message = format_trade_alert(idea)
+        message = format_trade_alert(idea, btc_context)
+        signal_id = execution_signal_id(idea)
+        entry = sum(idea.entry_zone) / 2
+        save_signal(
+            signal_id,
+            {
+                "signal_id": signal_id,
+                "pair": idea.symbol.upper(),
+                "side": idea.direction.lower(),
+                "entry": entry,
+                "stop_loss": idea.stop_loss,
+                "tp1": idea.take_profit_1,
+                "tp2": idea.take_profit_2,
+                "exchange": idea.exchange,
+                "timeframe": idea.timeframe,
+                "analysis": message,
+            },
+        )
         for chat_id in subscribers:
             try:
-                await bot.send_message(chat_id=chat_id, text=message)
+                await bot.send_message(chat_id=chat_id, text=message, reply_markup=trade_alert_keyboard(signal_id))
                 sent += 1
             except Exception as exc:
                 rejection_reasons["send error"] += 1

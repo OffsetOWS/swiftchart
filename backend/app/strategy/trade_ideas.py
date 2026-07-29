@@ -11,6 +11,8 @@ from app.strategy.market_structure import (
     volume_confirmation,
 )
 from app.strategy.support_resistance import average_true_range, find_support_resistance, nearest_range
+from app.strategy.strict_trend_short import StrictTrendShortResult, evaluate_strict_trend_short
+from app.utils.opportunities import canonical_opportunity_key, setup_family_from_regime
 from app.strategy.market_regime import detect_market_regime
 
 
@@ -468,6 +470,38 @@ def _regime_adjustment(direction: str, score: float, market_regime: MarketRegime
     return adjusted, penalty, f"Counter-trend {direction.lower()} allowed with {len(confirmations)} strong reversal confirmations."
 
 
+def _btc_regime_label(btc_context: dict | None) -> str:
+    return str((btc_context or {}).get("regime") or "unknown").lower()
+
+
+def _exceptional_reversal(direction: str, score: float, market_regime: MarketRegimeSnapshot, confirmations: list[str]) -> bool:
+    reclaim_key = "structure_reclaimed_bullish" if direction == "Long" else "structure_reclaimed_bearish"
+    return score >= 92 and len(confirmations) >= 4 and bool(market_regime.components.get(reclaim_key))
+
+
+def _context_gate(
+    *,
+    symbol: str,
+    direction: str,
+    score: float,
+    market_regime: MarketRegimeSnapshot,
+    confirmations: list[str],
+    btc_context: dict | None,
+) -> tuple[float, float, str | None, str | None]:
+    bias = market_regime.bias
+    btc_regime = _btc_regime_label(btc_context)
+    logger.debug(
+        "Context gate warning-only pair=%s direction=%s bias=%s btc_regime=%s confidence=%.1f confirmations=%s",
+        symbol,
+        direction,
+        bias,
+        btc_regime,
+        score,
+        len(confirmations),
+    )
+    return score, 0.0, None, None
+
+
 def _clone_regime_for_setup(
     market_regime: MarketRegimeSnapshot,
     *,
@@ -718,6 +752,8 @@ def _build_idea(
         reason = f"{reason} {' '.join(quality_reasons)} Entry Status: {entry_status}."
     reason = f"{reason} Market Regime: {market_regime_data.label} ({market_regime_data.score:+.0f}); trade is {trend_alignment}; confidence adjustment {confidence_adjustment:+.0f}."
 
+    signal_candle_time = df["timestamp"].iloc[-1]
+    setup_family = setup_family_from_regime(regime)
     idea = TradeIdea(
         symbol=symbol,
         timeframe=timeframe,
@@ -757,7 +793,19 @@ def _build_idea(
         exhaustion_risk=str(quality["risk"]),
         entry_status=entry_status,
         downgraded_reasons=quality_reasons,
-        signal_candle_time=df["timestamp"].iloc[-1],
+        signal_candle_time=signal_candle_time,
+        setup_family=setup_family,
+        opportunity_key=canonical_opportunity_key(
+            exchange=exchange,
+            symbol=symbol,
+            timeframe=timeframe,
+            direction=direction,
+            setup_family=setup_family,
+            signal_candle_time=signal_candle_time,
+        ),
+        signal_candle_high=float(df["high"].iloc[-1]),
+        signal_candle_low=float(df["low"].iloc[-1]),
+        signal_candle_close=float(df["close"].iloc[-1]),
     )
     review = SignalReview(
         symbol=symbol,
@@ -838,6 +886,7 @@ def build_trade_ideas(
 
     ideas: list[TradeIdea] = []
     signal_reviews: list[SignalReview] = []
+    strict_trend_short_shadow: StrictTrendShortResult | None = None
     distance_from_mid = abs((position if position is not None else 0.5) - 0.5)
     stop_buffer = max(atr * 0.65, range_width * 0.035)
 
@@ -846,6 +895,13 @@ def build_trade_ideas(
         if review is not None:
             signal_reviews.append(review)
         if idea is not None:
+            if idea.market_regime == "TRENDING_DOWN" and idea.direction == "Short" and strict_trend_short_shadow is not None:
+                idea.production_rule_accepted = True
+                idea.strict_trend_short_eligible = strict_trend_short_shadow.eligible
+                idea.strict_trigger_type = strict_trend_short_shadow.trigger_type
+                idea.strict_confirmation_type = strict_trend_short_shadow.confirmation_type
+                idea.strict_trigger_candle_time = strict_trend_short_shadow.trigger_candle_time
+                idea.strict_trigger_candle_completed = strict_trend_short_shadow.trigger_candle_completed
             ideas.append(idea)
 
     def reject_short(reason: str, missing_condition: str) -> None:
@@ -887,6 +943,27 @@ def build_trade_ideas(
     normal_volatility = 0.002 <= atr / max(price, 1e-9) <= 0.12
     near_long_edge = position is not None and position <= 0.4
     near_short_edge = position is not None and position >= 0.6
+    if regime == "TRENDING_DOWN":
+        try:
+            strict_trend_short_shadow = evaluate_strict_trend_short(
+                regime=regime,
+                direction="Short",
+                df=df,
+                timeframe=timeframe,
+                support=support,
+                resistance=resistance,
+                sweeps=sweeps,
+                htf_bias=htf_bias,
+                normalized_position=position,
+            )
+        except Exception:
+            # Shadow instrumentation must never suppress a production signal.
+            logger.exception(
+                "Strict trend-short shadow evaluation failed symbol=%s timeframe=%s exchange=%s",
+                symbol,
+                timeframe,
+                exchange,
+            )
 
     def evidence(direction: str) -> list[str]:
         items: list[str] = []

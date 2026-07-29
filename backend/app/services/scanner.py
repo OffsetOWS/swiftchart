@@ -13,7 +13,7 @@ from app.models.schemas import PendingSetup, RiskSettings, TradeIdea
 from app.services.execution_signals import dispatch_trade_ideas_to_execution
 from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.pending_setups import build_pending_setup
+from app.services.pending_setups import build_pending_setup, pending_setup_from_trade_idea
 from app.services.trade_history import save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.support_resistance import average_true_range
@@ -216,6 +216,49 @@ async def _scan_candles(exchange: str, symbol: str, timeframe: str, limit: int, 
         raise
 
 
+def btc_regime_from_scores(score_4h: float | None, score_1d: float | None) -> dict:
+    scores = [score for score in (score_4h, score_1d) if score is not None]
+    if not scores:
+        regime = "ranging"
+        average = 0.0
+    else:
+        average = round(sum(scores) / len(scores), 1)
+        if average <= -25 or any(score <= -55 for score in scores):
+            regime = "bearish"
+        elif average >= 25 or any(score >= 55 for score in scores):
+            regime = "bullish"
+        else:
+            regime = "ranging"
+    return {"regime": regime, "score_4h": score_4h, "score_1d": score_1d, "score": average}
+
+
+async def btc_market_context(exchange: str, stats: ScanFetchStats | None = None) -> dict:
+    selected_exchange = "hyperliquid" if normalize_exchange(exchange) == "all" else normalize_exchange(exchange)
+    local_stats = stats or ScanFetchStats()
+    score_4h: float | None = None
+    score_1d: float | None = None
+    try:
+        btc_4h = await _scan_candles(selected_exchange, "BTCUSDT", "4h", 220, local_stats)
+        score_4h = regime_score_from_dataframe(btc_4h)
+    except Exception as exc:
+        logger.info("BTC 4H context unavailable exchange=%s error=%s", selected_exchange, exc)
+    try:
+        btc_1d = await _scan_candles(selected_exchange, "BTCUSDT", "1d", 220, local_stats)
+        score_1d = regime_score_from_dataframe(btc_1d)
+    except Exception as exc:
+        logger.info("BTC 1D context unavailable exchange=%s error=%s", selected_exchange, exc)
+    context = btc_regime_from_scores(score_4h, score_1d)
+    logger.info(
+        "BTC market context exchange=%s regime=%s score_4h=%s score_1d=%s score=%s",
+        selected_exchange,
+        context["regime"],
+        context["score_4h"],
+        context["score_1d"],
+        context["score"],
+    )
+    return context
+
+
 async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Semaphore, stats: ScanFetchStats) -> Candidate | None:
     async with semaphore:
         try:
@@ -230,7 +273,13 @@ async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Sem
             return None
 
 
-async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSettings, semaphore: asyncio.Semaphore, stats: ScanFetchStats) -> list[TradeIdea]:
+async def _analyze_candidate(
+    candidate: Candidate,
+    timeframe: str,
+    risk: RiskSettings,
+    semaphore: asyncio.Semaphore,
+    stats: ScanFetchStats,
+) -> list[TradeIdea]:
     async with semaphore:
         try:
             df = candidate.candles
@@ -339,21 +388,28 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             reverse=True,
         )[:5]
         save_trade_ideas(ranked)
-        await dispatch_trade_ideas_to_execution(ranked)
+        executable_ranked = [idea for idea in ranked if idea.entry_status == "READY"]
+        retest_pending = [pending_setup_from_trade_idea(idea) for idea in ranked if idea.entry_status == "WAIT_FOR_RETEST"]
+        pending_setups = sorted(
+            [*pending_setups, *retest_pending],
+            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
+            reverse=True,
+        )[:20]
+        await dispatch_trade_ideas_to_execution(executable_ranked)
         duration = round(monotonic() - started, 2)
         result = {
             "timeframe": timeframe,
             "exchange": selected_exchange,
-            "ideas": ranked,
+            "ideas": executable_ranked,
             "pending_setups": pending_setups,
             "errors": [],
-            "message": None if len(ranked) >= 5 else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
+            "message": None if len(executable_ranked) >= 5 else f"Only {len(executable_ranked)} executable setups found. Retest setups remain pending.",
             "scan_stats": {
                 "markets": len(markets),
                 "scan_window": len(scan_markets),
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
-                "valid_setups": len(ranked),
+                "valid_setups": len(executable_ranked),
                 "pending_setups": len(pending_setups),
                 "successful_candle_fetches": fetch_stats.successful_candle_fetches,
                 "failed_candle_fetches": fetch_stats.failed_candle_fetches,

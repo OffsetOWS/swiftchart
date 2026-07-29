@@ -7,7 +7,8 @@ from app.models.schemas import LiquiditySweep
 from app.strategy.market_regime import detect_market_regime
 from app.models.schemas import RiskSettings, Zone
 from app.strategy.support_resistance import average_true_range
-from app.strategy.trade_ideas import _regime_adjustment, _signal_quality_control, build_trade_ideas
+from app.services.scanner import btc_regime_from_scores
+from app.strategy.trade_ideas import _context_gate, _regime_adjustment, _signal_quality_control, build_trade_ideas
 
 
 def candles_from_prices(prices: list[float]) -> pd.DataFrame:
@@ -73,6 +74,74 @@ def test_transition_regime_requires_confirmation_before_trading():
     assert adjusted == 47
     assert penalty == -35
     assert note and "only long setups" in note
+
+
+def test_context_gate_is_warning_only_for_long_against_short_bias():
+    snapshot = MarketRegimeSnapshot(
+        score=-64,
+        label="Strong Bearish",
+        regime_type="TRENDING_DOWN",
+        confidence_score=84,
+        confidence_breakdown={"bearish": 84},
+        structure="LH/LL",
+        is_transition=False,
+        trade_decision="TRADE_ALLOWED",
+        bias="Short bias",
+        long_bias="Counter-trend longs require strong reversal confirmation",
+        short_bias="Prioritize shorts",
+        bias_reason="bearish structure active",
+        updated_at=datetime.now(UTC),
+        components={"structure_reclaimed_bullish": False},
+    )
+
+    adjusted, penalty, rejected, note = _context_gate(
+        symbol="SOLUSDT",
+        direction="Long",
+        score=86,
+        market_regime=snapshot,
+        confirmations=["price closed above 50 EMA", "bullish momentum confirmation"],
+        btc_context={"regime": "ranging"},
+    )
+
+    assert adjusted == 86
+    assert penalty == 0
+    assert rejected is None
+    assert note is None
+
+
+def test_context_gate_does_not_penalize_alt_longs_when_btc_is_bearish():
+    snapshot = MarketRegimeSnapshot(
+        score=42,
+        label="Weak Bullish",
+        regime_type="TRENDING_UP",
+        confidence_score=76,
+        confidence_breakdown={"bullish": 76},
+        structure="HH/HL",
+        is_transition=False,
+        trade_decision="TRADE_ALLOWED",
+        bias="Long bias",
+        long_bias="Prioritize longs",
+        short_bias="Counter-trend shorts require strong reversal confirmation",
+        updated_at=datetime.now(UTC),
+        components={},
+    )
+
+    adjusted, penalty, rejected, _ = _context_gate(
+        symbol="ARBUSDT",
+        direction="Long",
+        score=82,
+        market_regime=snapshot,
+        confirmations=["bullish momentum confirmation", "price closed above 50 EMA"],
+        btc_context={"regime": "bearish", "score_4h": -55, "score_1d": -35},
+    )
+
+    assert adjusted == 82
+    assert penalty == 0
+    assert rejected is None
+
+
+def test_btc_ranging_context_allows_normal_scoring():
+    assert btc_regime_from_scores(-10, 16)["regime"] == "ranging"
 
 
 def test_confirmed_bearish_transition_can_score_short_candidate():

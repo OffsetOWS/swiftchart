@@ -123,11 +123,26 @@ def init_db() -> None:
             "ALTER TABLE trade_ideas ADD COLUMN expired_at TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN candles_to_resolution INTEGER",
             "ALTER TABLE trade_ideas ADD COLUMN lifecycle_events TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN entry_status TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN setup_family TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN opportunity_key TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN retest_confirmed_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN executable_at TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN production_rule_accepted INTEGER",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trend_short_eligible INTEGER",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_type TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_confirmation_type TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_candle_time TEXT",
+            "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_candle_completed INTEGER",
         ):
             try:
                 connection.execute(statement)
             except sqlite3.OperationalError:
                 pass
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_ideas_opportunity_key "
+            "ON trade_ideas(opportunity_key) WHERE opportunity_key IS NOT NULL"
+        )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS trade_outcomes (

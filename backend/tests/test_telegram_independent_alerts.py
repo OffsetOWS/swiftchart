@@ -9,9 +9,11 @@ from app.models.schemas import TradeIdea
 class FakeBot:
     def __init__(self) -> None:
         self.messages: list[tuple[int, str]] = []
+        self.reply_markups = []
 
-    async def send_message(self, chat_id: int, text: str) -> None:
+    async def send_message(self, chat_id: int, text: str, reply_markup=None) -> None:
         self.messages.append((chat_id, text))
+        self.reply_markups.append(reply_markup)
 
 
 class FakeExchange:
@@ -93,6 +95,8 @@ def test_telegram_alert_loop_works_when_website_ideas_are_empty(monkeypatch, tmp
     assert result["eligible"] == 1
     assert result["sent"] == 1
     assert len(bot.messages) == 1
+    buttons = [button.text for row in bot.reply_markups[0].inline_keyboard for button in row]
+    assert buttons == ["🧪 Paper Trade"]
 
 
 def test_telegram_does_not_call_cached_top_ideas(monkeypatch, tmp_path):
@@ -281,10 +285,13 @@ def test_trade_alert_formatter_only_includes_public_alert_fields():
         "Stop Loss: 0.352031\n"
         "TP1: 0.328189\n"
         "TP2: 0.315749\n"
-        "R:R: 3.29\n\n"
+        "R:R: 3.29\n"
+        "Confidence: 77%\n"
+        "Bias: Bearish trend\n"
+        "BTC Context: -\n\n"
         "Reason:\n"
         "Market structure favors trend-continuation pullbacks. Short idea has confirmed "
-        "liquidity sweep/reclaim with quality score 100. Signal aligns with active bearish conditions."
+        "liquidity sweep/reclaim with quality score 100."
     )
     removed_fields = [
         "Source:",
@@ -298,13 +305,26 @@ def test_trade_alert_formatter_only_includes_public_alert_fields():
         "Exhaustion Risk:",
         "Entry Status:",
         "Rejected/Downgraded Reasons:",
-        "Trade Bias:",
         "HTF Bias:",
         "Invalid if:",
         "Not financial advice.",
     ]
     for field in removed_fields:
         assert field not in message
+
+
+def test_trade_alert_warns_when_direction_conflicts_with_bias():
+    from bot.formatter import format_trade_alert
+
+    trade_idea = idea("ARBUSDT", score=81)
+    trade_idea.direction = "Long"
+    trade_idea.regime_bias = "Short bias"
+
+    message = format_trade_alert(trade_idea, {"regime": "bearish", "score_4h": -55, "score_1d": -30, "score": -42.5})
+
+    assert "Bias: Short bias" in message
+    assert "BTC Context: Bearish | score -42.5 | 4H -55 | 1D -30" in message
+    assert "⚠️ Direction conflicts with market bias." in message
 
 
 def test_telegram_market_discovery_does_not_filter_low_liquidity(monkeypatch):

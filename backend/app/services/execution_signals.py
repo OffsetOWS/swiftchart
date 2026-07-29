@@ -12,7 +12,7 @@ import httpx
 
 from app.config import get_settings
 from app.models.schemas import TradeIdea
-from app.services.alert_dedupe import mark_alert_sent, should_skip_alert
+from app.services.alert_dedupe import mark_alert_sent, opportunity_dedupe_key, should_skip_alert
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ _sent_signal_ids: set[str] = set()
 
 def execution_signal_id(idea: TradeIdea) -> str:
     entry = sum(idea.entry_zone) / 2
-    raw = "|".join(
+    raw = opportunity_dedupe_key(idea) or "|".join(
         [
             idea.exchange.lower(),
             idea.symbol.upper(),

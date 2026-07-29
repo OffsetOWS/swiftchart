@@ -2,7 +2,10 @@ from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
-from app.services.trade_history import evaluate_trade
+from app.config import get_settings
+from app.models.schemas import TradeIdea
+from app.services.trade_history import evaluate_trade, save_trade_ideas
+from app.utils import database
 
 
 def row() -> dict:
@@ -80,3 +83,79 @@ def test_lifecycle_can_move_stop_to_break_even_after_tp1():
     assert outcome["result"] == "BREAK_EVEN"
     assert outcome["tp1_hit_at"] is not None
     assert outcome["sl_hit_at"] is not None
+
+
+def test_recent_same_direction_sl_does_not_block_saving(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'swiftchart.db'}")
+    monkeypatch.setenv("ALERT_DEDUPE_STATE_PATH", str(tmp_path / "alert_dedupe.json"))
+    get_settings.cache_clear()
+    database._INITIALIZED = False
+    try:
+        with database.get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO trade_ideas (
+                    symbol, timeframe, exchange, direction, market_regime,
+                    higher_timeframe_bias, setup_score, setup_grade,
+                    entry_zone_low, entry_zone_high, stop_loss, take_profit_1,
+                    take_profit_2, risk_reward, confidence, reason, invalidation,
+                    status, sl_hit_at, closed_at, regime_score, regime_label,
+                    trend_alignment
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "SOLUSDT",
+                    "4h",
+                    "hyperliquid",
+                    "LONG",
+                    "TRENDING_UP",
+                    "HTF_BULLISH",
+                    82,
+                    "Valid Setup",
+                    100,
+                    101,
+                    96,
+                    110,
+                    118,
+                    2.5,
+                    82,
+                    "Old setup",
+                    "Invalid below SL",
+                    "SL_HIT",
+                    datetime(2026, 5, 1, 0, 0, tzinfo=UTC).isoformat(),
+                    datetime(2026, 5, 1, 0, 0, tzinfo=UTC).isoformat(),
+                    42,
+                    "Weak Bullish",
+                    "with-trend",
+                ),
+            )
+        idea = TradeIdea(
+            symbol="SOLUSDT",
+            timeframe="4h",
+            exchange="hyperliquid",
+            direction="Long",
+            market_regime="TRENDING_UP",
+            higher_timeframe_bias="HTF_BULLISH",
+            setup_score=84,
+            setup_grade="Valid Setup",
+            entry_zone=(102, 103),
+            stop_loss=96,
+            take_profit_1=112,
+            take_profit_2=120,
+            risk_reward_ratio=2.5,
+            reason="New setup",
+            confidence_score=84,
+            invalid_condition="Invalid below SL",
+            regime_score=45,
+            regime_label="Weak Bullish",
+            trend_alignment="with-trend",
+            signal_candle_time=datetime(2026, 5, 1, 20, 0, tzinfo=UTC),
+        )
+
+        ids = save_trade_ideas([idea])
+
+        assert len(ids) == 1
+    finally:
+        database._INITIALIZED = False
+        get_settings.cache_clear()
