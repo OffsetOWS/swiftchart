@@ -200,3 +200,15 @@ async def alert_loop(bot: Bot) -> None:
         except Exception:
             logger.exception("Alert scan failed")
         await asyncio.sleep(max(300, interval))
+
+
+async def forex_alert_loop(bot: Bot) -> None:
+    interval = int(os.getenv("FOREX_TELEGRAM_DISPATCH_INTERVAL_SECONDS", "60"))
+    await asyncio.sleep(int(os.getenv("FOREX_TELEGRAM_DISPATCH_STARTUP_DELAY_SECONDS", "10")))
+    while True:
+        try:
+            result = await dispatch_pending_forex(bot)
+            logger.info("Forex Telegram dispatch complete: %s", result)
+        except Exception:
+            logger.exception("Forex Telegram dispatch failed")
+        await asyncio.sleep(max(30, interval))

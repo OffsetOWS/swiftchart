@@ -27,7 +27,7 @@ from bot.handlers import (  # noqa: E402
     top,
     unsubscribe,
 )
-from bot.alerts import alert_loop  # noqa: E402
+from bot.alerts import alert_loop, forex_alert_loop  # noqa: E402
 from app.utils.database import init_db  # noqa: E402
 from app.utils.secure_logging import install_secure_logging  # noqa: E402
 
@@ -48,6 +48,7 @@ async def post_init(application: Application) -> None:
         ]
     )
     asyncio.create_task(alert_loop(application.bot))
+    asyncio.create_task(forex_alert_loop(application.bot))
 
 
 def build_application() -> Application:

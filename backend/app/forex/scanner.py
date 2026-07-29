@@ -69,7 +69,9 @@ def _structure(df: pd.DataFrame) -> tuple[str, str]:
     else:
         structure = "neutral"
     candle_time = pd.Timestamp(recent.iloc[-1]["timestamp"]).isoformat()
-    identifier = f"{candle_time}:{recent_high:.5f}:{recent_low:.5f}:{structure}"
+    # The setup candle is the immutable signal identity. Its in-progress
+    # high/low can change between provider requests without creating a new setup.
+    identifier = f"{candle_time}:{structure}"
     return structure, identifier
 
 
