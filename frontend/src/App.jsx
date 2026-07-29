@@ -282,6 +282,10 @@ export default function App() {
 
   useEffect(() => {
     if (auth.loading) return;
+    if (isLandingPage && auth.isAuthenticated) {
+      navigate("/app/home", { replace: true });
+      return;
+    }
     if (isDisabledCommercePage) {
       navigate("/app/home", { replace: true });
       return;
@@ -303,7 +307,7 @@ export default function App() {
     if (path === "/app" && auth.isAuthenticated) {
       navigate("/app/home", { replace: true });
     }
-  }, [auth.loading, auth.isAuthenticated, isProtectedPage, isCredentialEntryPage, isDisabledCommercePage, isLaunchPage, path]);
+  }, [auth.loading, auth.isAuthenticated, isLandingPage, isProtectedPage, isCredentialEntryPage, isDisabledCommercePage, isLaunchPage, path]);
 
   useEffect(() => {
     trackEvent("page_visit", { page });
@@ -385,6 +389,10 @@ export default function App() {
       </button>
     </div>
   ) : null;
+
+  if (isLandingPage && (auth.loading || auth.isAuthenticated)) {
+    return <AuthLoading />;
+  }
 
   if (isLandingPage) {
     return (
