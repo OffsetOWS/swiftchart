@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react";
 import {
-  Activity,
   AppWindow,
   Bell,
   BookOpen,
@@ -12,7 +11,6 @@ import {
   Download,
   ExternalLink,
   FileText,
-  Gauge,
   HelpCircle,
   Info,
   KeyRound,
@@ -45,7 +43,7 @@ const LEGAL_URLS = {
 };
 
 const SETTINGS_SECTIONS = [
-  ["settings-profile", "Profile", "Account details and subscription", User],
+  ["settings-profile", "Profile", "Account details and security", User],
   ["settings-notifications", "Notifications", "Trade, market, and delivery alerts", Bell],
   ["settings-trading", "Trading Preferences", "Default market and scan filters", SlidersHorizontal],
   ["settings-appearance", "Appearance", "Theme, spacing, and motion", Palette],
@@ -55,7 +53,7 @@ const SETTINGS_SECTIONS = [
 
 const SUPPORT_SECTIONS = [
   ["support-help", "Help Center", "Search SwiftChart answers", CircleHelp],
-  ["support-contact", "Contact Support", "Account, billing, or technical help", MessageCircle],
+  ["support-contact", "Contact Support", "Account or technical help", MessageCircle],
   ["support-bug", "Report a Bug", "Send a structured technical report", Bug],
   ["support-feature", "Request a Feature", "Tell us what SwiftChart should solve", Sparkles],
   ["support-telegram", "Telegram Community", "Open the configured SwiftChart Telegram", Send],
@@ -70,7 +68,6 @@ const FAQS = [
   ["Trade Bias", "What does Long or Short mean?", "Long expects price strength; Short expects price weakness. Always review the stop and invalidation before acting."],
   ["Entry, Stop Loss, TP1 and TP2", "How do execution levels work?", "Entry is the decision zone, Stop Loss defines invalidation, and TP1/TP2 are staged profit objectives."],
   ["Crypto and Forex", "Can I switch markets?", "Use the Crypto/Forex switch on Home. The selected market carries into Scan, History, and Account."],
-  ["Subscriptions", "What changes with Pro?", "Pro expands score access, scan limits, full details, history features, and Telegram alerts according to the active plan."],
   ["Notifications", "Why did I not receive browser push?", "In-app alerts remain available. Browser push also requires permission from your browser and operating system."],
   ["Account and Login", "How do I reset my password?", "Open Settings, then Privacy & Security or Profile, and request a secure reset email."],
   ["Telegram Alerts", "How do I connect Telegram?", "Open Telegram from Account and follow the configured SwiftChart bot flow. Staff will never request passwords or private keys."],
@@ -178,7 +175,7 @@ function SettingsOverview({ onNavigate, onBack }) {
   );
 }
 
-function ProfileSettings({ onBack, onUpgrade }) {
+function ProfileSettings({ onBack }) {
   const auth = useAuth();
   const originalName = auth.profile?.username || auth.user?.user_metadata?.username || "";
   const [username, setUsername] = useState(originalName);
@@ -190,8 +187,6 @@ function ProfileSettings({ onBack, onUpgrade }) {
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const fileRef = useRef(null);
-  const plan = String(auth.profile?.subscription_status || "free").replaceAll("_", " ");
-  const free = plan === "free";
 
   function chooseAvatar(event) {
     const file = event.target.files?.[0];
@@ -252,9 +247,7 @@ function ProfileSettings({ onBack, onUpgrade }) {
         </section>
         <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={28} pattern="[A-Za-z0-9_]+" required /></label>
         <label>Email address<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required /></label>
-        <SettingsGroup title="Access">
-          <SettingsRow icon={Gauge} title="Subscription plan" value={plan.replace(/\b\w/g, (letter) => letter.toUpperCase())} onClick={free ? onUpgrade : undefined} />
-          <SettingsRow icon={Activity} title="Daily scan usage" description={free ? "5 scans/day plan limit · live usage sync unavailable" : "Unlimited scans"} />
+        <SettingsGroup title="Security">
           <SettingsRow icon={KeyRound} title="Change password" description="Send a secure reset email" onClick={sendPasswordReset} />
         </SettingsGroup>
         <Notice>{notice}</Notice><Notice tone="error">{error}</Notice>
@@ -324,10 +317,10 @@ function NotificationSettings({ preferences, updateSection, onBack }) {
   );
 }
 
-function TradingSettings({ preferences, updateSection, resetSection, onBack, isFree }) {
+function TradingSettings({ preferences, updateSection, resetSection, onBack }) {
   const settings = preferences.trading;
   const [confirmReset, setConfirmReset] = useState(false);
-  const minimum = isFree ? Math.min(settings.minimumScore, 75) : settings.minimumScore;
+  const minimum = settings.minimumScore;
   return (
     <div className="graphite-screen settings-screen">
       <PageHeader title="Trading Preferences" onBack={onBack} />
@@ -338,7 +331,7 @@ function TradingSettings({ preferences, updateSection, resetSection, onBack, isF
         <Segment value={settings.defaultTimeframe} options={[["15m", "15m"], ["1h", "1H"], ["4h", "4H"], ["1d", "1D"]]} onChange={(value) => updateSection("trading", { defaultTimeframe: value })} label="Default timeframe" />
       </SettingsGroup>
       <SettingsGroup title="Scan Defaults">
-        <label className="settings-range">Minimum scan score <strong>{minimum}</strong><input type="range" min="65" max={isFree ? "75" : "100"} value={minimum} onChange={(event) => updateSection("trading", { minimumScore: Number(event.target.value) })} /></label>
+        <label className="settings-range">Minimum scan score <strong>{minimum}</strong><input type="range" min="0" max="100" value={minimum} onChange={(event) => updateSection("trading", { minimumScore: Number(event.target.value) })} /></label>
         <label className="settings-select">Preferred exchange<select value={settings.preferredExchange} onChange={(event) => updateSection("trading", { preferredExchange: event.target.value })}><option value="all">All Exchanges</option><option value="hyperliquid">Hyperliquid</option><option value="variational">Variational</option></select><ChevronDown size={15} /></label>
         <label className="settings-select">Default sorting<select value={settings.defaultSorting} onChange={(event) => updateSection("trading", { defaultSorting: event.target.value })}><option value="highest_score">Highest Score</option><option value="newest">Newest</option><option value="highest_rr">Highest R:R</option></select><ChevronDown size={15} /></label>
       </SettingsGroup>
@@ -472,7 +465,7 @@ function AppInformation({ onBack }) {
         </div>
       </SettingsGroup>
       <Notice>{notice}</Notice>
-      {confirmClear ? <ConfirmDialog title="Clear cached app data?" message="Cached assets and temporary session data will be removed. Your account, subscription, backend history, and preferences remain." confirmLabel="Clear Cache" onCancel={() => setConfirmClear(false)} onConfirm={clearCache} /> : null}
+      {confirmClear ? <ConfirmDialog title="Clear cached app data?" message="Cached assets and temporary session data will be removed. Your account, backend history, and preferences remain." confirmLabel="Clear Cache" onCancel={() => setConfirmClear(false)} onConfirm={clearCache} /> : null}
     </div>
   );
 }
@@ -578,7 +571,7 @@ function SupportForm({ kind, onBack }) {
             <label>Name<input value={values.name} onChange={(event) => set("name", event.target.value)} required /></label>
             <label>Email<input type="email" value={values.email} onChange={(event) => set("email", event.target.value)} required /></label>
             <label>Subject<input value={values.subject} onChange={(event) => set("subject", event.target.value)} required /></label>
-            <label>Category<select value={values.category} onChange={(event) => set("category", event.target.value)}>{["Account", "Billing", "Technical Issue", "Signal or Scan Issue", "Telegram", "Feature Question", "Other"].map((option) => <option key={option}>{option}</option>)}</select></label>
+            <label>Category<select value={values.category} onChange={(event) => set("category", event.target.value)}>{["Account", "Technical Issue", "Signal or Scan Issue", "Telegram", "Feature Question", "Other"].map((option) => <option key={option}>{option}</option>)}</select></label>
             <label>Message<textarea value={values.message} onChange={(event) => set("message", event.target.value)} required /></label>
           </>
         ) : null}
@@ -653,14 +646,12 @@ export default function SettingsSupport({
   preferencesController,
   onNavigate,
   onBack,
-  onUpgrade,
 }) {
-  const auth = useAuth();
   const props = { preferences: preferencesController.preferences, updateSection: preferencesController.updateSection, resetSection: preferencesController.resetSection, onBack };
   if (view === "settings") return <SettingsOverview onNavigate={onNavigate} onBack={onBack} />;
-  if (view === "settings-profile") return <ProfileSettings onBack={onBack} onUpgrade={onUpgrade} />;
+  if (view === "settings-profile") return <ProfileSettings onBack={onBack} />;
   if (view === "settings-notifications") return <NotificationSettings {...props} />;
-  if (view === "settings-trading") return <TradingSettings {...props} isFree={String(auth.profile?.subscription_status || "free") === "free"} />;
+  if (view === "settings-trading") return <TradingSettings {...props} />;
   if (view === "settings-appearance") return <AppearanceSettings {...props} />;
   if (view === "settings-security") return <SecuritySettings onBack={onBack} onDeleteAccount={() => onNavigate("settings-profile")} />;
   if (view === "settings-info") return <AppInformation onBack={onBack} />;

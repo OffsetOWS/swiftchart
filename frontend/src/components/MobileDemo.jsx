@@ -3,15 +3,11 @@ import {
   Bell,
   CheckCircle2,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
-  Copy,
-  CreditCard,
   HelpCircle,
   History,
   House,
   LineChart,
-  Lock,
   LogOut,
   MessageCircle,
   ScanLine,
@@ -28,8 +24,6 @@ import { useAuth } from "../lib/AuthContext.jsx";
 import { getForexOverview, getForexSignals, scanForex } from "../lib/api.js";
 import { MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
 import { formatSessionCountdown, formatUtcClock, getForexSessionState } from "../lib/forexSessions.js";
-import { PAYMENT_PLANS, listMyPaymentSubmissions, submitPayment } from "../lib/payments.js";
-import { PAYMENTS_COMING_SOON_MESSAGE, PAYMENTS_ENABLED } from "../lib/featureFlags.js";
 import { createPaperTradeFromSignal, listPaperTrades, signalIdForIdea } from "../lib/paperTrades.js";
 import { useNotifications } from "../lib/notifications.js";
 import { useAppPreferences } from "../lib/appPreferences.js";
@@ -51,15 +45,15 @@ function hasSeenAppSplash() {
 }
 
 const mockSignals = [
-  { rank: 1, symbol: "BTCUSDT", direction: "Long", timeframe: "4h", score: 97, tier: "Elite", entry: "104,200 - 104,850", tp: "108,900", sl: "102,760", rr: "3.1R", confidence: "Very high", regime: "Bullish continuation", thesis: "Liquidity swept below range. Momentum reclaimed. Clean continuation if BTC holds above entry.", locked: true },
-  { rank: 2, symbol: "HYPEUSDT", direction: "Short", timeframe: "4h", score: 92, tier: "High Conviction", entry: "41.90 - 42.30", tp: "38.70", sl: "43.10", rr: "3.4R", confidence: "High", regime: "Bearish retest", thesis: "Weak retest into supply. Sellers still defending the prior breakdown.", locked: true },
-  { rank: 3, symbol: "ETHUSDT", direction: "Long", timeframe: "6h", score: 85, tier: "Strong", entry: "3,520 - 3,555", tp: "3,710", sl: "3,470", rr: "2.6R", confidence: "High", regime: "Trend continuation", thesis: "ETH is holding trend structure. Needs BTC strength to confirm.", locked: true },
+  { rank: 1, symbol: "BTCUSDT", direction: "Long", timeframe: "4h", score: 97, tier: "Elite", entry: "104,200 - 104,850", tp: "108,900", sl: "102,760", rr: "3.1R", confidence: "Very high", regime: "Bullish continuation", thesis: "Liquidity swept below range. Momentum reclaimed. Clean continuation if BTC holds above entry." },
+  { rank: 2, symbol: "HYPEUSDT", direction: "Short", timeframe: "4h", score: 92, tier: "High Conviction", entry: "41.90 - 42.30", tp: "38.70", sl: "43.10", rr: "3.4R", confidence: "High", regime: "Bearish retest", thesis: "Weak retest into supply. Sellers still defending the prior breakdown." },
+  { rank: 3, symbol: "ETHUSDT", direction: "Long", timeframe: "6h", score: 85, tier: "Strong", entry: "3,520 - 3,555", tp: "3,710", sl: "3,470", rr: "2.6R", confidence: "High", regime: "Trend continuation", thesis: "ETH is holding trend structure. Needs BTC strength to confirm." },
   { rank: 4, symbol: "SOLUSDT", direction: "Long", timeframe: "4h", score: 72, tier: "Watchlist", entry: "142.20 - 144.10", tp: "149.80", sl: "139.70", rr: "2.8R", confidence: "Medium", regime: "Selective bullish", thesis: "Clean structure, lower conviction until volume expands." },
   { rank: 5, symbol: "AVAXUSDT", direction: "Short", timeframe: "1h", score: 69, tier: "Watchlist", entry: "31.80 - 32.10", tp: "30.20", sl: "32.70", rr: "1.9R", confidence: "Medium", regime: "Momentum fade", thesis: "Momentum is fading, but risk/reward is still developing." },
   { rank: 6, symbol: "LINKUSDT", direction: "Long", timeframe: "2h", score: 71, tier: "Watchlist", entry: "14.12 - 14.28", tp: "15.10", sl: "13.78", rr: "2.1R", confidence: "Medium", regime: "Range reclaim", thesis: "Reclaimed prior range. Needs a strong close above entry." },
   { rank: 7, symbol: "INJUSDT", direction: "Long", timeframe: "4h", score: 74, tier: "Watchlist", entry: "24.40 - 24.85", tp: "26.90", sl: "23.70", rr: "2.4R", confidence: "Medium", regime: "Bullish rotation", thesis: "Relative strength is improving while majors hold structure." },
   { rank: 8, symbol: "DOGEUSDT", direction: "Short", timeframe: "1h", score: 67, tier: "Watchlist", entry: "0.143 - 0.145", tp: "0.136", sl: "0.148", rr: "1.7R", confidence: "Low-medium", regime: "Weak bounce", thesis: "Weak bounce into resistance. Lower score due to choppy volume." },
-  { rank: 9, symbol: "SUIUSDT", direction: "Long", timeframe: "6h", score: 88, tier: "Strong", entry: "3.42 - 3.49", tp: "3.82", sl: "3.28", rr: "2.5R", confidence: "High", regime: "Trend expansion", thesis: "Expansion setup is clean, but full levels require Pro.", locked: true },
+  { rank: 9, symbol: "SUIUSDT", direction: "Long", timeframe: "6h", score: 88, tier: "Strong", entry: "3.42 - 3.49", tp: "3.82", sl: "3.28", rr: "2.5R", confidence: "High", regime: "Trend expansion", thesis: "Expansion structure is clean with momentum aligned above the trigger zone." },
   { rank: 10, symbol: "AAVEUSDT", direction: "Long", timeframe: "4h", score: 73, tier: "Watchlist", entry: "286 - 292", tp: "312", sl: "276", rr: "2.0R", confidence: "Medium", regime: "Demand hold", thesis: "Demand is holding. Watch for a clean trigger." },
 ];
 
@@ -81,9 +75,6 @@ const forexHistory = [
   { symbol: "GBPUSD", score: 79, result: "TP1", state: "TP1 hit", r: "+1.0R", date: "Yesterday", market: "forex" },
   { symbol: "USDJPY", score: 72, result: "Expired", state: "Expired", r: "0R", date: "Jul 12", market: "forex" },
 ];
-
-// Temporarily keep every setup open while the product experience is being built.
-const SIGNAL_LOCKING_ENABLED = false;
 
 function scoreTier(score) {
   if (score >= 95) return "Elite";
@@ -113,7 +104,6 @@ function normalizeIdea(idea, index) {
     confidence: idea?.confidence_score !== undefined ? `${Math.round(Number(idea.confidence_score))}%` : fallback.confidence,
     regime: idea?.regime_label || idea?.market_regime || fallback.regime,
     thesis: idea?.reason || fallback.thesis,
-    locked: SIGNAL_LOCKING_ENABLED && score > 75,
   };
 }
 
@@ -205,12 +195,6 @@ function tokenSymbol(symbol) {
   return normalizeCryptoSymbol(symbol);
 }
 
-function planLabel(status) {
-  if (status === "pro_lifetime") return "Pro Lifetime";
-  if (status === "pro_monthly") return "Pro Monthly";
-  return "Free";
-}
-
 function ScoreBadge({ score }) {
   return <span className={`graphite-score ${score >= 90 ? "elite" : score > 75 ? "pro" : ""}`}>{score}</span>;
 }
@@ -237,7 +221,7 @@ function Direction({ direction }) {
 function statusForSignal(signal) {
   if (signal.market === MARKET_TYPES.forex) return signal.score >= 80 ? signal.grade || "A" : signal.status || "Open";
   if (signal.score >= 90) return "High Conviction";
-  if (signal.score > 75) return SIGNAL_LOCKING_ENABLED ? "Pro" : signal.tier || scoreTier(signal.score);
+  if (signal.score > 75) return signal.tier || scoreTier(signal.score);
   return "Open";
 }
 
@@ -318,7 +302,6 @@ function SparkChart() {
 }
 
 function SignalRow({ signal, onSelect, compact = false }) {
-  const locked = SIGNAL_LOCKING_ENABLED && (signal.locked || signal.score > 75);
   return (
     <button type="button" className={`graphite-row ${compact ? "compact" : ""}`} onClick={() => onSelect(signal)}>
       <InstrumentLogo symbol={signal.symbol} marketType={signal.market} />
@@ -327,7 +310,7 @@ function SignalRow({ signal, onSelect, compact = false }) {
         <span><Direction direction={signal.direction} /> {signal.timeframe.toUpperCase()} · {signal.rr}</span>
       </div>
       <ScoreBadge score={signal.score} />
-      <em>{locked && signal.score < 90 ? <Lock size={12} /> : null}{statusForSignal(signal)}</em>
+      <em>{statusForSignal(signal)}</em>
       <ChevronRight className="graphite-row-chevron" size={18} aria-hidden="true" />
     </button>
   );
@@ -449,12 +432,12 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
   const forexTimeframe = "15m";
   const [coinQuery, setCoinQuery] = useState("");
   const [appliedCoinQuery, setAppliedCoinQuery] = useState("");
-  const [scoreBand, setScoreBand] = useState(() => tradingPreferences.minimumScore >= 90 ? "90-100" : tradingPreferences.minimumScore >= 75 ? "75-90" : "65-75");
-  const [timeframe, setTimeframe] = useState(() => tradingPreferences.defaultTimeframe);
+  const [scoreBand, setScoreBand] = useState("all");
+  const [timeframe, setTimeframe] = useState("all");
   const [exchange, setExchange] = useState(() => tradingPreferences.preferredExchange);
   const visibleSignals = useMemo(() => {
     const query = tokenSymbol(appliedCoinQuery);
-    const [minimumScore, maximumScore] = scoreBand.split("-").map(Number);
+    const [minimumScore, maximumScore] = scoreBand === "all" ? [0, 100] : scoreBand.split("-").map(Number);
     return signals.filter((signal) => {
       if (query && !tokenSymbol(signal.symbol).includes(query)) return false;
       if (signal.score < minimumScore || signal.score > maximumScore) return false;
@@ -529,6 +512,7 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
         <label>
           <span className="sr-only">Score range</span>
           <select value={scoreBand} onChange={(event) => setScoreBand(event.target.value)} aria-label="Score range">
+            <option value="all">All Scores</option>
             <option value="65-75">65-75</option>
             <option value="75-90">75-90</option>
             <option value="90-100">90-100</option>
@@ -538,6 +522,7 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
         <label>
           <span className="sr-only">Timeframe</span>
           <select value={timeframe} onChange={(event) => setTimeframe(event.target.value)} aria-label="Timeframe">
+            <option value="all">All Timeframes</option>
             {["15m", "1h", "2h", "4h", "6h", "1d"].map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}
           </select>
           <ChevronDown size={14} aria-hidden="true" />
@@ -555,7 +540,7 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
 
       <section className="graphite-section">
         <div className="graphite-section-head">
-          <span>Premium results</span>
+          <span>Scan results</span>
           <strong className="graphite-results-status">{scanState === "scanning" ? "Analyzing..." : "Updated just now"}<i /></strong>
         </div>
         <div className="graphite-stack graphite-signal-list compact">
@@ -567,10 +552,9 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
   );
 }
 
-function ExecutionLadder({ signal, locked }) {
-  const displayValue = (value) => locked ? <><Lock size={12} /> Locked</> : value;
+function ExecutionLadder({ signal }) {
   return (
-    <section className={`graphite-execution-ladder${locked ? " is-locked" : ""}`} aria-label="Execution ladder">
+    <section className="graphite-execution-ladder" aria-label="Execution ladder">
       <span className="graphite-ladder-title">Execution ladder</span>
       <div className="graphite-ladder-rail" aria-hidden="true">
         <i className="target" />
@@ -580,15 +564,15 @@ function ExecutionLadder({ signal, locked }) {
       <div className="graphite-ladder-values">
         <div className="target">
           <span>TP1</span>
-          <strong>{displayValue(signal.tp)}</strong>
+          <strong>{signal.tp}</strong>
         </div>
         <div className="entry">
           <span>Entry zone</span>
-          <strong>{displayValue(signal.entry)}</strong>
+          <strong>{signal.entry}</strong>
         </div>
         <div className="stop">
           <span>Stop loss</span>
-          <strong>{displayValue(signal.sl)}</strong>
+          <strong>{signal.sl}</strong>
         </div>
       </div>
     </section>
@@ -600,7 +584,7 @@ function sentenceCase(value) {
   return text ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : "market structure supports the setup";
 }
 
-function tradeReasoning(signal, { isForex, locked }) {
+function tradeReasoning(signal, { isForex }) {
   const direction = String(signal.direction || "trade").toLowerCase();
   const timeframe = String(signal.timeframe || "").toUpperCase();
   const raw = signal.rawIdea || {};
@@ -614,22 +598,19 @@ function tradeReasoning(signal, { isForex, locked }) {
   const confirmations = Array.isArray(raw.reversal_confirmations) && raw.reversal_confirmations.length
     ? ` Confirmations include ${raw.reversal_confirmations.join(", ")}.`
     : "";
-  const execution = locked
-    ? " Exact entry, target, and invalidation levels remain locked for Pro."
-    : ` The ${signal.entry} zone is the decision area; confirmation favors a move toward ${signal.tp}, while ${signal.sl} invalidates the setup.`;
+  const execution = ` The ${signal.entry} zone is the decision area; confirmation favors a move toward ${signal.tp}, while ${signal.sl} invalidates the setup.`;
   const quality = signal.score < 75
     ? ` Its ${signal.score} score and ${signal.rr} profile keep it on the watchlist until ${direction === "short" ? "downside" : "upside"} confirmation improves.`
     : ` Its ${signal.score} score and ${signal.rr} profile place it in the ${String(signal.tier || "ranked").toLowerCase()} tier.`;
-  const invalidation = !locked && raw.invalid_condition
+  const invalidation = raw.invalid_condition
     ? ` Backend invalidation: ${String(raw.invalid_condition).trim()}`
     : "";
 
   return `${setup}.${confirmations}${execution}${quality}${invalidation}`;
 }
 
-function TradeAnalysis({ signal, onClose, onUpgrade, onTakeTrade, tradeSaveState }) {
+function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
   if (!signal) return null;
-  const locked = SIGNAL_LOCKING_ENABLED && (signal.locked || signal.score > 75);
   const isForex = signal.market === MARKET_TYPES.forex;
   const activeTradeSaveState = tradeSaveState?.symbol === signal.symbol ? tradeSaveState : { status: "idle" };
   return (
@@ -651,18 +632,19 @@ function TradeAnalysis({ signal, onClose, onUpgrade, onTakeTrade, tradeSaveState
           <StatTile label="R/R" value={signal.rr} tone="reward" />
         </div>
 
-        <ExecutionLadder signal={signal} locked={locked} />
+        <ExecutionLadder signal={signal} />
 
         <div className="graphite-context-pills" aria-label="Trade context">
           {!isForex ? <span>Context · {signal.regime}</span> : null}
           <span>{signal.timeframe.toUpperCase()} structure</span>
+          <span>Confidence · {signal.confidence || signal.score}</span>
           {isForex ? <span>Session · {signal.session}</span> : null}
-          {isForex && signal.tp2 ? <span>TP2 · {locked ? "Locked" : signal.tp2}</span> : null}
+          {isForex && signal.tp2 ? <span>TP2 · {signal.tp2}</span> : null}
         </div>
 
         <section className="graphite-reasoning">
           <span>Reasoning</span>
-          <p>{tradeReasoning(signal, { isForex, locked })}</p>
+          <p>{tradeReasoning(signal, { isForex })}</p>
         </section>
 
         <div className="graphite-detail-actions">
@@ -670,9 +652,9 @@ function TradeAnalysis({ signal, onClose, onUpgrade, onTakeTrade, tradeSaveState
           <button
             type="button"
             disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved"}
-            onClick={locked && !isForex ? onUpgrade : isForex ? undefined : () => onTakeTrade(signal)}
+            onClick={isForex ? undefined : () => onTakeTrade(signal)}
           >
-            {isForex ? "Auto Trade" : locked ? "Unlock to Take Trade" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
+            {isForex ? "Auto Trade" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
           </button>
           {isForex ? <button type="button" className="ghost">Copy Setup</button> : null}
           {isForex ? <button type="button" className="ghost">Share Telegram</button> : null}
@@ -742,12 +724,11 @@ function HistoryScreen({ market, paperTrades = [] }) {
   );
 }
 
-function AccountScreen({ onUpgrade, onSettings, onSupport }) {
+function AccountScreen({ onSettings, onSupport }) {
   const auth = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const activePlan = planLabel(auth.profile?.subscription_status);
   const name = auth.profile?.username || auth.user?.email?.split("@")[0] || "doflam";
 
   async function logout() {
@@ -768,13 +749,12 @@ function AccountScreen({ onUpgrade, onSettings, onSupport }) {
         <div>
           <span>Profile</span>
           <strong>{name}</strong>
-          <p>{activePlan}{activePlan === "Free" ? " · 5 scans/day · scores 65-75" : " · Full access active"}</p>
+          <p>{auth.user?.email || "SwiftChart account"}</p>
         </div>
       </section>
 
       <div className="graphite-settings">
         <button type="button" onClick={() => window.open(TELEGRAM_BOT_URL, "_blank", "noopener,noreferrer")}><MessageCircle size={18} /><span>Telegram</span><CheckCircle2 size={16} /></button>
-        <button type="button" onClick={onUpgrade}><CreditCard size={18} /><span>Upgrade Plan</span><ChevronRight size={16} /></button>
         <button type="button" onClick={onSettings}><Settings size={18} /><span>Settings</span><ChevronRight size={16} /></button>
         <button type="button" onClick={onSupport}><HelpCircle size={18} /><span>Support</span><ChevronRight size={16} /></button>
         <button type="button" onClick={() => setConfirmLogout(true)} disabled={loggingOut}><LogOut size={18} /><span>{loggingOut ? "Signing out..." : "Log out"}</span><ChevronRight size={16} /></button>
@@ -792,127 +772,6 @@ function AccountScreen({ onUpgrade, onSettings, onSupport }) {
             </div>
           </section>
         </div>
-      ) : null}
-    </div>
-  );
-}
-
-function UpgradePlanScreen({ onBack, onPayment }) {
-  const auth = useAuth();
-  const activePlan = planLabel(auth.profile?.subscription_status);
-  return (
-    <div className="graphite-screen">
-      <button type="button" className="graphite-back" onClick={onBack}><ChevronLeft size={18} /> Account</button>
-      <section className="graphite-history-hero small">
-        <span>Current plan</span>
-        <strong>{activePlan}</strong>
-        <p>{activePlan === "Free" ? "Upgrade when you want full score access and alerts." : "SwiftChart Pro access is active."}</p>
-      </section>
-      {!PAYMENTS_ENABLED ? <p className="graphite-payment-notice">{PAYMENTS_COMING_SOON_MESSAGE}</p> : null}
-      <div className="graphite-plans">
-        <article>
-          <span>Pro Monthly</span>
-          <strong>$9.99/month</strong>
-          <p>Unlimited scans, Telegram alerts, full details, history, top ideas, scores 75-100.</p>
-          {activePlan === "Pro Monthly" || activePlan === "Pro Lifetime" ? <em>Active</em> : <button type="button" disabled={!PAYMENTS_ENABLED} onClick={() => onPayment("pro_monthly")}>{PAYMENTS_ENABLED ? "Pay with USDC" : "Coming soon"}</button>}
-        </article>
-        <article>
-          <span>Pro Lifetime</span>
-          <strong>$99.99 one-time</strong>
-          <p>Lifetime beta access, all Pro features, Early Supporter badge.</p>
-          {activePlan === "Pro Lifetime" ? <em>Active</em> : <button type="button" disabled={!PAYMENTS_ENABLED} onClick={() => onPayment("pro_lifetime")}>{PAYMENTS_ENABLED ? "Pay with USDC" : "Coming soon"}</button>}
-        </article>
-      </div>
-    </div>
-  );
-}
-
-function PaymentScreen({ onBack, plan }) {
-  const auth = useAuth();
-  const payment = PAYMENT_PLANS[plan] || PAYMENT_PLANS.pro_lifetime;
-  const [txHash, setTxHash] = useState("");
-  const [submissions, setSubmissions] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!PAYMENTS_ENABLED || !auth.session?.access_token) return;
-    listMyPaymentSubmissions(auth.session.access_token)
-      .then(setSubmissions)
-      .catch((loadError) => setError(loadError.message || "Could not load payment status."));
-  }, [auth.session?.access_token]);
-
-  if (!PAYMENTS_ENABLED) {
-    return (
-      <div className="graphite-screen">
-        <button type="button" className="graphite-back" onClick={onBack}><ChevronLeft size={18} /> Upgrade Plan</button>
-        <section className="graphite-payment-status">
-          <strong>Payments unavailable</strong>
-          <p>{PAYMENTS_COMING_SOON_MESSAGE}</p>
-        </section>
-      </div>
-    );
-  }
-
-  async function submit(event) {
-    event.preventDefault();
-    if (!txHash.trim()) {
-      setError("Transaction hash is required.");
-      return;
-    }
-    setLoading(true);
-    setError("");
-    setNotice("");
-    try {
-      const submission = await submitPayment({
-        txHash,
-        plan: payment.plan,
-        accessToken: auth.session?.access_token,
-      });
-      setSubmissions((rows) => [submission, ...rows]);
-      setTxHash("");
-      setNotice("Payment submitted for review.");
-    } catch (submitError) {
-      setError(submitError.message || "Could not submit this transaction.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="graphite-screen">
-      <button type="button" className="graphite-back" onClick={onBack}><ChevronLeft size={18} /> Upgrade Plan</button>
-      <section className="graphite-payment">
-        <span>{payment.label}</span>
-        <strong>{payment.price}</strong>
-        <div>
-          <p><span>Network</span><b>{payment.network}</b></p>
-          <p><span>Token</span><b>{payment.token}</b></p>
-          <p><span>Amount</span><b>${payment.amount.toFixed(2)}</b></p>
-        </div>
-        <code>{payment.walletAddress}</code>
-        <button type="button" onClick={() => navigator.clipboard?.writeText(payment.walletAddress)}><Copy size={15} /> Copy wallet</button>
-      </section>
-      <form className="graphite-payment-form" onSubmit={submit}>
-        <label htmlFor="graphite-tx-hash">Transaction hash</label>
-        <input
-          id="graphite-tx-hash"
-          value={txHash}
-          onChange={(event) => setTxHash(event.target.value)}
-          placeholder="0x..."
-          autoComplete="off"
-        />
-        <button type="submit" disabled={loading}>{loading ? "Submitting..." : "Submit for review"}</button>
-        {notice ? <p className="success">{notice}</p> : null}
-        {error ? <p className="error">{error}</p> : null}
-      </form>
-      {submissions.length ? (
-        <section className="graphite-payment-status">
-          <span>Latest submission</span>
-          <strong className={submissions[0].status}>{submissions[0].status}</strong>
-          <code>{submissions[0].tx_hash}</code>
-        </section>
       ) : null}
     </div>
   );
@@ -952,11 +811,7 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
   const [selectedSignal, setSelectedSignal] = useState(null);
   const [accountView, setAccountView] = useState(() => {
     const requestedView = new URLSearchParams(window.location.search).get("view");
-    return /^(upgrade|payment|settings(?:-[a-z]+)?|support(?:-[a-z]+)?)$/.test(requestedView || "") ? requestedView : "main";
-  });
-  const [paymentPlan, setPaymentPlan] = useState(() => {
-    const requestedPlan = new URLSearchParams(window.location.search).get("plan");
-    return PAYMENT_PLANS[requestedPlan] ? requestedPlan : "pro_lifetime";
+    return /^(settings(?:-[a-z]+)?|support(?:-[a-z]+)?)$/.test(requestedView || "") ? requestedView : "main";
   });
   const [forexOverview, setForexOverview] = useState(null);
   const [forexSignals, setForexSignals] = useState(mockForexSignals);
@@ -973,13 +828,7 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
   }, [topIdeas]);
   const preferredSignals = useMemo(() => {
     const settings = preferences.trading;
-    const filtered = signals.filter((signal) => {
-      if (signal.score < settings.minimumScore) return false;
-      if (settings.hideLowConviction && signal.score < 75) return false;
-      if (settings.showOnlyOpen && signal.score > 75) return false;
-      return true;
-    });
-    return [...filtered].sort((a, b) => {
+    return [...signals].sort((a, b) => {
       if (settings.defaultSorting === "highest_rr") return Number.parseFloat(b.rr) - Number.parseFloat(a.rr);
       if (settings.defaultSorting === "newest") {
         return new Date(b.rawIdea?.generated_at || b.rawIdea?.created_at || 0) - new Date(a.rawIdea?.generated_at || a.rawIdea?.created_at || 0);
@@ -1016,6 +865,18 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
 
   useEffect(() => {
     setMarketPreferenceReady(true);
+  }, []);
+
+  useEffect(() => {
+    const nextUrl = new URL(window.location.href);
+    const requestedView = nextUrl.searchParams.get("view");
+    if (!/^(upgrade|payment|pricing|billing|subscription|admin-payment)$/i.test(requestedView || "")) return;
+    nextUrl.pathname = "/app/account";
+    nextUrl.searchParams.delete("view");
+    nextUrl.searchParams.delete("plan");
+    window.history.replaceState({}, "", `${nextUrl.pathname}${nextUrl.search}`);
+    setTab("account");
+    setAccountView("main");
   }, []);
 
   useEffect(() => {
@@ -1059,7 +920,7 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
       const nextTab = validTabs.has(pathTab) ? pathTab : queryTab;
       if (validTabs.has(nextTab)) setTab(nextTab);
       const nextView = new URLSearchParams(window.location.search).get("view");
-      setAccountView(/^(upgrade|payment|settings(?:-[a-z]+)?|support(?:-[a-z]+)?)$/.test(nextView || "") ? nextView : "main");
+      setAccountView(/^(settings(?:-[a-z]+)?|support(?:-[a-z]+)?)$/.test(nextView || "") ? nextView : "main");
       setNotificationsOpen(false);
     };
     window.addEventListener("popstate", onPopState);
@@ -1130,18 +991,6 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
     }
   }
 
-  useEffect(() => {
-    if (!PAYMENTS_ENABLED || accountView !== "payment" || auth.loading || auth.isAuthenticated) return;
-    const returnTo = `/mobile-demo?tab=account&view=payment&plan=${paymentPlan}`;
-    window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo)}`);
-  }, [accountView, auth.loading, auth.isAuthenticated, paymentPlan]);
-
-  function openUpgrade() {
-    setSelectedSignal(null);
-    setTab("account");
-    setAccountView("upgrade");
-  }
-
   async function saveTradeToHistory(signal) {
     if (!auth.isAuthenticated || !auth.user) {
       const returnUrl = new URL(window.location.href);
@@ -1166,21 +1015,6 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
     } catch (error) {
       setTradeSaveState({ signalId, symbol: signal.symbol, status: "error", message: error.message || "Could not save trade to History." });
     }
-  }
-
-  function openPayment(plan = "pro_lifetime") {
-    if (!PAYMENTS_ENABLED) {
-      setAccountView("upgrade");
-      return;
-    }
-    const nextPlan = PAYMENT_PLANS[plan] ? plan : "pro_lifetime";
-    setPaymentPlan(nextPlan);
-    if (!auth.isAuthenticated) {
-      const returnTo = `/mobile-demo?tab=account&view=payment&plan=${nextPlan}`;
-      window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo)}`);
-      return;
-    }
-    setAccountView("payment");
   }
 
   function selectTab(nextTab) {
@@ -1317,20 +1151,16 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} /> : null}
             {tab === "account" && accountView === "main" ? (
               <AccountScreen
-                onUpgrade={() => navigateAccountView("upgrade")}
                 onSettings={() => navigateAccountView("settings")}
                 onSupport={() => navigateAccountView("support")}
               />
             ) : null}
-            {tab === "account" && accountView === "upgrade" ? <UpgradePlanScreen onBack={backAccountView} onPayment={openPayment} /> : null}
-            {tab === "account" && accountView === "payment" && auth.isAuthenticated ? <PaymentScreen onBack={backAccountView} plan={paymentPlan} /> : null}
             {tab === "account" && /^(settings|support)/.test(accountView) ? (
               <SettingsSupport
                 view={accountView}
                 preferencesController={preferencesController}
                 onNavigate={navigateAccountView}
                 onBack={backAccountView}
-                onUpgrade={() => navigateAccountView("upgrade")}
               />
             ) : null}
           </main>
@@ -1356,7 +1186,6 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
           <TradeAnalysis
             signal={selectedSignal}
             onClose={() => setSelectedSignal(null)}
-            onUpgrade={openUpgrade}
             onTakeTrade={saveTradeToHistory}
             tradeSaveState={tradeSaveState}
           />

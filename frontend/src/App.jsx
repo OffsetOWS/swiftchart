@@ -8,13 +8,11 @@ import TradeHistory from "./pages/TradeHistory.jsx";
 import Watchlist from "./pages/Watchlist.jsx";
 import MobileDemo from "./components/MobileDemo.jsx";
 import DesktopMobileGate from "./components/DesktopMobileGate.jsx";
-import AdminPayments from "./pages/AdminPayments.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
-import { PAYMENTS_COMING_SOON_MESSAGE, PAYMENTS_ENABLED } from "./lib/featureFlags.js";
 import { getAnalysis, getCandles, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
 import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
 import { freshnessForIdea, liquidityForIdea } from "./lib/signalQuality.js";
@@ -56,10 +54,11 @@ export default function App() {
   const isAnalysisPage = path.startsWith("/analysis/");
   const hasWorkspaceChrome = isAppPage || isAnalysisPage;
   const isMobileDemoPage = path === "/mobile-demo";
-  const isAdminPaymentsPage = path === "/admin/payments";
+  const isDisabledCommercePage = /^\/(?:admin\/payments?|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path)
+    || /^\/app\/(?:upgrade|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path);
   const isAuthPage = ["/auth", "/login", "/signup", "/forgot-password", "/reset-password"].includes(path);
   const isCredentialEntryPage = ["/auth", "/login", "/signup"].includes(path);
-  const isProtectedPage = isAppPage || isMobileDemoPage || isAdminPaymentsPage;
+  const isProtectedPage = isAppPage || isMobileDemoPage || isDisabledCommercePage;
   const isDocsPage = path === "/docs" || path.startsWith("/docs/");
   const [page, setPage] = useState(isAnalysisPage ? "markets" : "dashboard");
   const [nightMode, setNightMode] = useState(true);
@@ -283,6 +282,10 @@ export default function App() {
 
   useEffect(() => {
     if (auth.loading) return;
+    if (isDisabledCommercePage) {
+      navigate("/app/home", { replace: true });
+      return;
+    }
     if (isProtectedPage && !auth.isAuthenticated) {
       const returnTo = `${window.location.pathname}${window.location.search}`;
       navigate(`/login?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
@@ -300,7 +303,7 @@ export default function App() {
     if (path === "/app" && auth.isAuthenticated) {
       navigate("/app/home", { replace: true });
     }
-  }, [auth.loading, auth.isAuthenticated, isProtectedPage, isCredentialEntryPage, isLaunchPage, path]);
+  }, [auth.loading, auth.isAuthenticated, isProtectedPage, isCredentialEntryPage, isDisabledCommercePage, isLaunchPage, path]);
 
   useEffect(() => {
     trackEvent("page_visit", { page });
@@ -448,21 +451,7 @@ export default function App() {
     );
   }
 
-  if (isAdminPaymentsPage) {
-    return (
-      <>
-        {PAYMENTS_ENABLED ? <AdminPayments /> : (
-          <main className="payments-admin-page">
-            <section className="payments-admin-empty">
-              <h1>Payments unavailable</h1>
-              <p>{PAYMENTS_COMING_SOON_MESSAGE}</p>
-            </section>
-          </main>
-        )}
-        <Analytics />
-      </>
-    );
-  }
+  if (isDisabledCommercePage) return <AuthLoading />;
 
   return (
     <>
@@ -593,7 +582,7 @@ export default function App() {
             <section className="panel terminal-note" id="contacts">
               <span className="eyebrow">ALERT RELAY</span>
               <h2>Telegram waits for clean setups.</h2>
-              <p>SwiftChart can notify subscribed Telegram users when the scanner finds valid trade ideas that clear the strategy threshold.</p>
+              <p>SwiftChart can notify Telegram users when the scanner finds valid trade ideas that clear the strategy threshold.</p>
               <a
                 className="telegram-link"
                 href={TELEGRAM_BOT_URL}
@@ -604,7 +593,7 @@ export default function App() {
                 Open SwiftChart on Telegram
               </a>
               <div className="mono-list">
-                <span>/subscribe</span><span>/alerts</span><span>/top</span><span>/checktrades</span>
+                <span>/alerts</span><span>/top</span><span>/checktrades</span>
               </div>
             </section>
           )}
