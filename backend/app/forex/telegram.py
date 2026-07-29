@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC
 import html
+import json
 import logging
+import os
+from pathlib import Path
 
 from app.forex.models import ForexSignalPlan
 from app.forex.storage import (
@@ -14,6 +17,18 @@ from app.forex.storage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _telegram_subscribers() -> list[str]:
+    subscribers: set[str] = set()
+    for value in os.getenv("TELEGRAM_ALERT_CHAT_IDS", "").split(","):
+        if value.strip():
+            subscribers.add(str(int(value.strip())))
+    state_path = Path(os.getenv("BOT_STATE_PATH", ".swiftchart_bot_state.json"))
+    if state_path.exists():
+        payload = json.loads(state_path.read_text())
+        subscribers.update(str(int(chat_id)) for chat_id in payload.get("subscribers", []))
+    return sorted(subscribers)
 
 
 def format_forex_signal(signal: ForexSignalPlan, app_url: str = "https://swiftchart.xyz") -> str:
@@ -43,9 +58,7 @@ def format_forex_signal(signal: ForexSignalPlan, app_url: str = "https://swiftch
 
 def enqueue_forex_signal(signal: ForexSignalPlan) -> int:
     try:
-        from bot.storage import get_subscribers
-
-        subscribers = [str(chat_id) for chat_id in get_subscribers()]
+        subscribers = _telegram_subscribers()
     except Exception:
         logger.exception("Could not load Forex Telegram subscribers signal_id=%s", signal.id)
         return 0
@@ -55,9 +68,7 @@ def enqueue_forex_signal(signal: ForexSignalPlan) -> int:
 def reconcile_active_forex_dispatches() -> int:
     """Repair outbox gaps caused by a transient subscriber-store failure."""
     try:
-        from bot.storage import get_subscribers
-
-        subscribers = [str(chat_id) for chat_id in get_subscribers()]
+        subscribers = _telegram_subscribers()
     except Exception:
         logger.exception("Could not reconcile Forex Telegram subscribers")
         return 0
