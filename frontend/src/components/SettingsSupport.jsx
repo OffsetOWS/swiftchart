@@ -30,11 +30,12 @@ import {
   User,
   Volume2,
 } from "lucide-react";
+import { getPublicOrigin } from "../lib/siteUrl.js";
 import packageJson from "../../package.json";
 import { useAuth } from "../lib/AuthContext.jsx";
 
 const TELEGRAM_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || "";
-const PUBLIC_SITE_URL = import.meta.env.VITE_PUBLIC_SITE_URL || window.location.origin;
+const PUBLIC_SITE_URL = getPublicOrigin();
 const SUPPORT_ENDPOINT = import.meta.env.VITE_SUPPORT_ENDPOINT || "";
 const LEGAL_URLS = {
   privacy: import.meta.env.VITE_PRIVACY_POLICY_URL || "",

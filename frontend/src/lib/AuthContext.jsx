@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { ensureUserProfile } from "./profile.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
+import { getPublicOrigin } from "./siteUrl.js";
 
 const AuthContext = createContext(null);
 const SUPABASE_CONFIG_ERROR = "Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.";
@@ -40,7 +41,7 @@ function getAuthRedirectUrl(returnToOverride) {
   const currentPath = `${window.location.pathname}${window.location.search}`;
   const fallback = ["/auth", "/login", "/signup"].includes(window.location.pathname) ? "/app/home" : currentPath;
   const returnTo = safeReturnTo(returnToOverride || queryReturnTo, fallback);
-  return `${window.location.origin}/auth?returnTo=${encodeURIComponent(returnTo)}`;
+  return `${getPublicOrigin()}/auth?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function AuthProvider({ children }) {
@@ -144,7 +145,7 @@ export function AuthProvider({ children }) {
   async function sendPasswordReset(email, returnTo) {
     requireSupabase();
     setError("");
-    const redirectTo = `${window.location.origin}/reset-password?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`;
+    const redirectTo = `${getPublicOrigin()}/reset-password?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`;
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     if (resetError) {
       const safeError = friendlyAuthError(resetError);

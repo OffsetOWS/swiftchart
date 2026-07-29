@@ -13,6 +13,7 @@ import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
+import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
 import { getAnalysis, getCandles, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
 import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
 import { freshnessForIdea, liquidityForIdea } from "./lib/signalQuality.js";
@@ -653,8 +654,13 @@ const rootElement = document.getElementById("root");
 const appRoot = window.__swiftChartReactRoot || createRoot(rootElement);
 if (import.meta.env.DEV) window.__swiftChartReactRoot = appRoot;
 
-appRoot.render(
-  <AuthProvider>
-    <App />
-  </AuthProvider>
-);
+const canonicalRedirectUrl = getCanonicalRedirectUrl();
+if (canonicalRedirectUrl) {
+  window.location.replace(canonicalRedirectUrl);
+} else {
+  appRoot.render(
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  );
+}

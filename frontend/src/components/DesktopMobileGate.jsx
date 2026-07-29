@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { ArrowUpRight, Check, ScanLine } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import swiftChartLogo from "../assets/swiftchart-logo.png";
+import { getPublicOrigin } from "../lib/siteUrl.js";
 
 const DESKTOP_BREAKPOINT = 768;
 const BYPASS_STORAGE_KEY = "swiftchart.desktopMobileGateBypassed.v1";
-const PRODUCTION_APP_URL = import.meta.env.VITE_PRODUCTION_APP_URL || "https://swiftchart.vercel.app/app/home";
+const PRODUCTION_APP_URL = import.meta.env.VITE_PRODUCTION_APP_URL || `${getPublicOrigin()}/app/home`;
 
 function isDesktopViewport() {
   return window.innerWidth > DESKTOP_BREAKPOINT;

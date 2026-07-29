@@ -9,6 +9,19 @@
       "maxDuration": 30
     }
   },
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "swiftchart.vercel.app"
+        }
+      ],
+      "destination": "https://swiftchart.xyz/:path*",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

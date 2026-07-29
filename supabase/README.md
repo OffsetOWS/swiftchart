@@ -5,7 +5,7 @@
 3. In Supabase SQL Editor, run `supabase/paper_trades.sql`.
 4. In Supabase Auth providers, enable Google OAuth.
 5. Add these redirect URLs in Supabase Auth URL configuration:
-   - `https://swiftchart.vercel.app/app`
+   - `https://swiftchart.xyz/app`
    - `http://localhost:5173/app`
 6. Add these frontend environment variables in Vercel:
    - `VITE_SUPABASE_URL`
