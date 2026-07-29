@@ -8,6 +8,7 @@ from app.forex.models import ForexSignalPlan
 from app.forex.storage import (
     claim_pending_dispatches,
     get_signal,
+    list_signals,
     mark_dispatch_attempt,
     queue_dispatches,
 )
@@ -51,7 +52,26 @@ def enqueue_forex_signal(signal: ForexSignalPlan) -> int:
     return queue_dispatches(signal.id, subscribers)
 
 
+def reconcile_active_forex_dispatches() -> int:
+    """Repair outbox gaps caused by a transient subscriber-store failure."""
+    try:
+        from bot.storage import get_subscribers
+
+        subscribers = [str(chat_id) for chat_id in get_subscribers()]
+    except Exception:
+        logger.exception("Could not reconcile Forex Telegram subscribers")
+        return 0
+    if not subscribers:
+        return 0
+    queued = 0
+    for signal in list_signals(statuses=("PENDING_ENTRY", "OPEN", "TP1_HIT"), limit=200):
+        if not signal.is_legacy:
+            queued += queue_dispatches(signal.id, subscribers)
+    return queued
+
+
 async def dispatch_pending_forex(bot, *, app_url: str = "https://swiftchart.xyz") -> dict[str, int]:
+    reconcile_active_forex_dispatches()
     attempted = delivered = failed = 0
     for dispatch in claim_pending_dispatches():
         signal = get_signal(dispatch["signal_id"])

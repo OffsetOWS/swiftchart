@@ -164,9 +164,10 @@ def test_take_trade_uses_persisted_values_and_rejects_terminal(forex_database):
 
 
 def test_telegram_uses_exact_persisted_values_and_is_idempotent(forex_database):
+    from bot.storage import add_subscriber
+
     signal = asyncio.run(scan_forex(FakeProvider())).created[0]
-    assert queue_dispatches(signal.id, ["123"]) == 1
-    assert queue_dispatches(signal.id, ["123"]) == 0
+    add_subscriber(123)
 
     message = format_forex_signal(signal)
     assert signal.id in message
@@ -176,11 +177,16 @@ def test_telegram_uses_exact_persisted_values_and_is_idempotent(forex_database):
     assert f"{signal.take_profit_2:g}" in message
 
     bot = FakeBot()
+    # The bot repairs an outbox gap if no subscriber existed at scan time.
     first = asyncio.run(dispatch_pending_forex(bot))
+    assert queue_dispatches(signal.id, ["123"]) == 0
     second = asyncio.run(dispatch_pending_forex(bot))
-    assert first == {"attempted": 1, "delivered": 1, "failed": 0}
+    assert first["attempted"] == len(list_signals(("PENDING_ENTRY",)))
+    assert first["delivered"] == first["attempted"]
+    assert first["failed"] == 0
     assert second == {"attempted": 0, "delivered": 0, "failed": 0}
-    assert len(bot.messages) == 1
+    assert len(bot.messages) == first["delivered"]
+    assert any(signal.id in item["text"] for item in bot.messages)
 
 
 def test_signal_lifecycle_transitions_and_expiry(forex_database):
