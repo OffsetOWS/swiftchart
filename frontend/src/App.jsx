@@ -3,15 +3,17 @@ import { createRoot } from "react-dom/client";
 import { Analytics, track } from "@vercel/analytics/react";
 import Dashboard from "./pages/Dashboard.jsx";
 import Analysis from "./pages/Analysis.jsx";
+import Forex from "./pages/Forex.jsx";
 import TradeHistory from "./pages/TradeHistory.jsx";
 import Watchlist from "./pages/Watchlist.jsx";
+import MobileDemo from "./components/MobileDemo.jsx";
+import DesktopMobileGate from "./components/DesktopMobileGate.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
 import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getAnalysis, getCandles, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
-import { scanWithGenLayer } from "./lib/genlayer.js";
 import { createPaperTradeFromSignal, listPaperTradesForSignals, signalIdForIdea } from "./lib/paperTrades.js";
 import { freshnessForIdea, liquidityForIdea } from "./lib/signalQuality.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
@@ -34,15 +36,29 @@ function analysisSymbolFromPath(pathname) {
   return base ? `${base.replace(/(USDT|USDC|USD|PERP)$/i, "")}USDT` : "";
 }
 
+function appTabFromPath(pathname) {
+  const match = String(pathname || "").match(/^\/app\/(home|scan|history|account|notifications)$/i);
+  return match ? match[1].toLowerCase() : "home";
+}
+
+function safeReturnTo(value, fallback = "/app/home") {
+  return value?.startsWith("/") && !value.startsWith("//") ? value : fallback;
+}
+
 export default function App() {
   const auth = useAuth();
   const [path, setPath] = useState(window.location.pathname);
   const isLandingPage = path === "/";
   const isLaunchPage = path === "/launch";
-  const isAppPage = path === "/app";
+  const isAppPage = path === "/app" || /^\/app\/(home|scan|history|account|notifications)$/.test(path);
   const isAnalysisPage = path.startsWith("/analysis/");
   const hasWorkspaceChrome = isAppPage || isAnalysisPage;
-  const isAuthPage = path === "/auth" || path === "/login" || path === "/signup";
+  const isMobileDemoPage = path === "/mobile-demo";
+  const isDisabledCommercePage = /^\/(?:admin\/payments?|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path)
+    || /^\/app\/(?:upgrade|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path);
+  const isAuthPage = ["/auth", "/login", "/signup", "/forgot-password", "/reset-password"].includes(path);
+  const isCredentialEntryPage = ["/auth", "/login", "/signup"].includes(path);
+  const isProtectedPage = isAppPage || isMobileDemoPage || isDisabledCommercePage;
   const isDocsPage = path === "/docs" || path.startsWith("/docs/");
   const [page, setPage] = useState(isAnalysisPage ? "markets" : "dashboard");
   const [nightMode, setNightMode] = useState(true);
@@ -64,16 +80,14 @@ export default function App() {
   const [takenSignalIds, setTakenSignalIds] = useState(new Set());
   const [paperTradeLoadingSignalId, setPaperTradeLoadingSignalId] = useState("");
   const [paperHistoryVersion, setPaperHistoryVersion] = useState(0);
-  const [aiResults, setAiResults] = useState({});
-  const [aiErrors, setAiErrors] = useState({});
-  const [aiLoadingSignalId, setAiLoadingSignalId] = useState("");
 
   function navigate(nextPath, { replace = false } = {}) {
-    if (window.location.pathname !== nextPath) {
+    const nextUrl = new URL(nextPath, window.location.origin);
+    if (`${window.location.pathname}${window.location.search}` !== `${nextUrl.pathname}${nextUrl.search}`) {
       const method = replace ? "replaceState" : "pushState";
-      window.history[method]({}, "", nextPath);
+      window.history[method]({}, "", `${nextUrl.pathname}${nextUrl.search}`);
     }
-    setPath(nextPath);
+    setPath(nextUrl.pathname);
   }
 
   async function refreshTopIdeas(options = {}) {
@@ -113,15 +127,12 @@ export default function App() {
     setNoticeType("info");
     setAnalysisError("");
     try {
-      const [analysisResult, candleResult] = await Promise.allSettled([
-        getAnalysis({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe, risk }),
+      const [candleData, analysisData] = await Promise.all([
         getCandles({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe }),
+        getAnalysis({ exchange: requestExchange, symbol: requestSymbol, timeframe: requestTimeframe, risk }),
       ]);
-      if (analysisResult.status === "rejected") {
-        throw analysisResult.reason;
-      }
-      setAnalysis(analysisResult.value);
-      setCandles(candleResult.status === "fulfilled" ? candleResult.value : []);
+      setCandles(candleData);
+      setAnalysis(analysisData);
     } catch (error) {
       setCandles([]);
       setAnalysis(null);
@@ -138,7 +149,7 @@ export default function App() {
   async function paperTrade(idea) {
     if (!auth.isAuthenticated || !auth.user) {
       setNoticeType("error");
-      setNotice("Sign in to save this paper trade.");
+      setNotice("Sign in to save this trade to History.");
       navigate("/auth");
       return;
     }
@@ -185,31 +196,9 @@ export default function App() {
         return next;
       });
       setNoticeType("error");
-      setNotice(error.message || "Could not save paper trade.");
+      setNotice(error.message || "Could not save trade to History.");
     } finally {
       setPaperTradeLoadingSignalId("");
-    }
-  }
-
-  async function scanWithAi(idea) {
-    const signalId = signalIdForIdea(idea);
-    setAiLoadingSignalId(signalId);
-    setNotice("");
-    setNoticeType("info");
-    setAiErrors((current) => ({ ...current, [signalId]: "" }));
-    try {
-      const result = await scanWithGenLayer(idea);
-      setAiResults((current) => ({ ...current, [signalId]: result }));
-      trackEvent("genlayer_ai_scan", {
-        symbol: idea.symbol,
-        timeframe: idea.timeframe,
-        direction: idea.direction,
-        decision: result.decision,
-      });
-    } catch (error) {
-      setAiErrors((current) => ({ ...current, [signalId]: "GenLayer scan failed. Try again." }));
-    } finally {
-      setAiLoadingSignalId("");
     }
   }
 
@@ -240,9 +229,8 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (isAnalysisPage) return;
     refreshTopIdeas();
-  }, [exchange, timeframe, isAnalysisPage]);
+  }, [exchange, timeframe]);
 
   useEffect(() => {
     if (!auth.user?.id) {
@@ -294,16 +282,28 @@ export default function App() {
 
   useEffect(() => {
     if (auth.loading) return;
-    if (isAppPage && !auth.isAuthenticated && auth.isSupabaseConfigured) {
-      navigate("/launch", { replace: true });
+    if (isDisabledCommercePage) {
+      navigate("/app/home", { replace: true });
+      return;
     }
-    if (isAuthPage && auth.isAuthenticated) {
-      navigate("/app", { replace: true });
+    if (isProtectedPage && !auth.isAuthenticated) {
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      navigate(`/login?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
+      return;
+    }
+    if (isCredentialEntryPage && auth.isAuthenticated) {
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      navigate(safeReturnTo(returnTo), { replace: true });
+      return;
     }
     if (isLaunchPage && auth.isAuthenticated) {
-      navigate("/app", { replace: true });
+      navigate("/app/home", { replace: true });
+      return;
     }
-  }, [auth.loading, auth.isAuthenticated, isAppPage, isAuthPage, isLaunchPage]);
+    if (path === "/app" && auth.isAuthenticated) {
+      navigate("/app/home", { replace: true });
+    }
+  }, [auth.loading, auth.isAuthenticated, isProtectedPage, isCredentialEntryPage, isDisabledCommercePage, isLaunchPage, path]);
 
   useEffect(() => {
     trackEvent("page_visit", { page });
@@ -334,7 +334,8 @@ export default function App() {
   }, []);
 
   const tabs = [
-    ["dashboard", "Dashboard"],
+    ["dashboard", "Crypto"],
+    ["forex", "Forex"],
     ["markets", "Markets"],
     ["ideas", "Trade Ideas"],
     ["watchlist", "Watchlist"],
@@ -372,8 +373,12 @@ export default function App() {
       <button
         type="button"
         onClick={async () => {
-          await auth.signOut();
-          navigate("/launch", { replace: true });
+          try {
+            await auth.signOut();
+            navigate("/login", { replace: true });
+          } catch {
+            // AuthContext exposes a safe, user-facing error in the account menu.
+          }
         }}
       >
         Logout
@@ -408,6 +413,15 @@ export default function App() {
     );
   }
 
+  if (isAuthPage && auth.loading) {
+    return (
+      <>
+        <AuthLoading />
+        <Analytics />
+      </>
+    );
+  }
+
   if (isAuthPage) {
     return (
       <>
@@ -417,7 +431,7 @@ export default function App() {
     );
   }
 
-  if (isAppPage && (auth.loading || auth.profileLoading)) {
+  if (isProtectedPage && (auth.loading || auth.profileLoading || !auth.isAuthenticated)) {
     return (
       <>
         <AuthLoading />
@@ -426,10 +440,31 @@ export default function App() {
     );
   }
 
-  if (isAppPage && !auth.isAuthenticated && auth.isSupabaseConfigured) {
+  if (isMobileDemoPage) {
     return (
       <>
-        <LaunchFlow />
+        <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} mobile-demo-page`}>
+          <MobileDemo topIdeas={topIdeas} initialConfigLoading={loadingTopIdeas} />
+        </main>
+        <Analytics />
+      </>
+    );
+  }
+
+  if (isDisabledCommercePage) return <AuthLoading />;
+
+  if (isAppPage) {
+    return (
+      <>
+        <DesktopMobileGate enabled>
+          <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} app-view`}>
+            <MobileDemo
+              topIdeas={topIdeas}
+              initialConfigLoading={loadingTopIdeas}
+              initialTab={appTabFromPath(path)}
+            />
+          </main>
+        </DesktopMobileGate>
         <Analytics />
       </>
     );
@@ -437,7 +472,8 @@ export default function App() {
 
   return (
     <>
-    <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"}${isAppPage ? " app-view" : ""}`}>
+    <DesktopMobileGate enabled={false}>
+    <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"}`}>
       <div className="grain" />
       <div className="cursor-aura" />
 
@@ -507,10 +543,6 @@ export default function App() {
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
               getSignalId={signalIdForIdea}
-              onAiScan={scanWithAi}
-              aiResults={aiResults}
-              aiErrors={aiErrors}
-              aiLoadingSignalId={aiLoadingSignalId}
               onAnalyzeAsset={openAssetAnalysis}
             />
           )}
@@ -528,10 +560,6 @@ export default function App() {
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
               getSignalId={signalIdForIdea}
-              onAiScan={scanWithAi}
-              aiResults={aiResults}
-              aiErrors={aiErrors}
-              aiLoadingSignalId={aiLoadingSignalId}
               onAnalyzeAsset={openAssetAnalysis}
               compact
             />
@@ -548,13 +576,10 @@ export default function App() {
               takenSignalIds={takenSignalIds}
               paperTradeLoadingSignalId={paperTradeLoadingSignalId}
               getSignalId={signalIdForIdea}
-              onAiScan={scanWithAi}
-              aiResults={aiResults}
-              aiErrors={aiErrors}
-              aiLoadingSignalId={aiLoadingSignalId}
               analysisError={analysisError}
             />
           )}
+          {page === "forex" && <Forex />}
           {page === "watchlist" && (
             <Watchlist
               pendingSetups={pendingSetups}
@@ -572,7 +597,7 @@ export default function App() {
             <section className="panel terminal-note" id="contacts">
               <span className="eyebrow">ALERT RELAY</span>
               <h2>Telegram waits for clean setups.</h2>
-              <p>SwiftChart can notify subscribed Telegram users when the scanner finds valid trade ideas that clear the strategy threshold.</p>
+              <p>SwiftChart can notify Telegram users when the scanner finds valid trade ideas that clear the strategy threshold.</p>
               <a
                 className="telegram-link"
                 href={TELEGRAM_BOT_URL}
@@ -583,13 +608,14 @@ export default function App() {
                 Open SwiftChart on Telegram
               </a>
               <div className="mono-list">
-                <span>/subscribe</span><span>/alerts</span><span>/top</span><span>/checktrades</span>
+                <span>/alerts</span><span>/top</span><span>/checktrades</span>
               </div>
             </section>
           )}
         </div>
       </section>
     </main>
+    </DesktopMobileGate>
     <Analytics />
     </>
   );
@@ -597,7 +623,7 @@ export default function App() {
 
 function AuthLoading() {
   return (
-    <main className="auth-shell">
+    <main className="auth-shell auth-graphite">
       <section className="auth-card auth-loading-card" aria-live="polite">
         <div className="launch-mark" aria-hidden="true">
           <img src={swiftChartLogo} alt="" />
@@ -615,7 +641,11 @@ function AuthLoading() {
   );
 }
 
-createRoot(document.getElementById("root")).render(
+const rootElement = document.getElementById("root");
+const appRoot = window.__swiftChartReactRoot || createRoot(rootElement);
+if (import.meta.env.DEV) window.__swiftChartReactRoot = appRoot;
+
+appRoot.render(
   <AuthProvider>
     <App />
   </AuthProvider>

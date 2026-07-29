@@ -1,5 +1,6 @@
 import { ArrowDownRight, ArrowUpRight, BarChart3, Flame, ShieldCheck } from "lucide-react";
 import { formatChange, formatCompactUsd } from "../lib/marketIntelligence.js";
+import InstrumentLogo from "./InstrumentLogo.jsx";
 import "../styles/marketIntelligence.css";
 
 const sections = [
@@ -24,7 +25,10 @@ function AssetTable({ assets, showChange, onAnalyzeAsset }) {
           onClick={() => onAnalyzeAsset?.(asset)}
           aria-label={`Analyze ${asset.name || asset.symbol}`}
         >
-          <b>{asset.symbol}<small>{showChange ? formatChange(asset.price_change_24h) : asset.market_quality_score ? `${asset.market_quality_score}/100` : ""}</small></b>
+          <div className="market-asset-identity">
+            <InstrumentLogo symbol={asset.symbol} marketType={asset.marketType || asset.market} size={30} />
+            <b>{asset.symbol}<small>{showChange ? formatChange(asset.price_change_24h) : asset.market_quality_score ? `${asset.market_quality_score}/100` : ""}</small></b>
+          </div>
           <span>{formatCompactUsd(asset.market_cap)}</span>
           <span>{formatCompactUsd(asset.volume_24h)}</span>
           <span>{asset.cmc_rank ? `#${asset.cmc_rank}` : "-"}</span>

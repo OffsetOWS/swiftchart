@@ -1,23 +1,19 @@
 const configuredApiBase = import.meta.env.VITE_API_BASE || "";
 const isLocalApiBase = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(configuredApiBase);
-const isLocalApp =
-  typeof window !== "undefined" &&
-  ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-
-const API_BASE = configuredApiBase && (!isLocalApiBase || isLocalApp)
+const API_BASE = configuredApiBase && (!isLocalApiBase || import.meta.env.DEV)
   ? configuredApiBase
-  : isLocalApp
+  : import.meta.env.DEV
     ? "http://127.0.0.1:8000"
     : "";
 
-function friendlyErrorMessage(message, timeoutMessage = "SwiftChart scanner took too long to finish. Please try again in a moment.") {
+function friendlyErrorMessage(message) {
   const text = String(message || "").trim();
   if (!text) return "Request failed. Please try again.";
   if (/api\.hyperliquid\.xyz|Internal Server Error|Server error '500'|HTTPStatusError/i.test(text)) {
     return "Hyperliquid market data is temporarily unavailable. Please try again shortly.";
   }
   if (/FUNCTION_INVOCATION_TIMEOUT|Gateway Timeout|504/i.test(text)) {
-    return timeoutMessage;
+    return "SwiftChart scanner took too long to finish. Please try again in a moment.";
   }
   if (/Failed to fetch|NetworkError|Load failed/i.test(text)) {
     return "Could not reach SwiftChart market data. Please check the backend and try again.";
@@ -26,7 +22,7 @@ function friendlyErrorMessage(message, timeoutMessage = "SwiftChart scanner took
 }
 
 async function request(path, options = {}) {
-  const { accessToken, timeoutMessage, ...fetchOptions } = options;
+  const { accessToken, ...fetchOptions } = options;
   const headers = { "Content-Type": "application/json", ...(fetchOptions.headers || {}) };
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
@@ -45,18 +41,16 @@ async function request(path, options = {}) {
           return text;
         }
       });
-      throw new Error(friendlyErrorMessage(detail || response.statusText || `Request failed (${response.status})`, timeoutMessage));
+      throw new Error(friendlyErrorMessage(detail || response.statusText || `Request failed (${response.status})`));
     }
     return response.json();
   } catch (error) {
-    throw new Error(friendlyErrorMessage(error.message, timeoutMessage));
+    throw new Error(friendlyErrorMessage(error.message));
   }
 }
 
 export function getCandles({ exchange, symbol, timeframe }) {
-  return request(`/api/candles?exchange=${exchange}&symbol=${symbol}&timeframe=${timeframe}&limit=240`, {
-    timeoutMessage: "The price chart is taking longer than expected. SwiftChart analysis can still continue.",
-  });
+  return request(`/api/candles?exchange=${exchange}&symbol=${symbol}&timeframe=${timeframe}&limit=240`);
 }
 
 export function getAnalysis({ exchange, symbol, timeframe, risk }) {
@@ -69,9 +63,7 @@ export function getAnalysis({ exchange, symbol, timeframe, risk }) {
     min_rr: risk.minRR,
     max_open_trades: risk.maxOpenTrades,
   });
-  return request(`/api/analyze?${params.toString()}`, {
-    timeoutMessage: "SwiftChart analysis is taking longer than expected. Please try this asset again in a moment.",
-  });
+  return request(`/api/analyze?${params.toString()}`);
 }
 
 export function getTopIdeas({ exchange, timeframe }) {
@@ -131,4 +123,59 @@ export function checkTradeHistory() {
 
 export function getTradeStats() {
   return request("/api/trade-stats");
+}
+
+export function getForexOverview() {
+  return request("/api/forex/overview");
+}
+
+export function getForexSignals() {
+  return request("/api/forex/signals");
+}
+
+export function scanForex(payload = {}) {
+  return request("/api/forex/scan", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getForexSessions() {
+  return request("/api/forex/sessions");
+}
+
+export function getForexPairs() {
+  return request("/api/forex/pairs");
+}
+
+export function getMt5Status() {
+  return request("/api/performance");
+}
+
+export function submitPaymentApi(payload, accessToken) {
+  return request("/api/payments/submissions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    accessToken,
+  });
+}
+
+export function listMyPaymentsApi(accessToken) {
+  return request("/api/payments/submissions/me", { accessToken });
+}
+
+export function paymentAdminAccessApi(accessToken) {
+  return request("/api/payments/admin/access", { accessToken });
+}
+
+export function listPendingPaymentsApi(accessToken) {
+  return request("/api/payments/admin/submissions", { accessToken });
+}
+
+export function reviewPaymentApi(submissionId, payload, accessToken) {
+  return request(`/api/payments/admin/submissions/${submissionId}/review`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    accessToken,
+  });
 }

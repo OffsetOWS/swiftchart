@@ -1,4 +1,5 @@
 import { RefreshCcw } from "lucide-react";
+import InstrumentLogo from "../components/InstrumentLogo.jsx";
 
 function formatZone(zone) {
   if (!Array.isArray(zone) || zone.length < 2) return "-";
@@ -66,9 +67,12 @@ export default function Watchlist({
         {pendingSetups.map((setup) => (
           <article className="panel watchlist-card" key={`${setup.symbol}-${setup.direction}-${setup.status}-${setup.created_at}`}>
             <div className="watchlist-card-head">
-              <div>
-                <span className="watchlist-label">Not a trade signal yet</span>
-                <h3>{setup.symbol}</h3>
+              <div className="watchlist-asset-title">
+                <InstrumentLogo symbol={setup.symbol} marketType={setup.marketType || setup.market} size={42} />
+                <div>
+                  <span className="watchlist-label">Not a trade signal yet</span>
+                  <h3>{setup.symbol}</h3>
+                </div>
               </div>
               <div className={`direction-pill ${directionClass(setup.direction)}`}>{setup.direction}</div>
             </div>

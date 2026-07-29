@@ -17,10 +17,6 @@ export default function Dashboard({
   takenSignalIds = new Set(),
   paperTradeLoadingSignalId = "",
   getSignalId,
-  onAiScan,
-  aiResults = {},
-  aiErrors = {},
-  aiLoadingSignalId = "",
   onAnalyzeAsset,
   compact = false,
 }) {
@@ -95,10 +91,6 @@ export default function Dashboard({
                   onPaperTrade={onPaperTrade}
                   tradeTaken={takenSignalIds.has(signalId)}
                   paperTradeLoading={paperTradeLoadingSignalId === signalId}
-                  onAiScan={onAiScan}
-                  aiResult={aiResults[signalId]}
-                  aiError={aiErrors[signalId]}
-                  aiLoading={aiLoadingSignalId === signalId}
                   marketData={marketDataForSignal(marketIntelligence, idea.symbol)}
                   marketDataLoading={marketIntelligenceLoading}
                 />

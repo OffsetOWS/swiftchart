@@ -23,6 +23,15 @@ function createUsername() {
   return `${usernameWords[array[0] % usernameWords.length]}${randomDigits()}`;
 }
 
+function preferredUsername(user) {
+  const value = String(user.user_metadata?.username || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 28);
+  return value.length >= 3 ? value : "";
+}
+
 function isProfilesTableMissing(error) {
   return error?.code === "PGRST205" || error?.message?.includes("public.profiles");
 }
@@ -36,7 +45,7 @@ function getFallbackUsername(user) {
   const savedUsername = window.localStorage.getItem(storageKey);
   if (savedUsername) return savedUsername;
 
-  const username = createUsername();
+  const username = preferredUsername(user) || createUsername();
   window.localStorage.setItem(storageKey, username);
   return username;
 }
@@ -49,8 +58,28 @@ function createFallbackProfile(user, now, avatarUrl) {
     avatar_url: avatarUrl,
     signup_date: user.created_at || now,
     last_login: now,
+    subscription_status: "free",
+    subscription_started_at: null,
+    subscription_expires_at: null,
     profile_storage_ready: false,
   };
+}
+
+const PROFILE_FIELDS = [
+  "id",
+  "email",
+  "username",
+  "avatar_url",
+  "signup_date",
+  "last_login",
+  "subscription_status",
+  "subscription_started_at",
+  "subscription_expires_at",
+].join(",");
+
+async function refreshExpiredSubscription() {
+  const { error } = await supabase.rpc("refresh_my_subscription_status");
+  if (error && !["PGRST202", "42883"].includes(error.code)) throw error;
 }
 
 export async function ensureUserProfile(session) {
@@ -59,10 +88,11 @@ export async function ensureUserProfile(session) {
   const user = session.user;
   const now = new Date().toISOString();
   const avatarUrl = getAvatar(user);
+  await refreshExpiredSubscription();
 
   const { data: existingProfile, error: selectError } = await supabase
     .from("profiles")
-    .select("id,email,username,avatar_url,signup_date,last_login")
+    .select(PROFILE_FIELDS)
     .eq("id", user.id)
     .maybeSingle();
 
@@ -82,7 +112,7 @@ export async function ensureUserProfile(session) {
         last_login: now,
       })
       .eq("id", user.id)
-      .select("id,email,username,avatar_url,signup_date,last_login")
+      .select(PROFILE_FIELDS)
       .single();
 
     if (error) throw error;
@@ -90,17 +120,18 @@ export async function ensureUserProfile(session) {
   }
 
   for (let attempt = 0; attempt < 12; attempt += 1) {
+    const username = attempt === 0 ? preferredUsername(user) || createUsername() : createUsername();
     const { data, error } = await supabase
       .from("profiles")
       .insert({
         id: user.id,
         email: user.email,
-        username: createUsername(),
+        username,
         avatar_url: avatarUrl,
         signup_date: now,
         last_login: now,
       })
-      .select("id,email,username,avatar_url,signup_date,last_login")
+      .select(PROFILE_FIELDS)
       .single();
 
     if (!error) return data;
