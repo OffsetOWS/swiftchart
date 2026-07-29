@@ -453,10 +453,27 @@ export default function App() {
 
   if (isDisabledCommercePage) return <AuthLoading />;
 
+  if (isAppPage) {
+    return (
+      <>
+        <DesktopMobileGate enabled>
+          <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} app-view`}>
+            <MobileDemo
+              topIdeas={topIdeas}
+              initialConfigLoading={loadingTopIdeas}
+              initialTab={appTabFromPath(path)}
+            />
+          </main>
+        </DesktopMobileGate>
+        <Analytics />
+      </>
+    );
+  }
+
   return (
     <>
-    <DesktopMobileGate enabled={isAppPage}>
-    <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"}${isAppPage ? " app-view" : ""}`}>
+    <DesktopMobileGate enabled={false}>
+    <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"}`}>
       <div className="grain" />
       <div className="cursor-aura" />
 
@@ -491,9 +508,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {isAppPage ? <MobileDemo topIdeas={topIdeas} initialConfigLoading={loadingTopIdeas} initialTab={appTabFromPath(path)} /> : null}
-
-      <section id="terminal-workspace" className={`terminal-workspace${isAppPage ? " desktop-app-workspace" : ""}`}>
+      <section id="terminal-workspace" className="terminal-workspace">
         {!hasWorkspaceChrome ? (
           <div className="workspace-intro">
             <span>SwiftChart</span>
