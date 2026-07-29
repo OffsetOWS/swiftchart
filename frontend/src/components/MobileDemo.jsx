@@ -444,6 +444,10 @@ function ForexSignalGroups({ signals, onSelect, compact = false }) {
 function ForexHomeScreen({ signals, overview, onSelect }) {
   const [sessionClock, setSessionClock] = useState(() => new Date());
   const session = useMemo(() => getForexSessionState(sessionClock), [sessionClock]);
+  const homeSignals = useMemo(
+    () => signals.filter((signal) => String(signal.status).toUpperCase() !== "EXPIRED"),
+    [signals],
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => setSessionClock(new Date()), 30_000);
@@ -467,8 +471,8 @@ function ForexHomeScreen({ signals, overview, onSelect }) {
 
       {overview?.message ? <EmptyState title="Forex status" message={overview.message} /> : null}
 
-      <ForexSignalGroups signals={signals} onSelect={onSelect} />
-      {!signals.length ? (
+      <ForexSignalGroups signals={homeSignals} onSelect={onSelect} />
+      {!homeSignals.length ? (
         <p className="graphite-no-results">
           No persisted Forex setup currently meets the scanner criteria. SwiftChart will update this list after the next scheduled scan.
         </p>
