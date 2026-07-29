@@ -44,38 +44,6 @@ function hasSeenAppSplash() {
   }
 }
 
-const mockSignals = [
-  { rank: 1, symbol: "BTCUSDT", direction: "Long", timeframe: "4h", score: 97, tier: "Elite", entry: "104,200 - 104,850", tp: "108,900", sl: "102,760", rr: "3.1R", confidence: "Very high", regime: "Bullish continuation", thesis: "Liquidity swept below range. Momentum reclaimed. Clean continuation if BTC holds above entry." },
-  { rank: 2, symbol: "HYPEUSDT", direction: "Short", timeframe: "4h", score: 92, tier: "High Conviction", entry: "41.90 - 42.30", tp: "38.70", sl: "43.10", rr: "3.4R", confidence: "High", regime: "Bearish retest", thesis: "Weak retest into supply. Sellers still defending the prior breakdown." },
-  { rank: 3, symbol: "ETHUSDT", direction: "Long", timeframe: "6h", score: 85, tier: "Strong", entry: "3,520 - 3,555", tp: "3,710", sl: "3,470", rr: "2.6R", confidence: "High", regime: "Trend continuation", thesis: "ETH is holding trend structure. Needs BTC strength to confirm." },
-  { rank: 4, symbol: "SOLUSDT", direction: "Long", timeframe: "4h", score: 72, tier: "Watchlist", entry: "142.20 - 144.10", tp: "149.80", sl: "139.70", rr: "2.8R", confidence: "Medium", regime: "Selective bullish", thesis: "Clean structure, lower conviction until volume expands." },
-  { rank: 5, symbol: "AVAXUSDT", direction: "Short", timeframe: "1h", score: 69, tier: "Watchlist", entry: "31.80 - 32.10", tp: "30.20", sl: "32.70", rr: "1.9R", confidence: "Medium", regime: "Momentum fade", thesis: "Momentum is fading, but risk/reward is still developing." },
-  { rank: 6, symbol: "LINKUSDT", direction: "Long", timeframe: "2h", score: 71, tier: "Watchlist", entry: "14.12 - 14.28", tp: "15.10", sl: "13.78", rr: "2.1R", confidence: "Medium", regime: "Range reclaim", thesis: "Reclaimed prior range. Needs a strong close above entry." },
-  { rank: 7, symbol: "INJUSDT", direction: "Long", timeframe: "4h", score: 74, tier: "Watchlist", entry: "24.40 - 24.85", tp: "26.90", sl: "23.70", rr: "2.4R", confidence: "Medium", regime: "Bullish rotation", thesis: "Relative strength is improving while majors hold structure." },
-  { rank: 8, symbol: "DOGEUSDT", direction: "Short", timeframe: "1h", score: 67, tier: "Watchlist", entry: "0.143 - 0.145", tp: "0.136", sl: "0.148", rr: "1.7R", confidence: "Low-medium", regime: "Weak bounce", thesis: "Weak bounce into resistance. Lower score due to choppy volume." },
-  { rank: 9, symbol: "SUIUSDT", direction: "Long", timeframe: "6h", score: 88, tier: "Strong", entry: "3.42 - 3.49", tp: "3.82", sl: "3.28", rr: "2.5R", confidence: "High", regime: "Trend expansion", thesis: "Expansion structure is clean with momentum aligned above the trigger zone." },
-  { rank: 10, symbol: "AAVEUSDT", direction: "Long", timeframe: "4h", score: 73, tier: "Watchlist", entry: "286 - 292", tp: "312", sl: "276", rr: "2.0R", confidence: "Medium", regime: "Demand hold", thesis: "Demand is holding. Watch for a clean trigger." },
-];
-
-const mockHistory = [
-  { symbol: "INJUSDT", score: 74, result: "Win", state: "Closed", r: "+1.8R", date: "Today" },
-  { symbol: "AVAXUSDT", score: 69, result: "Open", state: "Open", r: "Tracking", date: "Yesterday" },
-  { symbol: "LINKUSDT", score: 66, result: "Loss", state: "Closed", r: "-1.0R", date: "Jun 13" },
-  { symbol: "SOLUSDT", score: 72, result: "Win", state: "Closed", r: "+1.2R", date: "Jun 12" },
-];
-
-const mockForexSignals = [
-  { market: "forex", symbol: "EURUSD", pair: "EUR/USD", direction: "Buy", timeframe: "15m", score: 84, grade: "A", entry: "1.0843 - 1.0847", sl: "1.0812", tp: "1.0881", tp2: "1.0915", rr: "2.1R", session: "London-New York overlap", spread: "SAFE", newsRisk: "LOW", status: "Open", confidence: "High", regime: "Bullish continuation", thesis: "London overlap breakout with momentum confirmation.", reasons: ["HTF trend aligned", "Spread safe", "Session active"], createdAt: "Now" },
-  { market: "forex", symbol: "GBPUSD", pair: "GBP/USD", direction: "Sell", timeframe: "1h", score: 79, grade: "B", entry: "1.2702 - 1.2706", sl: "1.2734", tp: "1.2651", tp2: "1.2620", rr: "2.0R", session: "London", spread: "SAFE", newsRisk: "LOW", status: "Open", confidence: "Medium", regime: "Bearish retest", thesis: "Supply retest with weak continuation candles.", reasons: ["1H structure bearish", "Location near resistance"], createdAt: "12m ago" },
-  { market: "forex", symbol: "USDJPY", pair: "USD/JPY", direction: "Buy", timeframe: "30m", score: 72, grade: "B", entry: "158.24 - 158.30", sl: "157.96", tp: "158.74", tp2: "158.96", rr: "2.3R", session: "Tokyo", spread: "UNKNOWN", newsRisk: "LOW", status: "Wait", confidence: "Medium", regime: "Range reclaim", thesis: "Waiting for Tokyo continuation above range.", reasons: ["Pre-session bias", "JPY pair pip sizing"], createdAt: "24m ago" },
-];
-
-const forexHistory = [
-  { symbol: "EURUSD", score: 84, result: "Open", state: "Open", r: "Tracking", date: "Today", market: "forex" },
-  { symbol: "GBPUSD", score: 79, result: "TP1", state: "TP1 hit", r: "+1.0R", date: "Yesterday", market: "forex" },
-  { symbol: "USDJPY", score: 72, result: "Expired", state: "Expired", r: "0R", date: "Jul 12", market: "forex" },
-];
-
 function scoreTier(score) {
   if (score >= 95) return "Elite";
   if (score >= 90) return "High Conviction";
@@ -83,27 +51,61 @@ function scoreTier(score) {
   return "Watchlist";
 }
 
+function displayRange(values) {
+  if (!Array.isArray(values) || values.length === 0) return "-";
+  const formatted = values.slice(0, 2).map((value) => fmt(value, 8));
+  return formatted.length === 1 ? formatted[0] : formatted.join(" - ");
+}
+
 function normalizeIdea(idea, index) {
-  const fallback = mockSignals[index] || mockSignals[3];
-  const score = Math.round(Number(idea?.setup_score || idea?.confidence_score || fallback.score));
+  const score = Math.round(Number(idea?.setup_score ?? idea?.confidence_score ?? 0));
   const entryZone = Array.isArray(idea?.entry_zone) ? idea.entry_zone : [];
   return {
-    ...fallback,
     rawIdea: idea,
+    market: MARKET_TYPES.crypto,
     rank: index + 1,
-    symbol: idea?.symbol || fallback.symbol,
-    direction: idea?.direction || fallback.direction,
-    timeframe: idea?.timeframe || fallback.timeframe,
+    symbol: idea?.symbol || "Unknown",
+    direction: idea?.direction || "Wait",
+    timeframe: idea?.timeframe || "-",
     score,
     tier: scoreTier(score),
-    entry: entryZone.length >= 2 ? `${Number(entryZone[0]).toLocaleString()} - ${Number(entryZone[1]).toLocaleString()}` : fallback.entry,
-    sl: idea?.stop_loss !== undefined ? Number(idea.stop_loss).toLocaleString() : fallback.sl,
-    tp: idea?.take_profit_1 !== undefined ? Number(idea.take_profit_1).toLocaleString() : fallback.tp,
-    tp2: idea?.take_profit_2 !== undefined ? Number(idea.take_profit_2).toLocaleString() : fallback.tp2,
-    rr: idea?.risk_reward_ratio !== undefined ? `${Number(idea.risk_reward_ratio).toFixed(1)}R` : fallback.rr,
-    confidence: idea?.confidence_score !== undefined ? `${Math.round(Number(idea.confidence_score))}%` : fallback.confidence,
-    regime: idea?.regime_label || idea?.market_regime || fallback.regime,
-    thesis: idea?.reason || fallback.thesis,
+    entry: displayRange(entryZone),
+    sl: idea?.stop_loss !== undefined ? fmt(idea.stop_loss, 8) : "-",
+    tp: idea?.take_profit_1 !== undefined ? fmt(idea.take_profit_1, 8) : "-",
+    tp2: idea?.take_profit_2 !== undefined ? fmt(idea.take_profit_2, 8) : "-",
+    rr: idea?.risk_reward_ratio !== undefined ? `${Number(idea.risk_reward_ratio).toFixed(1)}R` : "-",
+    confidence: idea?.confidence_score !== undefined ? `${Math.round(Number(idea.confidence_score))}%` : `${score}%`,
+    regime: idea?.regime_label || idea?.market_regime || "Awaiting market classification",
+    thesis: idea?.reason || "This setup passed SwiftChart's live confirmation checks.",
+    exchange: idea?.exchange,
+    status: idea?.status || "Open",
+  };
+}
+
+function normalizePendingSetup(setup, index) {
+  const score = Math.round(Number(setup?.score_preview ?? 0));
+  const short = /short|sell/i.test(setup?.direction);
+  const targetZone = short ? setup?.nearest_support : setup?.nearest_resistance;
+  return {
+    rawIdea: setup,
+    isPending: true,
+    market: MARKET_TYPES.crypto,
+    rank: index + 1,
+    symbol: setup?.symbol || "Unknown",
+    direction: setup?.direction || "Wait",
+    timeframe: setup?.timeframe || "-",
+    score,
+    tier: "Watchlist",
+    entry: displayRange(setup?.entry_zone),
+    sl: setup?.invalidation_level !== undefined ? fmt(setup.invalidation_level, 8) : "-",
+    tp: displayRange(targetZone),
+    tp2: "-",
+    rr: setup?.estimated_rr !== undefined ? `${Number(setup.estimated_rr).toFixed(1)}R` : "-",
+    confidence: `${score}% preview`,
+    regime: setup?.regime || "Pending confirmation",
+    thesis: setup?.reason || "Live market candidate awaiting confirmation.",
+    exchange: setup?.exchange,
+    status: "Wait",
   };
 }
 
@@ -159,34 +161,32 @@ function slashPair(symbol) {
 }
 
 function normalizeForexSignal(signal, index = 0) {
-  const fallback = mockForexSignals[index] || mockForexSignals[0];
-  const pair = signal?.pair || signal?.symbol || fallback.symbol;
-  const direction = String(signal?.direction || fallback.direction).toUpperCase();
-  const score = Math.round(Number(signal?.score ?? fallback.score));
-  const rr = signal?.rr ? `${signal.rr}R` : fallback.rr;
+  const pair = signal?.pair || signal?.symbol || "Unknown";
+  const direction = String(signal?.direction || "WAIT").toUpperCase();
+  const score = Math.round(Number(signal?.score ?? 0));
+  const rr = signal?.rr !== undefined ? `${Number(signal.rr).toFixed(1)}R` : "-";
   return {
-    ...fallback,
     ...signal,
     market: MARKET_TYPES.forex,
     symbol: String(pair).replace("/", "").toUpperCase(),
     pair: slashPair(pair),
     direction: direction === "SHORT" || direction === "SELL" ? "Sell" : direction === "WAIT" ? "Wait" : "Buy",
     score,
-    grade: signal?.grade || fallback.grade,
-    timeframe: signal?.timeframe || fallback.timeframe,
-    entry: signal?.entry ? fmt(signal.entry) : fallback.entry,
-    sl: signal?.stopLoss ? fmt(signal.stopLoss) : fallback.sl,
-    tp: signal?.tp1 ? fmt(signal.tp1) : fallback.tp,
-    tp2: signal?.tp2 ? fmt(signal.tp2) : fallback.tp2,
+    grade: signal?.grade || "-",
+    timeframe: signal?.timeframe || "-",
+    entry: signal?.entry !== undefined ? fmt(signal.entry) : "-",
+    sl: signal?.stopLoss !== undefined ? fmt(signal.stopLoss) : "-",
+    tp: signal?.tp1 !== undefined ? fmt(signal.tp1) : "-",
+    tp2: signal?.tp2 !== undefined ? fmt(signal.tp2) : "-",
     rr,
-    session: signal?.session || fallback.session,
-    spread: signal?.spreadStatus || fallback.spread,
-    newsRisk: signal?.newsRisk || fallback.newsRisk,
-    status: signal?.status || fallback.status,
-    regime: signal?.pre_session_bias || fallback.regime,
-    thesis: signal?.reason || fallback.thesis,
-    reasons: signal?.reason ? [signal.reason] : fallback.reasons,
-    createdAt: signal?.lastUpdated ? dt(signal.lastUpdated) : fallback.createdAt,
+    session: signal?.session || "-",
+    spread: signal?.spreadStatus || "-",
+    newsRisk: signal?.newsRisk || "-",
+    status: signal?.status || "Wait",
+    regime: signal?.pre_session_bias || "Awaiting structure",
+    thesis: signal?.reason || "Live Forex setup.",
+    reasons: signal?.reason ? [signal.reason] : [],
+    createdAt: signal?.lastUpdated ? dt(signal.lastUpdated) : "-",
     updatedAt: signal?.lastUpdated ? dt(signal.lastUpdated) : undefined,
   };
 }
@@ -220,6 +220,7 @@ function Direction({ direction }) {
 
 function statusForSignal(signal) {
   if (signal.market === MARKET_TYPES.forex) return signal.score >= 80 ? signal.grade || "A" : signal.status || "Open";
+  if (signal.isPending) return "Wait";
   if (signal.score >= 90) return "High Conviction";
   if (signal.score > 75) return signal.tier || scoreTier(signal.score);
   return "Open";
@@ -346,6 +347,18 @@ function HomeScreen({ signals, onSelect, onViewAll, market, forexSignals, forexO
   if (market === MARKET_TYPES.forex) {
     return <ForexHomeScreen signals={forexSignals} overview={forexOverview} onSelect={onSelect} />;
   }
+  if (!signals.length) {
+    return (
+      <div className="graphite-screen">
+        <EmptyState
+          title="No confirmed setup right now"
+          message="SwiftChart is tracking the live market. New opportunities will appear when they pass confirmation."
+          action="Scan again"
+          onAction={onViewAll}
+        />
+      </div>
+    );
+  }
   const best = signals[0];
   const bullish = !/short|sell/i.test(best.direction);
   return (
@@ -389,7 +402,6 @@ function HomeScreen({ signals, onSelect, onViewAll, market, forexSignals, forexO
 function ForexHomeScreen({ signals, overview, onSelect }) {
   const [sessionClock, setSessionClock] = useState(() => new Date());
   const session = useMemo(() => getForexSessionState(sessionClock), [sessionClock]);
-  const top = signals.length ? signals : mockForexSignals;
 
   useEffect(() => {
     const timer = window.setInterval(() => setSessionClock(new Date()), 30_000);
@@ -418,7 +430,8 @@ function ForexHomeScreen({ signals, overview, onSelect }) {
           <span>Top Forex setups</span>
         </div>
         <div className="graphite-stack graphite-signal-list">
-          {top.slice(0, 5).map((signal) => <SignalRow key={`${signal.symbol}-forex-home`} signal={signal} onSelect={onSelect} />)}
+          {signals.slice(0, 5).map((signal) => <SignalRow key={`${signal.symbol}-forex-home`} signal={signal} onSelect={onSelect} />)}
+          {!signals.length ? <p className="graphite-no-results">No live Forex setup currently meets the scanner criteria.</p> : null}
         </div>
       </section>
 
@@ -426,7 +439,7 @@ function ForexHomeScreen({ signals, overview, onSelect }) {
   );
 }
 
-function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scanningForex, forexError, tradingPreferences }) {
+function ScanScreen({ signals, onSelect, market, forexSignals, onCryptoScan, cryptoLoading, onForexScan, scanningForex, forexError, tradingPreferences }) {
   const [scanState, setScanState] = useState("idle");
   const [forexPair, setForexPair] = useState("EURUSD");
   const forexTimeframe = "15m";
@@ -447,10 +460,15 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
     });
   }, [appliedCoinQuery, exchange, scoreBand, signals, timeframe]);
 
-  function startScan() {
+  async function startScan() {
     setAppliedCoinQuery("");
     setScanState("scanning");
-    window.setTimeout(() => setScanState("done"), 1600);
+    try {
+      const refreshed = await onCryptoScan?.();
+      setScanState(refreshed === false ? "error" : "done");
+    } catch {
+      setScanState("error");
+    }
   }
 
   function scanCoin(event) {
@@ -484,7 +502,8 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
             <span>Forex results</span>
           </div>
           <div className="graphite-stack graphite-signal-list compact">
-            {(forexSignals.length ? forexSignals : mockForexSignals).map((signal) => <SignalRow key={`${signal.symbol}-forex-scan`} signal={signal} onSelect={onSelect} compact />)}
+            {forexSignals.map((signal) => <SignalRow key={`${signal.symbol}-forex-scan`} signal={signal} onSelect={onSelect} compact />)}
+            {!forexSignals.length && !scanningForex ? <p className="graphite-no-results">No live Forex setup currently meets the scanner criteria.</p> : null}
           </div>
         </section>
       </div>
@@ -499,7 +518,7 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
           <h1>Find clean setups</h1>
           <p>Search one coin or rank the market in seconds.</p>
         </div>
-        <button type="button" onClick={startScan}><ScanLine size={18} /> Scan Market</button>
+        <button type="button" onClick={startScan} disabled={scanState === "scanning" || cryptoLoading}><ScanLine size={18} /> {scanState === "scanning" || cryptoLoading ? "Scanning..." : "Scan Market"}</button>
       </section>
 
       <form className="graphite-search" onSubmit={scanCoin}>
@@ -541,7 +560,7 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onForexScan, scan
       <section className="graphite-section">
         <div className="graphite-section-head">
           <span>Scan results</span>
-          <strong className="graphite-results-status">{scanState === "scanning" ? "Analyzing..." : "Updated just now"}<i /></strong>
+          <strong className="graphite-results-status">{scanState === "scanning" || cryptoLoading ? "Analyzing..." : scanState === "error" ? "Refresh failed" : "Live market"}<i /></strong>
         </div>
         <div className="graphite-stack graphite-signal-list compact">
           {visibleSignals.map((signal) => <SignalRow key={`${signal.symbol}-scan`} signal={signal} onSelect={onSelect} compact />)}
@@ -681,18 +700,18 @@ function HistoryScreen({ market, paperTrades = [] }) {
     market: MARKET_TYPES.crypto,
     id: trade.id,
   }));
-  const savedSymbols = new Set(savedRows.map((item) => item.symbol));
-  const rows = [
-    ...savedRows,
-    ...mockHistory.filter((item) => !savedSymbols.has(item.symbol)).map((item) => ({ ...item, market: MARKET_TYPES.crypto })),
-    ...forexHistory,
-  ].filter((item) => (marketFilter === "all" ? true : item.market === marketFilter))
+  const rows = savedRows
+    .filter((item) => (marketFilter === "all" ? true : item.market === marketFilter))
     .filter((item) => statusFilter === "all" || item.result.toLowerCase().includes(statusFilter));
+  const totalR = rows.reduce((sum, item) => {
+    const value = Number.parseFloat(item.r);
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
   return (
     <div className="graphite-screen">
       <section className="graphite-history-hero">
         <span>{market === MARKET_TYPES.forex ? "Forex Total R" : "Total R"}</span>
-        <strong>{market === MARKET_TYPES.forex ? "+1.0R" : "+2.6R"}</strong>
+        <strong>{`${totalR >= 0 ? "+" : ""}${totalR.toFixed(1)}R`}</strong>
         <p>{rows.length} tracked ideas · market filter active</p>
       </section>
 
@@ -786,7 +805,13 @@ const navItems = [
 
 const validTabs = new Set(navItems.map(([key]) => key));
 
-export default function MobileDemo({ topIdeas = [], initialConfigLoading = false, initialTab = "" }) {
+export default function MobileDemo({
+  topIdeas = [],
+  pendingSetups = [],
+  initialConfigLoading = false,
+  initialTab = "",
+  onRefreshCrypto,
+}) {
   const auth = useAuth();
   const notificationCenter = useNotifications();
   const preferencesController = useAppPreferences(auth.user?.id);
@@ -814,18 +839,20 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
     return /^(settings(?:-[a-z]+)?|support(?:-[a-z]+)?)$/.test(requestedView || "") ? requestedView : "main";
   });
   const [forexOverview, setForexOverview] = useState(null);
-  const [forexSignals, setForexSignals] = useState(mockForexSignals);
+  const [forexSignals, setForexSignals] = useState([]);
   const [forexPairs, setForexPairs] = useState([]);
   const [forexError, setForexError] = useState("");
   const [forexLoading, setForexLoading] = useState(false);
   const [paperTrades, setPaperTrades] = useState([]);
   const [tradeSaveState, setTradeSaveState] = useState({ signalId: "", status: "idle" });
   const signals = useMemo(() => {
-    const mapped = topIdeas.slice(0, 10).map(normalizeIdea);
-    return (mapped.length ? mapped : mockSignals)
+    const confirmed = topIdeas.map(normalizeIdea);
+    const pending = pendingSetups.map(normalizePendingSetup);
+    return [...confirmed, ...pending]
       .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
       .map((signal, index) => ({ ...signal, rank: index + 1 }));
-  }, [topIdeas]);
+  }, [pendingSetups, topIdeas]);
   const preferredSignals = useMemo(() => {
     const settings = preferences.trading;
     return [...signals].sort((a, b) => {
@@ -939,29 +966,34 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
   useEffect(() => {
     if (activeMarket !== MARKET_TYPES.forex) return;
     let cancelled = false;
-    setForexLoading(true);
-    setForexError("");
-    Promise.allSettled([getForexOverview(), getForexSignals()])
-      .then(([overviewResult, signalsResult]) => {
-        if (cancelled) return;
-        if (overviewResult.status === "fulfilled") {
-          setForexOverview(overviewResult.value);
-          setForexPairs(overviewResult.value?.supportedPairs || []);
-        }
-        if (signalsResult.status === "fulfilled") {
-          const data = signalsResult.value;
-          const raw = data.topSetups?.length ? data.topSetups : data.signals || [];
-          setForexSignals(raw.map(normalizeForexSignal));
-          setForexPairs((current) => current.length ? current : data.supportedPairs || []);
-        }
-        const failed = [overviewResult, signalsResult].find((result) => result.status === "rejected");
-        if (failed) setForexError(failed.reason?.message || "Could not load Forex data.");
-      })
-      .finally(() => {
-        if (!cancelled) setForexLoading(false);
-      });
+    const loadForex = () => {
+      setForexLoading(true);
+      setForexError("");
+      Promise.allSettled([getForexOverview(), getForexSignals()])
+        .then(([overviewResult, signalsResult]) => {
+          if (cancelled) return;
+          if (overviewResult.status === "fulfilled") {
+            setForexOverview(overviewResult.value);
+            setForexPairs(overviewResult.value?.supportedPairs || []);
+          }
+          if (signalsResult.status === "fulfilled") {
+            const data = signalsResult.value;
+            const raw = data.topSetups?.length ? data.topSetups : data.signals || [];
+            setForexSignals(raw.map(normalizeForexSignal));
+            setForexPairs((current) => current.length ? current : data.supportedPairs || []);
+          }
+          const failed = [overviewResult, signalsResult].find((result) => result.status === "rejected");
+          if (failed) setForexError(failed.reason?.message || "Could not load Forex data.");
+        })
+        .finally(() => {
+          if (!cancelled) setForexLoading(false);
+        });
+    };
+    loadForex();
+    const refreshTimer = window.setInterval(loadForex, 60_000);
     return () => {
       cancelled = true;
+      window.clearInterval(refreshTimer);
     };
   }, [activeMarket]);
 
@@ -1147,7 +1179,7 @@ export default function MobileDemo({ topIdeas = [], initialConfigLoading = false
           ) : null}
           <main className="graphite-content">
             {tab === "home" ? <HomeScreen signals={preferredSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} /> : null}
-            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onForexScan={runForexScan} scanningForex={forexLoading} forexError={forexError} tradingPreferences={preferences.trading} /> : null}
+            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} cryptoLoading={initialConfigLoading} onForexScan={runForexScan} scanningForex={forexLoading} forexError={forexError} tradingPreferences={preferences.trading} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} /> : null}
             {tab === "account" && accountView === "main" ? (
               <AccountScreen

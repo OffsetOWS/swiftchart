@@ -93,8 +93,10 @@ export default function App() {
 
   async function refreshTopIdeas(options = {}) {
     const manual = options?.manual === true;
+    const silent = options?.silent === true;
     const firstLoad = topIdeas.length === 0 && pendingSetups.length === 0;
-    setLoadingTopIdeas(firstLoad);
+    const showLoading = !silent && firstLoad;
+    if (showLoading) setLoadingTopIdeas(true);
     setNotice("");
     setNoticeType("info");
     try {
@@ -111,11 +113,13 @@ export default function App() {
         lastRefreshFinishedAt: data.last_refresh_finished_at,
         scanDurationSeconds: data.scan_duration_seconds,
       });
+      return true;
     } catch (error) {
       setNoticeType("error");
       setNotice(error.message);
+      return false;
     } finally {
-      setLoadingTopIdeas(false);
+      if (showLoading) setLoadingTopIdeas(false);
     }
   }
 
@@ -231,6 +235,8 @@ export default function App() {
 
   useEffect(() => {
     refreshTopIdeas();
+    const refreshTimer = window.setInterval(() => refreshTopIdeas({ silent: true }), 60_000);
+    return () => window.clearInterval(refreshTimer);
   }, [exchange, timeframe]);
 
   useEffect(() => {
@@ -453,7 +459,12 @@ export default function App() {
     return (
       <>
         <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} mobile-demo-page`}>
-          <MobileDemo topIdeas={topIdeas} initialConfigLoading={loadingTopIdeas} />
+          <MobileDemo
+            topIdeas={topIdeas}
+            pendingSetups={pendingSetups}
+            initialConfigLoading={loadingTopIdeas}
+            onRefreshCrypto={() => refreshTopIdeas({ manual: true })}
+          />
         </main>
         <Analytics />
       </>
@@ -469,8 +480,10 @@ export default function App() {
           <main className={`${nightMode ? "app-shell dark-mode" : "app-shell"} app-view`}>
             <MobileDemo
               topIdeas={topIdeas}
+              pendingSetups={pendingSetups}
               initialConfigLoading={loadingTopIdeas}
               initialTab={appTabFromPath(path)}
+              onRefreshCrypto={() => refreshTopIdeas({ manual: true })}
             />
           </main>
         </DesktopMobileGate>
