@@ -1,6 +1,6 @@
 import { AlertTriangle, Clock3, Globe2, RefreshCcw, ShieldAlert, Waves } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { getForexOverview, getForexSignals, scanForex } from "../lib/api.js";
+import { getForexOverview, getForexSignals } from "../lib/api.js";
 import "../styles/forex.css";
 
 function fmt(value, digits = 5) {
@@ -11,6 +11,26 @@ function fmt(value, digits = 5) {
 function dt(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function normalizeSignal(signal) {
+  return {
+    ...signal,
+    pair: signal.symbol || signal.pair,
+    score: signal.setup_score ?? signal.score,
+    grade: signal.grade || (signal.setup_score >= 90 ? "A+" : signal.setup_score >= 80 ? "A" : "B"),
+    session: signal.market_session || signal.session,
+    pre_session_bias: signal.timeframe_alignment || signal.htf_bias,
+    entry: signal.entry_price ?? signal.entry,
+    stopLoss: signal.stop_loss ?? signal.stopLoss,
+    tp1: signal.take_profit_1 ?? signal.tp1,
+    tp2: signal.take_profit_2 ?? signal.tp2,
+    rr: signal.risk_reward_2 ?? signal.rr,
+    spreadStatus: signal.spread_status || signal.spreadStatus,
+    newsRisk: signal.news_risk || signal.newsRisk,
+    lastUpdated: signal.last_price_updated_at || signal.created_at || signal.lastUpdated,
+    reason: signal.setup_reason || signal.reason,
+  };
 }
 
 function ForexSignalCard({ signal }) {
@@ -53,7 +73,6 @@ export default function Forex() {
   const [signals, setSignals] = useState([]);
   const [topSetups, setTopSetups] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
 
   async function load() {
@@ -62,8 +81,8 @@ export default function Forex() {
     try {
       const [overviewData, signalData] = await Promise.all([getForexOverview(), getForexSignals()]);
       setOverview(overviewData);
-      setSignals(signalData.signals || []);
-      setTopSetups(signalData.topSetups || []);
+      setSignals((signalData.signals || []).map(normalizeSignal));
+      setTopSetups((overviewData.top_setups || []).map(normalizeSignal));
     } catch (err) {
       setError(err.message || "Could not load Forex Mode.");
     } finally {
@@ -71,27 +90,12 @@ export default function Forex() {
     }
   }
 
-  async function runScan() {
-    setScanning(true);
-    setError("");
-    try {
-      const data = await scanForex();
-      setSignals(data.signals || []);
-      setTopSetups(data.topSetups || []);
-      setOverview((current) => current ? { ...current, topSetups: data.topSetups || [], message: data.message } : current);
-    } catch (err) {
-      setError(err.message || "Could not scan forex.");
-    } finally {
-      setScanning(false);
-    }
-  }
-
   useEffect(() => {
     load();
   }, []);
 
-  const session = overview?.activeSession;
-  const supportedPairs = overview?.supportedPairs || [];
+  const session = overview?.active_session || overview?.activeSession;
+  const supportedPairs = overview?.supported_pairs || overview?.supportedPairs || [];
   const message = error || overview?.message;
   const cleanSignals = useMemo(() => (signals.length ? signals : topSetups), [signals, topSetups]);
 
@@ -103,9 +107,7 @@ export default function Forex() {
           <h2>Session-aware FX scanner</h2>
           <p>Dedicated forex logic for major pairs, session timing, spread safety, news risk, and risk-defined setups.</p>
         </div>
-        <button className="primary forex-scan-button" onClick={runScan} disabled={scanning}>
-          <RefreshCcw size={17} /> {scanning ? "Scanning Forex..." : "Scan Forex"}
-        </button>
+        <span className="forex-scan-button"><RefreshCcw size={17} /> Scheduled scanner</span>
       </section>
 
       {message ? (

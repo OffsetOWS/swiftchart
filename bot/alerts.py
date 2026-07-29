@@ -12,6 +12,7 @@ from app.services.alert_dedupe import should_skip_alert
 from bot.formatter import format_trade_alert
 from bot.scanner import scan_top_ideas
 from bot.storage import get_subscribers
+from app.forex.telegram import dispatch_pending_forex
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +61,23 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     min_score = alert_min_score()
     rejection_reasons: Counter[str] = Counter()
     subscribers = get_subscribers()
+    forex_dispatch = await dispatch_pending_forex(bot)
     if not subscribers:
         rejection_reasons["missing subscribers"] += 1
         logger.info(
             "telegram_alert_scan_complete subscribers=0 symbols_scanned=0 valid_ideas_found=0 eligible_alerts=0 alerts_sent=0 rejection_reasons=%s",
             dict(rejection_reasons),
         )
-        return {"status": "ok", "subscribers": 0, "ideas": 0, "eligible": 0, "sent": 0, "alerts_sent": 0, "rejection_reasons": dict(rejection_reasons)}
+        return {
+            "status": "ok",
+            "subscribers": 0,
+            "ideas": 0,
+            "eligible": 0,
+            "sent": 0,
+            "alerts_sent": 0,
+            "forex_dispatch": forex_dispatch,
+            "rejection_reasons": dict(rejection_reasons),
+        }
 
     selected_exchange = exchange
     symbols_scanned = 0
@@ -175,6 +186,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         "skipped_timeframe": skipped_timeframes,
         "skipped_by_entry_status": skipped_by_entry_status,
         "rejection_reasons": dict(rejection_reasons),
+        "forex_dispatch": forex_dispatch,
     }
 
 

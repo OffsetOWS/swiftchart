@@ -133,10 +133,15 @@ export function getForexSignals() {
   return request("/api/forex/signals");
 }
 
-export function scanForex(payload = {}) {
-  return request("/api/forex/scan", {
+export function getForexSignal(signalId) {
+  return request(`/api/forex/signals/${encodeURIComponent(signalId)}`);
+}
+
+export function takeForexTrade(signalId, payload, accessToken) {
+  return request(`/api/forex/signals/${encodeURIComponent(signalId)}/take-trade`, {
     method: "POST",
     body: JSON.stringify(payload),
+    accessToken,
   });
 }
 

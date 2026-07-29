@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     cmc_api_base_url: str = "https://pro-api.coinmarketcap.com"
     cmc_cache_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     cmc_request_timeout_seconds: float = Field(default=8.0, ge=1, le=30)
+    twelve_data_api_key: str = ""
+    internal_api_secret: str = ""
+    forex_scanner_enabled: bool = True
+    forex_scan_interval_seconds: int = Field(default=900, ge=60)
+    forex_lifecycle_interval_seconds: int = Field(default=60, ge=30)
+    forex_worker_startup_delay_seconds: int = Field(default=20, ge=0)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -1,0 +1,1 @@
+"""Persisted Forex signal architecture."""

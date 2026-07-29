@@ -8,6 +8,9 @@ from app.routes.market_intelligence import router as market_intelligence_router
 from app.routes.markets import router as markets_router
 from app.routes.paper_trades import router as paper_trades_router
 from app.routes.trade_history import router as trade_history_router
+from app.routes.forex import router as forex_router
+from app.forex.scheduler import start_forex_worker
+from app.forex.storage import ensure_forex_schema
 from app.services.scanner import start_background_scanner
 from app.utils.database import init_db
 from app.utils.secure_logging import install_secure_logging
@@ -31,7 +34,9 @@ app.add_middleware(
 async def startup() -> None:
     install_secure_logging()
     init_db()
+    ensure_forex_schema()
     start_background_scanner()
+    start_forex_worker()
 
 
 @app.get("/health")
@@ -48,3 +53,4 @@ app.include_router(paper_trades_router, prefix="/api", tags=["paper-trades"])
 app.include_router(trade_history_router, prefix="/api", tags=["trade-history"])
 app.include_router(genlayer_router, prefix="/api", tags=["genlayer-ai"])
 app.include_router(market_intelligence_router, prefix="/api", tags=["market-intelligence"])
+app.include_router(forex_router, prefix="/api", tags=["forex"])
