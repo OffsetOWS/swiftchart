@@ -23,6 +23,7 @@ from app.forex.models import (
 )
 from app.forex.config import normalize_forex_timeframe
 from app.forex.news import forex_news_risk
+from app.forex.oanda import OandaForexProvider
 from app.forex.scanner import forex_pair_infos, scan_forex
 from app.forex.sessions import forex_session_state
 from app.forex.storage import (
@@ -95,7 +96,11 @@ async def forex_overview():
     session = forex_session_state()
     news_risk, news_reason = forex_news_risk()
     active = list_signals(ACTIVE_FOREX_STATUSES, limit=5)
-    configured = bool(settings.twelve_data_api_key)
+    oanda_configured = bool(
+        (settings.oanda_api_key or os.getenv("OANDA_API_TOKEN"))
+        and settings.oanda_account_id
+    )
+    configured = oanda_configured or bool(settings.twelve_data_api_key)
     if not configured:
         message = "Forex data provider is not configured."
     elif not active:
@@ -104,7 +109,7 @@ async def forex_overview():
         message = None
     return ForexOverview(
         configured=configured,
-        provider="twelvedata",
+        provider="oanda" if oanda_configured else "twelvedata",
         active_session=session,
         supported_pairs=forex_pair_infos(),
         news_risk_warning=news_reason if news_risk != "LOW" else "News risk: LOW.",
@@ -206,6 +211,14 @@ async def forex_scanner_diagnostics(
 ):
     _require_internal_secret(x_internal_api_secret)
     return ForexScannerDiagnostics(**get_scanner_diagnostics())
+
+
+@router.get("/forex/provider/health")
+async def forex_provider_health(
+    x_internal_api_secret: str | None = Header(default=None),
+):
+    _require_internal_secret(x_internal_api_secret)
+    return await OandaForexProvider().health()
 
 
 @router.post("/forex/signals/{signal_id}/take-trade", response_model=TakeTradePreparation)

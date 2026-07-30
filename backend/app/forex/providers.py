@@ -111,5 +111,48 @@ class TwelveDataForexProvider(ForexDataProvider):
         return pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
 
 
+class FallbackForexProvider(ForexDataProvider):
+    name = "oanda"
+
+    def __init__(
+        self,
+        primary: ForexDataProvider,
+        fallback: ForexDataProvider,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    async def candles(
+        self,
+        pair: ForexPairConfig,
+        timeframe: str,
+        limit: int = 240,
+    ) -> pd.DataFrame:
+        try:
+            return await self.primary.candles(pair, timeframe, limit)
+        except ForexProviderError as primary_error:
+            logger.warning(
+                "Primary Forex provider failed provider=%s pair=%s timeframe=%s error=%s; "
+                "using fallback=%s",
+                self.primary.name,
+                pair.pair,
+                timeframe,
+                primary_error,
+                self.fallback.name,
+            )
+            try:
+                return await self.fallback.candles(pair, timeframe, limit)
+            except ForexProviderError as fallback_error:
+                raise ForexProviderError(
+                    f"Primary provider unavailable ({primary_error}); "
+                    f"fallback unavailable ({fallback_error})"
+                ) from fallback_error
+
+
 def get_forex_provider() -> ForexDataProvider:
-    return TwelveDataForexProvider()
+    from app.forex.oanda import OandaForexProvider
+
+    return FallbackForexProvider(
+        primary=OandaForexProvider(),
+        fallback=TwelveDataForexProvider(),
+    )

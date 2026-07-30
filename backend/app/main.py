@@ -10,6 +10,7 @@ from app.routes.paper_trades import router as paper_trades_router
 from app.routes.trade_history import router as trade_history_router
 from app.routes.forex import router as forex_router
 from app.forex.scheduler import start_forex_worker
+from app.forex.oanda import verify_oanda_startup
 from app.forex.storage import ensure_forex_schema
 from app.services.scanner import start_background_scanner
 from app.utils.database import init_db
@@ -36,6 +37,7 @@ async def startup() -> None:
     init_db()
     ensure_forex_schema()
     start_background_scanner()
+    await verify_oanda_startup()
     start_forex_worker()
 
 

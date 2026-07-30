@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     cmc_api_base_url: str = "https://pro-api.coinmarketcap.com"
     cmc_cache_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     cmc_request_timeout_seconds: float = Field(default=8.0, ge=1, le=30)
+    oanda_api_key: str = ""
+    oanda_account_id: str = ""
+    oanda_env: str = "practice"
+    oanda_base_url: str = "https://api-fxpractice.oanda.com"
+    oanda_request_timeout_seconds: float = Field(default=12.0, ge=1, le=30)
+    oanda_retry_attempts: int = Field(default=3, ge=1, le=5)
+    oanda_retry_backoff_seconds: float = Field(default=0.5, ge=0, le=10)
     twelve_data_api_key: str = ""
     internal_api_secret: str = ""
     forex_scanner_enabled: bool = True

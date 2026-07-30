@@ -44,6 +44,9 @@ SUPPORTED_FOREX_PAIRS: dict[str, ForexPairConfig] = {
     "USDCAD": ForexPairConfig("USDCAD", "USD/CAD", 0.0001, ("New York", "London-New York overlap"), 2.0, 4, 55),
     "USDCHF": ForexPairConfig("USDCHF", "USD/CHF", 0.0001, ("London", "New York"), 2.0, 4, 50),
     "NZDUSD": ForexPairConfig("NZDUSD", "NZD/USD", 0.0001, ("Tokyo", "London-New York overlap"), 2.5, 3, 42),
+    "EURGBP": ForexPairConfig("EURGBP", "EUR/GBP", 0.0001, ("London",), 1.8, 3, 40),
+    "EURJPY": ForexPairConfig("EURJPY", "EUR/JPY", 0.01, ("Tokyo", "London"), 2.5, 5, 70),
+    "GBPJPY": ForexPairConfig("GBPJPY", "GBP/JPY", 0.01, ("Tokyo", "London"), 3.5, 7, 90),
     "XAUUSD": ForexPairConfig("XAUUSD", "XAU/USD", 0.1, ("London", "New York", "London-New York overlap"), 35.0, 10, 350),
 }
 
