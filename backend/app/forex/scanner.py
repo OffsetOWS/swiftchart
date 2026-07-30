@@ -24,6 +24,7 @@ from app.forex.providers import (
     ForexDataProvider,
     ForexProviderError,
     ForexProviderNotConfigured,
+    ForexProviderQuotaExceeded,
     get_forex_provider,
 )
 from app.forex.sessions import forex_session_state
@@ -242,9 +243,12 @@ async def scan_forex(
     rejected: list[dict[str, str | float]] = []
     errors: list[str] = []
     telegram_queued = 0
+    pairs_evaluated = 0
+    quota_exhausted = False
     try:
         for pair in SUPPORTED_FOREX_PAIRS.values():
             try:
+                pairs_evaluated += 1
                 candles = await provider.candles(pair, provider_timeframe, 180)
                 plan, audit = analyze_forex_timeframe(
                     pair,
@@ -267,6 +271,10 @@ async def scan_forex(
                 telegram_queued += enqueue_forex_signal(persisted)
             except ForexProviderNotConfigured:
                 raise
+            except ForexProviderQuotaExceeded as exc:
+                errors.append(str(exc))
+                quota_exhausted = True
+                break
             except ForexProviderError as exc:
                 errors.append(f"{pair.pair}: {exc}")
             except Exception as exc:
@@ -279,19 +287,18 @@ async def scan_forex(
         rejection_reasons = [
             f"{reason} ({count})" for reason, count in rejection_counts.most_common(4)
         ]
-        total_pairs = len(SUPPORTED_FOREX_PAIRS)
         result_status = (
             "TRADE_FOUND"
             if created or reused
             else "FAILED"
-            if errors and len(errors) >= total_pairs
+            if quota_exhausted or (errors and not rejected)
             else "NO_TRADE"
         )
         finish_scan_run(
             scan_id,
             created_count=len(created),
             reused_count=len(reused),
-            pairs_evaluated=total_pairs,
+            pairs_evaluated=pairs_evaluated,
             rejected_count=len(rejected),
             telegram_queued_count=telegram_queued,
             result_status=result_status,
@@ -306,7 +313,7 @@ async def scan_forex(
             timeframe=timeframe,
             trigger_source=trigger_source,
             result_status=result_status,
-            pairs_scanned=total_pairs,
+            pairs_scanned=pairs_evaluated,
             candidates_found=len(created) + len(reused),
             persisted_count=len(created),
             telegram_queued=telegram_queued,

@@ -7,6 +7,7 @@ import sqlite3
 
 import pandas as pd
 import pytest
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -14,7 +15,11 @@ from app.config import get_settings
 from app.forex.config import SUPPORTED_FOREX_PAIRS, SUPPORTED_FOREX_TIMEFRAMES
 from app.forex.lifecycle import next_signal_status
 from app.forex.models import TakeTradeRequest
-from app.forex.providers import ForexDataProvider
+from app.forex.providers import (
+    ForexDataProvider,
+    ForexProviderQuotaExceeded,
+    TwelveDataForexProvider,
+)
 from app.forex.scanner import scan_forex
 from app.forex.storage import (
     get_scanner_diagnostics,
@@ -80,6 +85,14 @@ class NoTradeProvider(FakeProvider):
         )
 
 
+class QuotaProvider(FakeProvider):
+    async def candles(self, pair, timeframe: str, limit: int = 240) -> pd.DataFrame:
+        self.timeframes.append(timeframe)
+        raise ForexProviderQuotaExceeded(
+            "Forex market-data daily credit limit reached; scanning resumes after the provider reset."
+        )
+
+
 @pytest.fixture()
 def forex_database(monkeypatch, tmp_path: Path):
     import app.utils.database as database
@@ -91,6 +104,57 @@ def forex_database(monkeypatch, tmp_path: Path):
     yield
     get_settings.cache_clear()
     database._INITIALIZED = False
+
+
+def test_daily_quota_response_opens_provider_circuit(monkeypatch):
+    import app.forex.providers as providers
+
+    requests = 0
+
+    class QuotaClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            nonlocal requests
+            requests += 1
+            return httpx.Response(
+                429,
+                request=httpx.Request("GET", "https://api.twelvedata.com/time_series"),
+                json={"message": "You have run out of API credits for the day."},
+            )
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **kwargs: QuotaClient())
+    TwelveDataForexProvider._unavailable_until = None
+    TwelveDataForexProvider._unavailable_reason = None
+    provider = TwelveDataForexProvider(api_key="test-key")
+    pair = SUPPORTED_FOREX_PAIRS["EURUSD"]
+
+    with pytest.raises(ForexProviderQuotaExceeded, match="daily credit limit"):
+        asyncio.run(provider.candles(pair, "15m", 2))
+    with pytest.raises(ForexProviderQuotaExceeded, match="daily credit limit"):
+        asyncio.run(provider.candles(pair, "15m", 2))
+
+    assert requests == 1
+    TwelveDataForexProvider._unavailable_until = None
+    TwelveDataForexProvider._unavailable_reason = None
+
+
+def test_quota_failure_stops_scan_after_first_pair(forex_database):
+    provider = QuotaProvider()
+    result = asyncio.run(scan_forex(provider, timeframe="15M", trigger_source="manual"))
+
+    assert result.result_status == "FAILED"
+    assert result.pairs_scanned == 1
+    assert result.persisted_count == 0
+    assert len(provider.timeframes) == 1
+    assert not list_signals(("PENDING_ENTRY",))
+    diagnostics = get_scanner_diagnostics()
+    assert diagnostics["latest_scanner_error"]
+    assert "daily credit limit" in diagnostics["latest_scanner_error"]
 
 
 def test_signal_list_does_not_call_scanner(monkeypatch, forex_database):

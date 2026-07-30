@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 
 import httpx
@@ -21,6 +21,10 @@ class ForexProviderNotConfigured(ForexProviderError):
     pass
 
 
+class ForexProviderQuotaExceeded(ForexProviderError):
+    pass
+
+
 class ForexDataProvider(ABC):
     name: str
 
@@ -32,6 +36,8 @@ class ForexDataProvider(ABC):
 class TwelveDataForexProvider(ForexDataProvider):
     name = "twelvedata"
     interval_map = {"15m": "15min", "1h": "1h", "4h": "4h", "1d": "1day"}
+    _unavailable_until: datetime | None = None
+    _unavailable_reason: str | None = None
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key if api_key is not None else get_settings().twelve_data_api_key
@@ -39,6 +45,11 @@ class TwelveDataForexProvider(ForexDataProvider):
     async def candles(self, pair: ForexPairConfig, timeframe: str, limit: int = 240) -> pd.DataFrame:
         if not self.api_key:
             raise ForexProviderNotConfigured("Forex data provider is not configured.")
+        now = datetime.now(UTC)
+        if self._unavailable_until and now < self._unavailable_until:
+            raise ForexProviderQuotaExceeded(
+                self._unavailable_reason or "Forex market-data capacity is temporarily exhausted."
+            )
         interval = self.interval_map.get(timeframe.lower())
         if not interval:
             raise ForexProviderError(f"Unsupported forex timeframe: {timeframe}")
@@ -50,8 +61,32 @@ class TwelveDataForexProvider(ForexDataProvider):
         }
         async with httpx.AsyncClient(timeout=18) as client:
             response = await client.get("https://api.twelvedata.com/time_series", params=params)
-            response.raise_for_status()
+        try:
             payload = response.json()
+        except ValueError:
+            payload = {}
+        if response.status_code == 429:
+            provider_message = str(payload.get("message") or "")
+            daily_limit_hit = "credits for the day" in provider_message.lower()
+            if daily_limit_hit:
+                tomorrow = (now + timedelta(days=1)).date()
+                self.__class__._unavailable_until = datetime.combine(
+                    tomorrow,
+                    datetime.min.time(),
+                    tzinfo=UTC,
+                )
+                reason = "Forex market-data daily credit limit reached; scanning resumes after the provider reset."
+            else:
+                retry_after = max(int(response.headers.get("Retry-After", "60") or 60), 60)
+                self.__class__._unavailable_until = now + timedelta(seconds=retry_after)
+                reason = "Forex market-data rate limit reached; retry after the provider cooldown."
+            self.__class__._unavailable_reason = reason
+            raise ForexProviderQuotaExceeded(reason)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            message = str(payload.get("message") or f"HTTP {response.status_code}")
+            raise ForexProviderError(f"Forex market-data request failed: {message}") from exc
         if payload.get("status") == "error":
             raise ForexProviderError(str(payload.get("message") or "Twelve Data request failed."))
         rows = []
