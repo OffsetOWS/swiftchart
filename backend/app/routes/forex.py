@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import hashlib
+import os
 import secrets
 import time
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
 from app.config import get_settings
@@ -42,9 +44,39 @@ def _require_internal_secret(x_internal_api_secret: str | None) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Scanner access denied.")
 
 
-def _require_authenticated(authorization: str | None) -> None:
+async def _require_authenticated(authorization: str | None) -> str:
     if not authorization or not authorization.lower().startswith("bearer ") or len(authorization) < 24:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    token = authorization.split(" ", 1)[1].strip()
+    supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
+    if not supabase_url or not anon_key:
+        if get_settings().environment.lower() == "production":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service is unavailable.",
+            )
+        return token
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(
+                f"{supabase_url.rstrip('/')}/auth/v1/user",
+                headers={"Authorization": f"Bearer {token}", "apikey": anon_key},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is temporarily unavailable.",
+        ) from exc
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your session has expired. Please sign in again.",
+        )
+    user_id = str(response.json().get("id") or "")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    return user_id
 
 
 @router.get("/forex/pairs")
@@ -140,7 +172,7 @@ async def manual_forex_scan(
     timeframe: str = Query(default="15M"),
     authorization: str | None = Header(default=None),
 ):
-    _require_authenticated(authorization)
+    await _require_authenticated(authorization)
     try:
         normalized_timeframe = normalize_forex_timeframe(timeframe)
     except ValueError as exc:
@@ -182,7 +214,7 @@ async def take_forex_trade(
     payload: TakeTradeRequest,
     authorization: str | None = Header(default=None),
 ):
-    _require_authenticated(authorization)
+    await _require_authenticated(authorization)
     signal = get_signal(signal_id)
     if signal is None:
         raise HTTPException(status_code=404, detail="Forex signal not found.")
