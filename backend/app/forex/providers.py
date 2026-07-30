@@ -121,6 +121,7 @@ class FallbackForexProvider(ForexDataProvider):
     ) -> None:
         self.primary = primary
         self.fallback = fallback
+        self.last_provider_name = primary.name
 
     async def candles(
         self,
@@ -129,7 +130,9 @@ class FallbackForexProvider(ForexDataProvider):
         limit: int = 240,
     ) -> pd.DataFrame:
         try:
-            return await self.primary.candles(pair, timeframe, limit)
+            result = await self.primary.candles(pair, timeframe, limit)
+            self.last_provider_name = self.primary.name
+            return result
         except ForexProviderError as primary_error:
             logger.warning(
                 "Primary Forex provider failed provider=%s pair=%s timeframe=%s error=%s; "
@@ -141,7 +144,9 @@ class FallbackForexProvider(ForexDataProvider):
                 self.fallback.name,
             )
             try:
-                return await self.fallback.candles(pair, timeframe, limit)
+                result = await self.fallback.candles(pair, timeframe, limit)
+                self.last_provider_name = self.fallback.name
+                return result
             except ForexProviderError as fallback_error:
                 raise ForexProviderError(
                     f"Primary provider unavailable ({primary_error}); "

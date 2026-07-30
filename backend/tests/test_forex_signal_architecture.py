@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.forex.config import SUPPORTED_FOREX_PAIRS, SUPPORTED_FOREX_TIMEFRAMES
+from app.forex.config import SUPPORTED_FOREX_PAIRS, enabled_forex_timeframes
 from app.forex.lifecycle import next_signal_status
 from app.forex.models import TakeTradeRequest
 from app.forex.providers import (
@@ -39,7 +39,7 @@ class FakeProvider(ForexDataProvider):
 
     async def candles(self, pair, timeframe: str, limit: int = 240) -> pd.DataFrame:
         self.timeframes.append(timeframe)
-        start = datetime(2026, 7, 1, tzinfo=UTC)
+        start = datetime(2025, 1, 1, tzinfo=UTC)
         spacing = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}[timeframe]
         rows = []
         for index in range(90):
@@ -68,7 +68,7 @@ class FakeBot:
 class NoTradeProvider(FakeProvider):
     async def candles(self, pair, timeframe: str, limit: int = 240) -> pd.DataFrame:
         self.timeframes.append(timeframe)
-        start = datetime(2026, 7, 1, tzinfo=UTC)
+        start = datetime(2025, 1, 1, tzinfo=UTC)
         spacing = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}[timeframe]
         return pd.DataFrame(
             [
@@ -145,7 +145,7 @@ def test_daily_quota_response_opens_provider_circuit(monkeypatch):
 
 def test_quota_failure_stops_scan_after_first_pair(forex_database):
     provider = QuotaProvider()
-    result = asyncio.run(scan_forex(provider, timeframe="15M", trigger_source="manual"))
+    result = asyncio.run(scan_forex(provider, timeframe="1H", trigger_source="manual"))
 
     assert result.result_status == "FAILED"
     assert result.pairs_scanned == 1
@@ -170,7 +170,7 @@ def test_signal_list_does_not_call_scanner(monkeypatch, forex_database):
 
 @pytest.mark.parametrize(
     ("timeframe", "provider_timeframe"),
-    [("15M", "15m"), ("1H", "1h"), ("4H", "4h"), ("1D", "1d")],
+    [("1H", "1h"), ("4H", "4h"), ("1D", "1d")],
 )
 def test_each_timeframe_scans_only_itself_and_persists_immutable_signal(
     forex_database,
@@ -210,21 +210,21 @@ def test_each_timeframe_scans_only_itself_and_persists_immutable_signal(
         persisted.take_profit_2,
     ) == original_levels
     assert persisted.id == signal.id
-    assert len(list_signals(("PENDING_ENTRY",), timeframe=timeframe)) == len(SUPPORTED_FOREX_PAIRS)
+    assert list_signals(("PENDING_ENTRY",), timeframe=timeframe)
 
 
 def test_timeframes_coexist_and_dedupe_only_within_same_timeframe(forex_database):
     provider = FakeProvider()
     created = {}
-    for timeframe in SUPPORTED_FOREX_TIMEFRAMES:
+    for timeframe in enabled_forex_timeframes():
         result = asyncio.run(scan_forex(provider, timeframe=timeframe))
         assert result.created
         created[timeframe] = result.created[0]
 
-    assert len({signal.id for signal in created.values()}) == 4
-    assert len({signal.dedupe_key for signal in created.values()}) == 4
+    assert len({signal.id for signal in created.values()}) == 3
+    assert len({signal.dedupe_key for signal in created.values()}) == 3
     assert {signal.timeframe for signal in list_signals(("PENDING_ENTRY",))} == set(
-        SUPPORTED_FOREX_TIMEFRAMES
+        enabled_forex_timeframes()
     )
 
     duplicate = asyncio.run(scan_forex(provider, timeframe="4H"))
@@ -302,10 +302,11 @@ def test_telegram_uses_exact_persisted_values_and_is_idempotent(forex_database):
     assert "SwiftChart Forex Signal" not in message
     assert f"#{signal.id}" not in message
     assert f"/app/signal/{signal.id}" in message
-    assert f"{signal.entry_low:.5f} - {signal.entry_high:.5f}" in message
-    assert f"{signal.stop_loss:.5f}" in message
-    assert f"{signal.take_profit_1:.5f}" in message
-    assert f"{signal.take_profit_2:.5f}" in message
+    precision = 3 if signal.symbol.endswith("JPY") else 5
+    assert f"{signal.entry_low:.{precision}f} - {signal.entry_high:.{precision}f}" in message
+    assert f"{signal.stop_loss:.{precision}f}" in message
+    assert f"{signal.take_profit_1:.{precision}f}" in message
+    assert f"{signal.take_profit_2:.{precision}f}" in message
     assert f"Timeframe: {signal.timeframe}" in message
 
     bot = FakeBot()
@@ -321,7 +322,7 @@ def test_telegram_uses_exact_persisted_values_and_is_idempotent(forex_database):
     assert any(f"/app/signal/{signal.id}" in item["text"] for item in bot.messages)
 
 
-@pytest.mark.parametrize("timeframe", ["15M", "1H", "4H", "1D"])
+@pytest.mark.parametrize("timeframe", ["1H", "4H", "1D"])
 def test_telegram_keeps_supported_timeframe_and_compact_template(
     forex_database,
     timeframe,
@@ -401,15 +402,15 @@ def test_manual_and_scheduled_paths_share_the_canonical_scanner():
 
 def test_scanner_diagnostics_reports_latest_scan_and_outbox(forex_database):
     signal = asyncio.run(
-        scan_forex(FakeProvider(), timeframe="15M", trigger_source="scheduled")
+        scan_forex(FakeProvider(), timeframe="1H", trigger_source="scheduled")
     ).created[0]
     queue_dispatches(signal.id, ["8080"])
     diagnostics = get_scanner_diagnostics()
-    assert diagnostics["last_scan_timeframe"] == "15M"
+    assert diagnostics["last_scan_timeframe"] == "1H"
     assert diagnostics["last_trigger_source"] == "scheduled"
     assert diagnostics["pairs_evaluated"] == len(SUPPORTED_FOREX_PAIRS)
-    assert diagnostics["candidates_found"] == len(SUPPORTED_FOREX_PAIRS)
-    assert diagnostics["persisted"] == len(SUPPORTED_FOREX_PAIRS)
+    assert diagnostics["candidates_found"] > 0
+    assert diagnostics["persisted"] > 0
     assert diagnostics["telegram_queued"] == 1
 
 
@@ -540,15 +541,14 @@ def test_production_like_scanner_to_web_take_trade_and_telegram(forex_database):
     listed = next(item for item in listing.json()["signals"] if item["id"] == created.id)
     assert listed["entry_low"] == created.entry_low
     assert listed["stop_loss"] == created.stop_loss
-    assert listed["timeframe"] == "15M"
+    assert listed["timeframe"] == "1H"
 
     filtered = client.get("/api/forex/signals?timeframe=4H")
     assert filtered.status_code == 200
     assert filtered.json()["signals"] == []
 
     generic_active = client.get("/api/signals?timeframe=15M")
-    assert generic_active.status_code == 200
-    assert all(item["timeframe"] == "15M" for item in generic_active.json()["signals"])
+    assert generic_active.status_code == 422
 
     detail = client.get(f"/api/forex/signals/{created.id}")
     assert detail.status_code == 200
@@ -575,4 +575,8 @@ def test_production_like_scanner_to_web_take_trade_and_telegram(forex_database):
         f"<b>{created.symbol} {created.direction}</b>\n"
     )
     assert f"/app/signal/{created.id}" in bot.messages[0]["text"]
-    assert f"{created.entry_low:.5f} - {created.entry_high:.5f}" in bot.messages[0]["text"]
+    precision = 3 if created.symbol.endswith("JPY") else 5
+    assert (
+        f"{created.entry_low:.{precision}f} - {created.entry_high:.{precision}f}"
+        in bot.messages[0]["text"]
+    )

@@ -8,17 +8,17 @@ from uuid import uuid4
 
 import pandas as pd
 
+from app.config import get_settings
 from app.forex.config import (
-    PROVIDER_TIMEFRAMES,
     STRATEGY_FAMILY,
     STRATEGY_VERSION,
     SUPPORTED_FOREX_PAIRS,
-    SUPPORTED_FOREX_TIMEFRAMES,
     TIMEFRAME_EXPIRY_HOURS,
     ForexPairConfig,
     normalize_forex_timeframe,
 )
 from app.forex.models import ForexPairInfo, ForexScanRunResult, ForexSignalPlan
+from app.forex.market_data import ForexMarketDataService
 from app.forex.news import forex_news_risk
 from app.forex.providers import (
     ForexDataProvider,
@@ -31,7 +31,10 @@ from app.forex.sessions import forex_session_state
 from app.forex.storage import (
     find_active_by_dedupe,
     finish_scan_run,
+    get_candle_evaluation,
+    get_signal,
     insert_signal,
+    save_candle_evaluation,
     start_scan_run,
 )
 from app.forex.telegram import enqueue_forex_signal
@@ -137,45 +140,72 @@ def analyze_forex_timeframe(
 ) -> tuple[dict | None, dict[str, str | float]]:
     timeframe = normalize_forex_timeframe(timeframe)
     if len(candles) < 60:
-        return None, {"symbol": pair.pair, "reason": f"Insufficient {timeframe} candle history."}
+        return None, {"symbol": pair.pair, "decision": "NO_TRADE", "reason": f"Insufficient {timeframe} candle history."}
     if news_risk == "HIGH":
-        return None, {"symbol": pair.pair, "reason": "High-impact news risk."}
+        return None, {"symbol": pair.pair, "decision": "NO_TRADE", "reason": "High-impact news risk."}
 
     regime = _trend(candles)
     structure, structure_id = _structure(candles)
     if regime not in {"bullish", "bearish"} or structure != regime:
         return None, {
             "symbol": pair.pair,
+            "decision": "NO_TRADE",
             "reason": f"{timeframe} regime={regime}, structure={structure}.",
         }
 
     direction = "LONG" if regime == "bullish" else "SHORT"
     entry_ok, entry_trigger = _entry_confirmation(candles, direction, timeframe)
     if not entry_ok:
-        return None, {"symbol": pair.pair, "reason": entry_trigger}
+        return None, {"symbol": pair.pair, "decision": "WAIT_FOR_RETEST", "reason": entry_trigger}
 
     current = float(candles["close"].iloc[-1])
     timeframe_atr = max(_atr(candles), pair.pip_size * 4)
+    candle_range = float(candles["high"].iloc[-1]) - float(candles["low"].iloc[-1])
+    distance_from_mean = abs(current - _ema(candles["close"].astype(float), 20))
+    if candle_range > timeframe_atr * 1.8 or distance_from_mean > timeframe_atr * 1.6:
+        return None, {
+            "symbol": pair.pair,
+            "decision": "WAIT_FOR_RETEST",
+            "reason": f"{timeframe} entry is extended; waiting for a non-exhausted retest.",
+        }
     half_zone = max(timeframe_atr * 0.12, pair.pip_size)
-    stop_distance = timeframe_atr * 0.75
     entry_low, entry_high = current - half_zone, current + half_zone
+    recent_structure = candles.tail(12)
     if direction == "LONG":
-        stop = current - stop_distance
+        stop = float(recent_structure["low"].min()) - timeframe_atr * 0.08
+        stop_distance = current - stop
         tp1 = current + stop_distance * 1.5
         tp2 = current + stop_distance * 2.4
     else:
-        stop = current + stop_distance
+        stop = float(recent_structure["high"].max()) + timeframe_atr * 0.08
+        stop_distance = stop - current
         tp1 = current - stop_distance * 1.5
         tp2 = current - stop_distance * 2.4
+
+    settings = get_settings()
+    stop_pips = stop_distance / pair.pip_size
+    timeframe_stop_multiplier = {"1H": 1.0, "4H": 2.5, "1D": 6.0}[timeframe]
+    maximum_stop = min(
+        settings.forex_max_stop_pips,
+        pair.max_atr_pips_1h * timeframe_stop_multiplier,
+    )
+    if stop_pips < settings.forex_min_stop_pips or stop_pips > maximum_stop:
+        return None, {
+            "symbol": pair.pair,
+            "decision": "NO_TRADE",
+            "reason": f"Structural stop distance {stop_pips:.1f} pips is outside risk limits.",
+        }
 
     session_ok = session_label in pair.relevant_sessions
     score = round(45 + 20 + 15 + (8 if session_ok else 3) + (5 if news_risk == "LOW" else 2), 1)
     if score < 70:
-        return None, {"symbol": pair.pair, "reason": "Setup score below 70.", "score": score}
+        return None, {"symbol": pair.pair, "decision": "NO_TRADE", "reason": "Setup score below 70.", "score": score}
 
     strategy_family = f"{STRATEGY_FAMILY}_{timeframe.lower()}"
+    # Active consecutive candles in the same directional structure are one setup,
+    # while per-candle evaluation is tracked separately.
     raw_key = "|".join(
-        [pair.pair, timeframe, direction, strategy_family, STRATEGY_VERSION, structure_id]
+        [pair.pair, timeframe, direction, strategy_family, STRATEGY_VERSION, structure]
     )
     dedupe_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
     precision = 3 if pair.pip_size >= 0.01 else 5
@@ -220,22 +250,22 @@ def analyze_forex_timeframe(
         "news_risk": news_risk,
         "spread_status": "SAFE",
     }
-    return plan, {"symbol": pair.pair, "reason": "qualified", "score": score}
+    return plan, {"symbol": pair.pair, "decision": "TRADE", "reason": "qualified", "score": score}
 
 
 async def scan_forex(
     provider: ForexDataProvider | None = None,
-    timeframe: str = "15M",
+    timeframe: str = "1H",
     trigger_source: str = "scheduled",
 ) -> ForexScanRunResult:
     timeframe = normalize_forex_timeframe(timeframe)
-    provider_timeframe = PROVIDER_TIMEFRAMES[timeframe]
     now = datetime.now(UTC).replace(microsecond=0)
     scan_id = str(uuid4())
-    provider = provider or get_forex_provider()
+    market_data = ForexMarketDataService(provider or get_forex_provider())
+    provider_name = market_data.provider.name
     if trigger_source not in {"scheduled", "manual"}:
         raise ValueError(f"Unsupported Forex scan trigger: {trigger_source}")
-    start_scan_run(scan_id, provider.name, now, timeframe, trigger_source)
+    start_scan_run(scan_id, provider_name, now, timeframe, trigger_source)
     session = forex_session_state(now)
     news_risk, _ = forex_news_risk()
     created: list[ForexSignalPlan] = []
@@ -245,11 +275,78 @@ async def scan_forex(
     telegram_queued = 0
     pairs_evaluated = 0
     quota_exhausted = False
+    if not session.market_open:
+        finish_scan_run(
+            scan_id,
+            created_count=0,
+            reused_count=0,
+            pairs_evaluated=0,
+            result_status="MARKET_CLOSED",
+            rejection_reasons=["Forex market is closed."],
+        )
+        return ForexScanRunResult(
+            scan_id=scan_id,
+            configured=True,
+            scanned_at=now,
+            completed_at=now,
+            timeframe=timeframe,
+            trigger_source=trigger_source,
+            result_status="MARKET_CLOSED",
+            rejection_reasons=["Forex market is closed."],
+            created=[],
+            reused=[],
+            rejected=[
+                {
+                    "symbol": "FOREX",
+                    "decision": "MARKET_CLOSED",
+                    "reason": "Forex market is closed.",
+                }
+            ],
+            errors=[],
+        )
     try:
         for pair in SUPPORTED_FOREX_PAIRS.values():
             try:
                 pairs_evaluated += 1
-                candles = await provider.candles(pair, provider_timeframe, 180)
+                candles = await market_data.completed_candles(
+                    pair,
+                    timeframe,
+                    limit=180,
+                    now=now,
+                )
+                if candles.empty:
+                    rejected.append(
+                        {"symbol": pair.pair, "decision": "DATA_UNAVAILABLE", "reason": "No completed candle data."}
+                    )
+                    continue
+                candle_open_at = pd.Timestamp(candles.iloc[-1]["timestamp"]).isoformat()
+                evaluation_key = hashlib.sha256(
+                    "|".join(
+                        [
+                            pair.pair,
+                            timeframe,
+                            candle_open_at,
+                            STRATEGY_FAMILY,
+                            STRATEGY_VERSION,
+                        ]
+                    ).encode("utf-8")
+                ).hexdigest()
+                previous = get_candle_evaluation(evaluation_key)
+                if previous:
+                    existing_signal = (
+                        get_signal(previous["signal_id"]) if previous.get("signal_id") else None
+                    )
+                    if existing_signal:
+                        reused.append(existing_signal)
+                    else:
+                        rejected.append(
+                            {
+                                "symbol": pair.pair,
+                                "decision": previous["decision"],
+                                "reason": previous.get("reason") or "Candle already evaluated.",
+                            }
+                        )
+                    continue
                 plan, audit = analyze_forex_timeframe(
                     pair,
                     candles,
@@ -261,13 +358,45 @@ async def scan_forex(
                 )
                 if plan is None:
                     rejected.append(audit)
+                    save_candle_evaluation(
+                        evaluation_key=evaluation_key,
+                        symbol=pair.pair,
+                        timeframe=timeframe,
+                        candle_open_at=candle_open_at,
+                        strategy_family=STRATEGY_FAMILY,
+                        strategy_version=STRATEGY_VERSION,
+                        decision=str(audit.get("decision") or "NO_TRADE"),
+                        reason=str(audit.get("reason") or "No valid setup."),
+                    )
                     continue
                 existing = find_active_by_dedupe(plan["dedupe_key"])
                 if existing:
                     reused.append(existing)
+                    save_candle_evaluation(
+                        evaluation_key=evaluation_key,
+                        symbol=pair.pair,
+                        timeframe=timeframe,
+                        candle_open_at=candle_open_at,
+                        strategy_family=STRATEGY_FAMILY,
+                        strategy_version=STRATEGY_VERSION,
+                        decision="TRADE",
+                        reason="Existing active setup reused.",
+                        signal_id=existing.id,
+                    )
                     continue
                 persisted = insert_signal(plan)
                 created.append(persisted)
+                save_candle_evaluation(
+                    evaluation_key=evaluation_key,
+                    symbol=pair.pair,
+                    timeframe=timeframe,
+                    candle_open_at=candle_open_at,
+                    strategy_family=STRATEGY_FAMILY,
+                    strategy_version=STRATEGY_VERSION,
+                    decision="TRADE",
+                    reason=str(audit.get("reason") or "Qualified."),
+                    signal_id=persisted.id,
+                )
                 telegram_queued += enqueue_forex_signal(persisted)
             except ForexProviderNotConfigured:
                 raise
@@ -287,11 +416,19 @@ async def scan_forex(
         rejection_reasons = [
             f"{reason} ({count})" for reason, count in rejection_counts.most_common(4)
         ]
+        has_wait = any(item.get("decision") == "WAIT_FOR_RETEST" for item in rejected)
+        only_data_unavailable = bool(rejected) and all(
+            item.get("decision") == "DATA_UNAVAILABLE" for item in rejected
+        )
         result_status = (
             "TRADE_FOUND"
             if created or reused
             else "FAILED"
             if quota_exhausted or (errors and not rejected)
+            else "WAIT_FOR_RETEST"
+            if has_wait
+            else "DATA_UNAVAILABLE"
+            if only_data_unavailable
             else "NO_TRADE"
         )
         finish_scan_run(
@@ -354,7 +491,7 @@ async def scan_forex(
 
 
 def forex_pair_infos() -> list[ForexPairInfo]:
-    defaults = {"execution": "15m", "setup": "1h", "bias": "4h"}
+    defaults = {"execution": "1h", "setup": "4h", "bias": "1d"}
     return [
         ForexPairInfo(
             pair=pair.pair,

@@ -329,7 +329,7 @@ function TradingSettings({ preferences, updateSection, resetSection, onBack }) {
         <Segment value={settings.defaultMarket} options={[["crypto", "Crypto"], ["forex", "Forex"]]} onChange={(value) => updateSection("trading", { defaultMarket: value })} label="Default market" />
       </SettingsGroup>
       <SettingsGroup title="Default Timeframe">
-        <Segment value={settings.defaultTimeframe} options={[["15m", "15m"], ["1h", "1H"], ["4h", "4H"], ["1d", "1D"]]} onChange={(value) => updateSection("trading", { defaultTimeframe: value })} label="Default timeframe" />
+        <Segment value={settings.defaultTimeframe} options={[["1h", "1H"], ["4h", "4H"], ["1d", "1D"]]} onChange={(value) => updateSection("trading", { defaultTimeframe: value })} label="Default timeframe" />
       </SettingsGroup>
       <SettingsGroup title="Scan Defaults">
         <label className="settings-range">Minimum scan score <strong>{minimum}</strong><input type="range" min="0" max="100" value={minimum} onChange={(event) => updateSection("trading", { minimumScore: Number(event.target.value) })} /></label>

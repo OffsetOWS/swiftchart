@@ -21,9 +21,9 @@ from app.forex.models import (
     TakeTradePreparation,
     TakeTradeRequest,
 )
-from app.forex.config import normalize_forex_timeframe
+from app.forex.config import enabled_forex_timeframes, normalize_forex_timeframe
+from app.forex.market_data import get_forex_market_data_service
 from app.forex.news import forex_news_risk
-from app.forex.oanda import OandaForexProvider
 from app.forex.scanner import forex_pair_infos, scan_forex
 from app.forex.sessions import forex_session_state
 from app.forex.storage import (
@@ -37,6 +37,11 @@ router = APIRouter()
 MANUAL_SCAN_COOLDOWN_SECONDS = 30
 _manual_scans_active: set[str] = set()
 _manual_scan_completed_at: dict[str, float] = {}
+
+
+def _enabled_signals(signals: list[ForexSignalPlan]) -> list[ForexSignalPlan]:
+    enabled = set(enabled_forex_timeframes())
+    return [signal for signal in signals if signal.timeframe in enabled]
 
 
 def _require_internal_secret(x_internal_api_secret: str | None) -> None:
@@ -95,7 +100,7 @@ async def forex_overview():
     settings = get_settings()
     session = forex_session_state()
     news_risk, news_reason = forex_news_risk()
-    active = list_signals(ACTIVE_FOREX_STATUSES, limit=5)
+    active = _enabled_signals(list_signals(ACTIVE_FOREX_STATUSES, limit=100))[:5]
     oanda_configured = bool(
         (settings.oanda_api_key or os.getenv("OANDA_API_TOKEN"))
         and settings.oanda_account_id
@@ -133,7 +138,7 @@ async def forex_signals(
         normalized_timeframe = normalize_forex_timeframe(timeframe) if timeframe else None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    signals = list_signals(statuses, limit, normalized_timeframe)
+    signals = _enabled_signals(list_signals(statuses, limit, normalized_timeframe))
     return ForexSignalList(signals=signals, count=len(signals))
 
 
@@ -147,7 +152,9 @@ async def active_signals(
         normalized_timeframe = normalize_forex_timeframe(timeframe) if timeframe else None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    signals = list_signals(ACTIVE_FOREX_STATUSES, limit, normalized_timeframe)
+    signals = _enabled_signals(
+        list_signals(ACTIVE_FOREX_STATUSES, limit, normalized_timeframe)
+    )
     return ForexSignalList(signals=signals, count=len(signals))
 
 
@@ -161,7 +168,7 @@ async def forex_signal_detail(signal_id: str):
 
 @router.post("/forex/scanner/run", response_model=ForexScanRunResult)
 async def forex_scanner_run(
-    timeframe: str = Query(default="15M"),
+    timeframe: str = Query(default="1H"),
     x_internal_api_secret: str | None = Header(default=None),
 ):
     _require_internal_secret(x_internal_api_secret)
@@ -174,7 +181,7 @@ async def forex_scanner_run(
 
 @router.post("/forex/scan", response_model=ForexScanRunResult)
 async def manual_forex_scan(
-    timeframe: str = Query(default="15M"),
+    timeframe: str = Query(default="1H"),
     authorization: str | None = Header(default=None),
 ):
     await _require_authenticated(authorization)
@@ -218,7 +225,7 @@ async def forex_provider_health(
     x_internal_api_secret: str | None = Header(default=None),
 ):
     _require_internal_secret(x_internal_api_secret)
-    return await OandaForexProvider().health()
+    return await get_forex_market_data_service().health()
 
 
 @router.post("/forex/signals/{signal_id}/take-trade", response_model=TakeTradePreparation)
@@ -227,7 +234,7 @@ async def take_forex_trade(
     payload: TakeTradeRequest,
     authorization: str | None = Header(default=None),
 ):
-    await _require_authenticated(authorization)
+    user_id = await _require_authenticated(authorization)
     signal = get_signal(signal_id)
     if signal is None:
         raise HTTPException(status_code=404, detail="Forex signal not found.")
@@ -236,11 +243,34 @@ async def take_forex_trade(
     stop_distance = abs(signal.entry_price - signal.stop_loss)
     if stop_distance <= 0:
         raise HTTPException(status_code=409, detail="This signal has invalid risk levels.")
-    risk_amount = payload.account_balance * payload.risk_percentage / 100
+    settings = get_settings()
+    if payload.risk_percentage > settings.forex_risk_percentage_per_trade:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Risk may not exceed {settings.forex_risk_percentage_per_trade:g}% per trade.",
+        )
+    pair = next(
+        (item for item in forex_pair_infos() if item.pair == signal.symbol),
+        None,
+    )
+    if pair is None:
+        raise HTTPException(status_code=409, detail="This signal has no supported risk profile.")
+    stop_pips = stop_distance / pair.pip_size
+    if not settings.forex_min_stop_pips <= stop_pips <= settings.forex_max_stop_pips:
+        raise HTTPException(status_code=409, detail="This signal's structural stop is outside risk limits.")
+    risk_amount = min(
+        payload.account_balance * payload.risk_percentage / 100,
+        settings.forex_max_monetary_risk_per_trade,
+    )
     position_size = risk_amount / stop_distance
+    if not settings.forex_min_position_size <= position_size <= settings.forex_max_position_size:
+        raise HTTPException(
+            status_code=409,
+            detail="The risk-adjusted position size is outside broker limits.",
+        )
     save_trade_preparation(
         signal,
-        user_id=None,
+        user_id=user_id,
         account_balance=payload.account_balance,
         risk_percentage=payload.risk_percentage,
         risk_amount=risk_amount,

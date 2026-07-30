@@ -46,10 +46,10 @@ class ForexSignalPlan(BaseModel):
     take_profit_2: float
     risk_reward_1: float
     risk_reward_2: float
-    timeframe: ForexTimeframe = "15M"
-    execution_timeframe: str = "15m"
-    setup_timeframe: str = "1h"
-    bias_timeframe: str = "4h"
+    timeframe: ForexTimeframe = "1H"
+    execution_timeframe: str = "1h"
+    setup_timeframe: str = "4h"
+    bias_timeframe: str = "1d"
     timeframe_alignment: str
     htf_bias: str
     setup_structure: str
@@ -91,9 +91,16 @@ class ForexScanRunResult(BaseModel):
     configured: bool
     scanned_at: datetime
     completed_at: datetime | None = None
-    timeframe: ForexTimeframe = "15M"
+    timeframe: ForexTimeframe = "1H"
     trigger_source: Literal["scheduled", "manual"] = "scheduled"
-    result_status: Literal["TRADE_FOUND", "NO_TRADE", "FAILED"] = "NO_TRADE"
+    result_status: Literal[
+        "TRADE_FOUND",
+        "WAIT_FOR_RETEST",
+        "NO_TRADE",
+        "MARKET_CLOSED",
+        "DATA_UNAVAILABLE",
+        "FAILED",
+    ] = "NO_TRADE"
     pairs_scanned: int = 0
     candidates_found: int = 0
     persisted_count: int = 0

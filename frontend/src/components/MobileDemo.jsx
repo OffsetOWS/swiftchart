@@ -187,7 +187,7 @@ function normalizeForexSignal(signal, index = 0) {
     score,
     id: signal?.id || `${pair}-${index}`,
     grade: signal?.grade || (score >= 90 ? "A+" : score >= 80 ? "A" : "B"),
-    timeframe: signal?.timeframe || signal?.execution_timeframe || "15M",
+    timeframe: signal?.timeframe || signal?.execution_timeframe || "1H",
     setupTimeframe: signal?.setup_timeframe || "1h",
     biasTimeframe: signal?.bias_timeframe || "4h",
     timeframeAlignment: signal?.timeframe_alignment || "-",
@@ -513,7 +513,7 @@ function ScanScreen({
   const [appliedCoinQuery, setAppliedCoinQuery] = useState("");
   const [scoreBand, setScoreBand] = useState("all");
   const [timeframe, setTimeframe] = useState("all");
-  const [forexTimeframe, setForexTimeframe] = useState("15M");
+  const [forexTimeframe, setForexTimeframe] = useState("1H");
   const [forexCooldown, setForexCooldown] = useState(0);
   const [exchange, setExchange] = useState(() => tradingPreferences.preferredExchange);
   const visibleSignals = useMemo(() => {
@@ -599,7 +599,6 @@ function ScanScreen({
           <label>
             <span className="sr-only">Timeframe</span>
             <select value={forexTimeframe} onChange={(event) => setForexTimeframe(event.target.value)} aria-label="Forex timeframe">
-              <option value="15M">15 Minutes</option>
               <option value="1H">1 Hour</option>
               <option value="4H">4 Hours</option>
               <option value="1D">Daily</option>

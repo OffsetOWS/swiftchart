@@ -4,8 +4,9 @@ from datetime import UTC, datetime
 import logging
 
 from app.forex.config import SUPPORTED_FOREX_PAIRS
+from app.forex.market_data import ForexMarketDataService, forex_market_is_open
 from app.forex.models import ForexSignalPlan
-from app.forex.providers import ForexDataProvider, get_forex_provider
+from app.forex.providers import ForexDataProvider
 from app.forex.storage import list_signals, update_signal_market_state
 
 logger = logging.getLogger(__name__)
@@ -44,15 +45,22 @@ def next_signal_status(
 
 
 async def update_forex_lifecycle(provider: ForexDataProvider | None = None) -> list[ForexSignalPlan]:
-    provider = provider or get_forex_provider()
+    market_data = ForexMarketDataService(provider)
     checked_at = datetime.now(UTC).replace(microsecond=0)
+    if not forex_market_is_open(checked_at):
+        return []
     updated: list[ForexSignalPlan] = []
     for signal in list_signals(("PENDING_ENTRY", "OPEN", "TP1_HIT"), limit=200):
         pair = SUPPORTED_FOREX_PAIRS.get(signal.symbol)
         if not pair:
             continue
         try:
-            candles = await provider.candles(pair, signal.timeframe.lower(), 2)
+            candles = await market_data.completed_candles(
+                pair,
+                signal.timeframe,
+                limit=2,
+                now=checked_at,
+            )
             if candles.empty:
                 continue
             price = float(candles["close"].iloc[-1])

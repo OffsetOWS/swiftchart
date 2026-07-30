@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 import sqlite3
 from typing import Any
@@ -182,6 +182,54 @@ def ensure_forex_schema() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS forex_candles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                instrument TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                candle_open_at TEXT NOT NULL,
+                candle_close_at TEXT NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL DEFAULT 0,
+                complete INTEGER NOT NULL DEFAULT 1,
+                source_timestamp TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                UNIQUE(provider, instrument, timeframe, candle_open_at)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS forex_market_data_locks (
+                lock_key TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                acquired_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS forex_candle_evaluations (
+                evaluation_key TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                candle_open_at TEXT NOT NULL,
+                strategy_family TEXT NOT NULL,
+                strategy_version TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                reason TEXT,
+                signal_id TEXT,
+                evaluated_at TEXT NOT NULL
+            )
+            """
+        )
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_forex_signal_public_id ON forex_signals(public_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_signal_status ON forex_signals(status, created_at)")
         connection.execute(
@@ -230,6 +278,160 @@ def ensure_forex_schema() -> None:
             """
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_dispatch_pending ON forex_telegram_dispatches(delivered_at, retry_count)")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forex_candles_latest "
+            "ON forex_candles(symbol, timeframe, candle_open_at DESC)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forex_evaluations_candle "
+            "ON forex_candle_evaluations(symbol, timeframe, candle_open_at)"
+        )
+
+
+def upsert_forex_candles(rows: list[dict[str, Any]]) -> int:
+    if not rows:
+        return 0
+    ensure_forex_schema()
+    with get_connection() as connection:
+        before = connection.total_changes
+        connection.executemany(
+            """
+            INSERT INTO forex_candles (
+                provider, instrument, symbol, timeframe, candle_open_at,
+                candle_close_at, open, high, low, close, volume, complete,
+                source_timestamp, fetched_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, instrument, timeframe, candle_open_at) DO UPDATE SET
+                candle_close_at=excluded.candle_close_at,
+                open=excluded.open, high=excluded.high, low=excluded.low,
+                close=excluded.close, volume=excluded.volume,
+                complete=excluded.complete,
+                source_timestamp=excluded.source_timestamp,
+                fetched_at=excluded.fetched_at
+            """,
+            [
+                (
+                    row["provider"], row["instrument"], row["symbol"], row["timeframe"],
+                    row["candle_open_at"], row["candle_close_at"], row["open"],
+                    row["high"], row["low"], row["close"], row.get("volume", 0),
+                    int(row.get("complete", True)), row["source_timestamp"],
+                    row["fetched_at"],
+                )
+                for row in rows
+            ],
+        )
+        return connection.total_changes - before
+
+
+def list_forex_candles(
+    symbol: str,
+    timeframe: str,
+    *,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    ensure_forex_schema()
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM (
+                SELECT *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY symbol, timeframe, candle_open_at
+                        ORDER BY fetched_at DESC, id DESC
+                    ) AS canonical_rank
+                FROM forex_candles
+                WHERE symbol = ? AND timeframe = ? AND complete = 1
+            )
+            WHERE canonical_rank = 1
+            ORDER BY candle_open_at DESC LIMIT ?
+            """,
+            (symbol, timeframe, limit),
+        ).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def latest_forex_candle(symbol: str, timeframe: str) -> dict[str, Any] | None:
+    rows = list_forex_candles(symbol, timeframe, limit=1)
+    return rows[-1] if rows else None
+
+
+def acquire_market_data_lock(
+    lock_key: str,
+    owner: str,
+    *,
+    stale_seconds: int,
+) -> bool:
+    ensure_forex_schema()
+    now = datetime.now(UTC)
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM forex_market_data_locks WHERE expires_at <= ?",
+            (now.isoformat(),),
+        )
+        cursor = connection.execute(
+            """
+            INSERT OR IGNORE INTO forex_market_data_locks
+                (lock_key, owner, acquired_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                lock_key,
+                owner,
+                now.isoformat(),
+                (now + timedelta(seconds=stale_seconds)).isoformat(),
+            ),
+        )
+        return cursor.rowcount == 1
+
+
+def release_market_data_lock(lock_key: str, owner: str) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM forex_market_data_locks WHERE lock_key = ? AND owner = ?",
+            (lock_key, owner),
+        )
+
+
+def get_candle_evaluation(evaluation_key: str) -> dict[str, Any] | None:
+    ensure_forex_schema()
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM forex_candle_evaluations WHERE evaluation_key = ?",
+            (evaluation_key,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def save_candle_evaluation(
+    *,
+    evaluation_key: str,
+    symbol: str,
+    timeframe: str,
+    candle_open_at: str,
+    strategy_family: str,
+    strategy_version: str,
+    decision: str,
+    reason: str,
+    signal_id: str | None = None,
+) -> None:
+    ensure_forex_schema()
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO forex_candle_evaluations (
+                evaluation_key, symbol, timeframe, candle_open_at,
+                strategy_family, strategy_version, decision, reason,
+                signal_id, evaluated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                evaluation_key, symbol, timeframe, candle_open_at,
+                strategy_family, strategy_version, decision, reason,
+                signal_id, datetime.now(UTC).isoformat(),
+            ),
+        )
 
 
 def start_scan_run(

@@ -169,6 +169,25 @@ POST /api/paper-trade
 GET  /api/paper-trades
 ```
 
+### Forex market-data workflow
+
+OANDA is the primary Forex provider. All scheduled scans, manual scans, lifecycle
+checks, diagnostics, API feeds, and Telegram alerts use the canonical persisted
+candle service:
+
+```text
+OANDA -> completed candle cache -> per-candle evaluation -> persisted signal
+      -> API / website / Telegram
+```
+
+Active Forex timeframes are configured once with
+`FOREX_ENABLED_TIMEFRAMES=1H,4H,1D`. The reusable 15-minute provider mapping and
+historical records remain supported internally, but 15M is not scanned,
+scheduled, exposed as a user option, or dispatched. Candle synchronization is
+incremental and database-locked; repeated reads during the same completed
+candle do not trigger another provider request. `TRADE`, `WAIT_FOR_RETEST`, and
+`NO_TRADE` are all valid persisted evaluation outcomes.
+
 ## Run locally
 
 Backend:

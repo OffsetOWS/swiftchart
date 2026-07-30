@@ -284,7 +284,7 @@ async def verify_oanda_startup() -> None:
     try:
         frame = await provider.candles(
             SUPPORTED_FOREX_PAIRS["EURUSD"],
-            "15m",
+            "1h",
             2,
         )
         if frame.empty:

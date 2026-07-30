@@ -4,7 +4,9 @@ import asyncio
 import logging
 
 from app.config import get_settings
+from app.forex.config import enabled_forex_timeframes
 from app.forex.lifecycle import update_forex_lifecycle
+from app.forex.market_data import seconds_until_next_candle_close
 from app.forex.scanner import scan_forex
 
 logger = logging.getLogger(__name__)
@@ -13,7 +15,6 @@ _tasks: list[asyncio.Task] = []
 
 async def _timeframe_worker(
     timeframe: str,
-    interval_seconds: int,
     startup_delay_seconds: int,
 ) -> None:
     await asyncio.sleep(max(0, startup_delay_seconds))
@@ -30,7 +31,7 @@ async def _timeframe_worker(
             )
         except Exception:
             logger.exception("Forex timeframe worker failed timeframe=%s", timeframe)
-        await asyncio.sleep(max(60, interval_seconds))
+        await asyncio.sleep(seconds_until_next_candle_close(timeframe))
 
 
 async def _lifecycle_worker(interval_seconds: int, startup_delay_seconds: int) -> None:
@@ -49,18 +50,13 @@ def start_forex_worker() -> None:
     if not settings.forex_scanner_enabled or any(not task.done() for task in _tasks):
         return
     base_delay = settings.forex_worker_startup_delay_seconds
-    schedules = (
-        ("15M", settings.forex_scan_15m_interval_seconds),
-        ("1H", settings.forex_scan_1h_interval_seconds),
-        ("4H", settings.forex_scan_4h_interval_seconds),
-        ("1D", settings.forex_scan_1d_interval_seconds),
-    )
+    schedules = enabled_forex_timeframes()
     _tasks = [
         asyncio.create_task(
-            _timeframe_worker(timeframe, interval, base_delay + index * 120),
+            _timeframe_worker(timeframe, base_delay + index * 5),
             name=f"swiftchart-forex-{timeframe.lower()}-worker",
         )
-        for index, (timeframe, interval) in enumerate(schedules)
+        for index, timeframe in enumerate(schedules)
     ]
     _tasks.append(
         asyncio.create_task(

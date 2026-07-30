@@ -56,6 +56,20 @@ class Settings(BaseSettings):
     twelve_data_api_key: str = ""
     internal_api_secret: str = ""
     forex_scanner_enabled: bool = True
+    forex_enabled_timeframes: str = "1H,4H,1D"
+    forex_candle_close_delay_seconds: int = Field(default=15, ge=0, le=300)
+    forex_bootstrap_candle_limit: int = Field(default=500, ge=60, le=5000)
+    forex_incremental_candle_limit: int = Field(default=8, ge=2, le=100)
+    forex_data_lock_timeout_seconds: int = Field(default=20, ge=1, le=120)
+    forex_data_lock_stale_seconds: int = Field(default=90, ge=10, le=600)
+    forex_risk_percentage_per_trade: float = Field(default=1.0, gt=0, le=5)
+    forex_max_monetary_risk_per_trade: float = Field(default=1000.0, gt=0)
+    forex_min_stop_pips: float = Field(default=1.0, gt=0)
+    forex_max_stop_pips: float = Field(default=300.0, gt=0)
+    forex_min_position_size: float = Field(default=1.0, gt=0)
+    forex_max_position_size: float = Field(default=10_000_000.0, gt=0)
+    forex_max_total_open_risk_percentage: float = Field(default=3.0, gt=0, le=20)
+    forex_max_correlated_exposure: int = Field(default=2, ge=1, le=20)
     forex_scan_interval_seconds: int = Field(default=900, ge=60)
     forex_scan_15m_interval_seconds: int = Field(default=900, ge=60)
     forex_scan_1h_interval_seconds: int = Field(default=3600, ge=60)

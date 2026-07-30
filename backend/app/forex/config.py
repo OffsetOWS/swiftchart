@@ -2,25 +2,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.config import get_settings
 
-SUPPORTED_FOREX_TIMEFRAMES = ("15M", "1H", "4H", "1D")
-PROVIDER_TIMEFRAMES = {value: value.lower() for value in SUPPORTED_FOREX_TIMEFRAMES}
+
+ALL_FOREX_TIMEFRAMES = ("15M", "1H", "4H", "1D")
+# Compatibility catalog for historical records and provider-level tests. Active
+# scanning uses enabled_forex_timeframes(), which excludes 15M by default.
+SUPPORTED_FOREX_TIMEFRAMES = ALL_FOREX_TIMEFRAMES
+PROVIDER_TIMEFRAMES = {value: value.lower() for value in ALL_FOREX_TIMEFRAMES}
 TIMEFRAME_EXPIRY_HOURS = {"15M": 3, "1H": 12, "4H": 48, "1D": 240}
 DEFAULT_FOREX_TIMEFRAMES = {
-    "execution": "15m",
-    "setup": "1h",
-    "bias": "4h",
+    "execution": "1h",
+    "setup": "4h",
+    "bias": "1d",
 }
 
 STRATEGY_FAMILY = "swiftchart_fx_structure"
 STRATEGY_VERSION = "3.0"
 
 
-def normalize_forex_timeframe(value: str) -> str:
+def enabled_forex_timeframes() -> tuple[str, ...]:
+    configured = get_settings().forex_enabled_timeframes
+    values = tuple(
+        alias
+        for item in configured.split(",")
+        if (alias := _normalize_timeframe_value(item)) in ALL_FOREX_TIMEFRAMES
+    )
+    return values or ("1H", "4H", "1D")
+
+
+def _normalize_timeframe_value(value: str) -> str:
     normalized = str(value or "").strip().upper()
     aliases = {"15MIN": "15M", "60M": "1H", "D": "1D", "DAILY": "1D"}
-    normalized = aliases.get(normalized, normalized)
-    if normalized not in SUPPORTED_FOREX_TIMEFRAMES:
+    return aliases.get(normalized, normalized)
+
+
+def normalize_forex_timeframe(value: str, *, require_enabled: bool = True) -> str:
+    normalized = _normalize_timeframe_value(value)
+    supported = enabled_forex_timeframes() if require_enabled else ALL_FOREX_TIMEFRAMES
+    if normalized not in supported:
         raise ValueError(f"Unsupported Forex timeframe: {value}")
     return normalized
 
