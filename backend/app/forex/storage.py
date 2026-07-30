@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 import sqlite3
 from typing import Any
 from uuid import uuid4
@@ -135,6 +136,20 @@ def ensure_forex_schema() -> None:
         }
         if "timeframe" not in scan_run_columns:
             connection.execute("ALTER TABLE forex_scan_runs ADD COLUMN timeframe TEXT")
+        scan_run_additions = {
+            "trigger_source": "TEXT NOT NULL DEFAULT 'scheduled'",
+            "pairs_evaluated": "INTEGER NOT NULL DEFAULT 0",
+            "candidate_count": "INTEGER NOT NULL DEFAULT 0",
+            "rejected_count": "INTEGER NOT NULL DEFAULT 0",
+            "telegram_queued_count": "INTEGER NOT NULL DEFAULT 0",
+            "result_status": "TEXT",
+            "rejection_summary": "TEXT",
+        }
+        for column, definition in scan_run_additions.items():
+            if column not in scan_run_columns:
+                connection.execute(
+                    f"ALTER TABLE forex_scan_runs ADD COLUMN {column} {definition}"
+                )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS forex_telegram_dispatches (
@@ -217,13 +232,23 @@ def ensure_forex_schema() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_dispatch_pending ON forex_telegram_dispatches(delivered_at, retry_count)")
 
 
-def start_scan_run(scan_id: str, provider: str, started_at: datetime, timeframe: str) -> None:
+def start_scan_run(
+    scan_id: str,
+    provider: str,
+    started_at: datetime,
+    timeframe: str,
+    trigger_source: str,
+) -> None:
     ensure_forex_schema()
     with get_connection() as connection:
         connection.execute(
-            "INSERT INTO forex_scan_runs (id, started_at, provider, timeframe, status) "
-            "VALUES (?, ?, ?, ?, 'RUNNING')",
-            (scan_id, started_at.isoformat(), provider, timeframe),
+            """
+            INSERT INTO forex_scan_runs (
+                id, started_at, provider, timeframe, trigger_source, status
+            )
+            VALUES (?, ?, ?, ?, ?, 'RUNNING')
+            """,
+            (scan_id, started_at.isoformat(), provider, timeframe, trigger_source),
         )
 
 
@@ -232,13 +257,21 @@ def finish_scan_run(
     *,
     created_count: int,
     reused_count: int,
+    pairs_evaluated: int = 0,
+    rejected_count: int = 0,
+    telegram_queued_count: int = 0,
+    result_status: str | None = None,
+    rejection_reasons: list[str] | None = None,
     error_message: str | None = None,
 ) -> None:
     with get_connection() as connection:
         connection.execute(
             """
             UPDATE forex_scan_runs
-            SET completed_at = ?, status = ?, created_count = ?, reused_count = ?, error_message = ?
+            SET completed_at = ?, status = ?, created_count = ?, reused_count = ?,
+                pairs_evaluated = ?, candidate_count = ?, rejected_count = ?,
+                telegram_queued_count = ?, result_status = ?, rejection_summary = ?,
+                error_message = ?
             WHERE id = ?
             """,
             (
@@ -246,10 +279,85 @@ def finish_scan_run(
                 "FAILED" if error_message else "COMPLETED",
                 created_count,
                 reused_count,
+                pairs_evaluated,
+                created_count + reused_count,
+                rejected_count,
+                telegram_queued_count,
+                result_status or ("FAILED" if error_message else "NO_TRADE"),
+                json.dumps(rejection_reasons or []),
                 error_message,
                 scan_id,
             ),
         )
+
+
+def get_scanner_diagnostics() -> dict[str, Any]:
+    ensure_forex_schema()
+    with get_connection() as connection:
+        latest = connection.execute(
+            "SELECT * FROM forex_scan_runs ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        latest_scheduled = connection.execute(
+            """
+            SELECT * FROM forex_scan_runs
+            WHERE trigger_source = 'scheduled'
+            ORDER BY started_at DESC LIMIT 1
+            """
+        ).fetchone()
+        latest_success = connection.execute(
+            """
+            SELECT * FROM forex_scan_runs
+            WHERE status = 'COMPLETED'
+            ORDER BY completed_at DESC LIMIT 1
+            """
+        ).fetchone()
+        scanner_error = connection.execute(
+            """
+            SELECT error_message FROM forex_scan_runs
+            WHERE error_message IS NOT NULL AND error_message != ''
+            ORDER BY started_at DESC LIMIT 1
+            """
+        ).fetchone()
+        telegram_error = connection.execute(
+            """
+            SELECT error_message FROM forex_telegram_dispatches
+            WHERE error_message IS NOT NULL AND error_message != ''
+            ORDER BY attempted_at DESC LIMIT 1
+            """
+        ).fetchone()
+        queued = delivered = 0
+        if latest:
+            dispatch_counts = connection.execute(
+                """
+                SELECT
+                    COUNT(d.id) AS queued,
+                    SUM(CASE WHEN d.delivered_at IS NOT NULL THEN 1 ELSE 0 END) AS delivered
+                FROM forex_signals s
+                LEFT JOIN forex_telegram_dispatches d ON d.signal_id = s.public_id
+                WHERE s.source_scan_id = ?
+                """,
+                (latest["id"],),
+            ).fetchone()
+            queued = int(dispatch_counts["queued"] or 0)
+            delivered = int(dispatch_counts["delivered"] or 0)
+    return {
+        "last_scheduled_scan_time": _parse_datetime(
+            latest_scheduled["completed_at"] or latest_scheduled["started_at"]
+        ) if latest_scheduled else None,
+        "last_successful_scan_time": _parse_datetime(
+            latest_success["completed_at"]
+        ) if latest_success else None,
+        "last_scan_timeframe": latest["timeframe"] if latest else None,
+        "last_trigger_source": latest["trigger_source"] if latest else None,
+        "pairs_evaluated": int(latest["pairs_evaluated"] or 0) if latest else 0,
+        "candidates_found": int(latest["candidate_count"] or 0) if latest else 0,
+        "rejected": int(latest["rejected_count"] or 0) if latest else 0,
+        "persisted": int(latest["created_count"] or 0) if latest else 0,
+        "telegram_queued": queued,
+        "telegram_delivered": delivered,
+        "latest_scanner_error": scanner_error["error_message"] if scanner_error else None,
+        "latest_telegram_error": telegram_error["error_message"] if telegram_error else None,
+    }
 
 
 def _parse_datetime(value: Any) -> datetime | None:

@@ -21,7 +21,13 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../lib/AuthContext.jsx";
-import { getForexOverview, getForexSignal, getForexSignals, takeForexTrade } from "../lib/api.js";
+import {
+  getForexOverview,
+  getForexSignal,
+  getForexSignals,
+  runForexScan,
+  takeForexTrade,
+} from "../lib/api.js";
 import { MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
 import { formatSessionCountdown, formatUtcClock, getForexSessionState } from "../lib/forexSessions.js";
 import { createPaperTradeFromSignal, listPaperTrades, signalIdForIdea } from "../lib/paperTrades.js";
@@ -489,12 +495,26 @@ function ForexHomeScreen({ signals, overview, onSelect }) {
   );
 }
 
-function ScanScreen({ signals, onSelect, market, forexSignals, onCryptoScan, cryptoLoading, scanningForex, forexError, tradingPreferences }) {
+function ScanScreen({
+  signals,
+  onSelect,
+  market,
+  forexSignals,
+  onCryptoScan,
+  onForexScan,
+  cryptoLoading,
+  scanningForex,
+  forexScanResult,
+  forexError,
+  tradingPreferences,
+}) {
   const [scanState, setScanState] = useState("idle");
   const [coinQuery, setCoinQuery] = useState("");
   const [appliedCoinQuery, setAppliedCoinQuery] = useState("");
   const [scoreBand, setScoreBand] = useState("all");
   const [timeframe, setTimeframe] = useState("all");
+  const [forexTimeframe, setForexTimeframe] = useState("15M");
+  const [forexCooldown, setForexCooldown] = useState(0);
   const [exchange, setExchange] = useState(() => tradingPreferences.preferredExchange);
   const visibleSignals = useMemo(() => {
     const query = tokenSymbol(appliedCoinQuery);
@@ -525,18 +545,52 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onCryptoScan, cry
     setScanState("done");
   }
 
+  useEffect(() => {
+    if (!forexCooldown) return undefined;
+    const timer = window.setInterval(
+      () => setForexCooldown((seconds) => Math.max(0, seconds - 1)),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [forexCooldown > 0]);
+
+  async function startForexScan() {
+    if (scanningForex || forexCooldown) return;
+    const completed = await onForexScan?.(forexTimeframe);
+    if (completed) setForexCooldown(30);
+  }
+
   if (market === MARKET_TYPES.forex) {
+    const filterTimeframe = forexTimeframe.toLowerCase();
     const visibleForexSignals = timeframe === "all"
       ? forexSignals
       : forexSignals.filter((signal) => signal.timeframe.toLowerCase() === timeframe);
+    const resultSignals = [
+      ...(forexScanResult?.created || []),
+      ...(forexScanResult?.reused || []),
+    ].map(normalizeForexSignal);
+    const noTrade = forexScanResult?.result_status === "NO_TRADE";
+    const failed = forexScanResult?.result_status === "FAILED";
     return (
       <div className="graphite-screen">
         <section className="graphite-scan-card forex">
           <div>
-            <span>Forex Signals</span>
-            <h1>Persisted setups</h1>
-            <p>Independent 15M, 1H, 4H, and Daily strategies. Updated independently of page visits.</p>
+            <span>Forex Scan</span>
+            <h1>Check the market now</h1>
+            <p>Run the same qualified strategy used by SwiftChart's scheduled scanner.</p>
           </div>
+          <button
+            type="button"
+            onClick={startForexScan}
+            disabled={scanningForex || forexCooldown > 0}
+          >
+            <ScanLine size={16} />
+            {scanningForex
+              ? "Scanning..."
+              : forexCooldown
+                ? `Wait ${forexCooldown}s`
+                : "Scan Forex"}
+          </button>
         </section>
 
         {forexError ? <EmptyState title="Could not load Forex signals" message={forexError} /> : null}
@@ -544,21 +598,60 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onCryptoScan, cry
         <div className="graphite-filters forex-timeframe-filter" aria-label="Forex timeframe filter">
           <label>
             <span className="sr-only">Timeframe</span>
-            <select value={timeframe} onChange={(event) => setTimeframe(event.target.value)} aria-label="Forex timeframe">
-              <option value="all">All</option>
-              <option value="15m">15M</option>
-              <option value="1h">1H</option>
-              <option value="4h">4H</option>
-              <option value="1d">Daily</option>
+            <select value={forexTimeframe} onChange={(event) => setForexTimeframe(event.target.value)} aria-label="Forex timeframe">
+              <option value="15M">15 Minutes</option>
+              <option value="1H">1 Hour</option>
+              <option value="4H">4 Hours</option>
+              <option value="1D">Daily</option>
             </select>
             <ChevronDown size={14} aria-hidden="true" />
           </label>
         </div>
 
+        {forexScanResult && !failed ? (
+          <section className={`forex-manual-result ${noTrade ? "no-trade" : "trade-found"}`} aria-live="polite">
+            <span>{noTrade ? "Scan complete" : "Opportunity found"}</span>
+            <h2>
+              {noTrade
+                ? `No qualified forex setup found on the ${forexScanResult.timeframe} timeframe.`
+                : `${resultSignals.length} qualified ${resultSignals.length === 1 ? "setup" : "setups"} found`}
+            </h2>
+            <div className="forex-scan-facts">
+              <p><small>Timeframe</small><strong>{forexScanResult.timeframe}</strong></p>
+              <p><small>Pairs scanned</small><strong>{forexScanResult.pairs_scanned}</strong></p>
+              <p>
+                <small>Completed</small>
+                <strong>{new Date(forexScanResult.completed_at || forexScanResult.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>
+              </p>
+            </div>
+            {noTrade && forexScanResult.rejection_reasons?.length ? (
+              <p className="forex-rejection-summary">
+                Most setups were rejected because: {forexScanResult.rejection_reasons.join("; ")}
+              </p>
+            ) : null}
+            {resultSignals.map((signal) => (
+              <div className="forex-manual-signal" key={signal.id}>
+                <InstrumentLogo symbol={signal.symbol} marketType="forex" size={36} />
+                <div>
+                  <strong>{signal.symbol} {signal.direction.toUpperCase()}</strong>
+                  <span>{signal.timeframe} · {signal.entry} · {signal.rr}</span>
+                </div>
+                <button type="button" onClick={() => onSelect(signal)}>Open Signal</button>
+              </div>
+            ))}
+          </section>
+        ) : null}
+        {failed ? (
+          <EmptyState
+            title="Forex scan could not complete"
+            message={forexScanResult.errors?.[0] || "Market data is temporarily unavailable."}
+          />
+        ) : null}
+
         <section className="graphite-section">
           <div className="graphite-section-head">
             <span>Stored Forex signals</span>
-            <small>{scanningForex ? "Refreshing..." : "Read only"}</small>
+            <small>{scanningForex ? `Scanning ${forexTimeframe}...` : filterTimeframe.toUpperCase()}</small>
           </div>
           <ForexSignalGroups signals={visibleForexSignals} onSelect={onSelect} compact />
           {!visibleForexSignals.length && !scanningForex ? (
@@ -967,6 +1060,8 @@ export default function MobileDemo({
   const [forexPairs, setForexPairs] = useState([]);
   const [forexError, setForexError] = useState("");
   const [forexLoading, setForexLoading] = useState(false);
+  const [forexScanLoading, setForexScanLoading] = useState(false);
+  const [forexScanResult, setForexScanResult] = useState(null);
   const [paperTrades, setPaperTrades] = useState([]);
   const [tradeSaveState, setTradeSaveState] = useState({ signalId: "", status: "idle" });
   const signals = useMemo(() => {
@@ -1143,6 +1238,56 @@ export default function MobileDemo({
       window.clearInterval(refreshTimer);
     };
   }, [activeMarket]);
+
+  useEffect(() => {
+    const signalMatch = window.location.pathname.match(/^\/app\/signal\/([^/]+)$/i);
+    if (!signalMatch) return;
+    let cancelled = false;
+    const signalId = decodeURIComponent(signalMatch[1]);
+    setActiveMarketState(MARKET_TYPES.forex);
+    window.localStorage?.setItem("swiftchart.activeMarket", MARKET_TYPES.forex);
+    setTab("scan");
+    getForexSignal(signalId)
+      .then((signal) => {
+        if (cancelled) return;
+        const normalized = normalizeForexSignal(signal);
+        setForexSignals((current) => current.some((item) => item.id === normalized.id)
+          ? current
+          : [normalized, ...current]);
+        setSelectedSignal(normalized);
+      })
+      .catch((error) => {
+        if (!cancelled) setForexError(error.message || "Forex signal could not be opened.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function scanForexNow(timeframe) {
+    if (forexScanLoading || !auth.session?.access_token) return null;
+    setForexScanLoading(true);
+    setForexError("");
+    try {
+      const result = await runForexScan(timeframe, auth.session.access_token);
+      setForexScanResult(result);
+      const persisted = [...(result.created || []), ...(result.reused || [])]
+        .map(normalizeForexSignal);
+      if (persisted.length) {
+        setForexSignals((current) => {
+          const merged = new Map(current.map((signal) => [signal.id, signal]));
+          persisted.forEach((signal) => merged.set(signal.id, signal));
+          return [...merged.values()].sort((a, b) => b.score - a.score);
+        });
+      }
+      return result;
+    } catch (error) {
+      setForexError(error.message || "Forex scan could not complete.");
+      return null;
+    } finally {
+      setForexScanLoading(false);
+    }
+  }
 
   async function saveTradeToHistory(signal) {
     if (!auth.isAuthenticated || !auth.user) {
@@ -1323,7 +1468,7 @@ export default function MobileDemo({
           ) : null}
           <main className="graphite-content">
             {tab === "home" ? <HomeScreen signals={preferredSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} /> : null}
-            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} cryptoLoading={initialConfigLoading} scanningForex={forexLoading} forexError={forexError} tradingPreferences={preferences.trading} /> : null}
+            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexError={forexError} tradingPreferences={preferences.trading} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} /> : null}
             {tab === "account" && accountView === "main" ? (
               <AccountScreen

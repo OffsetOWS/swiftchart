@@ -19,7 +19,7 @@ async def _timeframe_worker(
     await asyncio.sleep(max(0, startup_delay_seconds))
     while True:
         try:
-            result = await scan_forex(timeframe=timeframe)
+            result = await scan_forex(timeframe=timeframe, trigger_source="scheduled")
             logger.info(
                 "Forex scheduled scan timeframe=%s scan_id=%s created=%s reused=%s errors=%s",
                 timeframe,

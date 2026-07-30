@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from collections import Counter
 import hashlib
 import logging
 from uuid import uuid4
@@ -224,19 +225,23 @@ def analyze_forex_timeframe(
 async def scan_forex(
     provider: ForexDataProvider | None = None,
     timeframe: str = "15M",
+    trigger_source: str = "scheduled",
 ) -> ForexScanRunResult:
     timeframe = normalize_forex_timeframe(timeframe)
     provider_timeframe = PROVIDER_TIMEFRAMES[timeframe]
     now = datetime.now(UTC).replace(microsecond=0)
     scan_id = str(uuid4())
     provider = provider or get_forex_provider()
-    start_scan_run(scan_id, provider.name, now, timeframe)
+    if trigger_source not in {"scheduled", "manual"}:
+        raise ValueError(f"Unsupported Forex scan trigger: {trigger_source}")
+    start_scan_run(scan_id, provider.name, now, timeframe, trigger_source)
     session = forex_session_state(now)
     news_risk, _ = forex_news_risk()
     created: list[ForexSignalPlan] = []
     reused: list[ForexSignalPlan] = []
     rejected: list[dict[str, str | float]] = []
     errors: list[str] = []
+    telegram_queued = 0
     try:
         for pair in SUPPORTED_FOREX_PAIRS.values():
             try:
@@ -259,7 +264,7 @@ async def scan_forex(
                     continue
                 persisted = insert_signal(plan)
                 created.append(persisted)
-                enqueue_forex_signal(persisted)
+                telegram_queued += enqueue_forex_signal(persisted)
             except ForexProviderNotConfigured:
                 raise
             except ForexProviderError as exc:
@@ -269,22 +274,71 @@ async def scan_forex(
                     "Forex scan failed pair=%s timeframe=%s", pair.pair, timeframe
                 )
                 errors.append(f"{pair.pair}: {type(exc).__name__}")
-        finish_scan_run(scan_id, created_count=len(created), reused_count=len(reused))
+        completed_at = datetime.now(UTC).replace(microsecond=0)
+        rejection_counts = Counter(str(item.get("reason") or "Unknown rejection.") for item in rejected)
+        rejection_reasons = [
+            f"{reason} ({count})" for reason, count in rejection_counts.most_common(4)
+        ]
+        total_pairs = len(SUPPORTED_FOREX_PAIRS)
+        result_status = (
+            "TRADE_FOUND"
+            if created or reused
+            else "FAILED"
+            if errors and len(errors) >= total_pairs
+            else "NO_TRADE"
+        )
+        finish_scan_run(
+            scan_id,
+            created_count=len(created),
+            reused_count=len(reused),
+            pairs_evaluated=total_pairs,
+            rejected_count=len(rejected),
+            telegram_queued_count=telegram_queued,
+            result_status=result_status,
+            rejection_reasons=rejection_reasons,
+            error_message="; ".join(errors[:3]) if result_status == "FAILED" else None,
+        )
         return ForexScanRunResult(
             scan_id=scan_id,
             configured=True,
             scanned_at=now,
+            completed_at=completed_at,
+            timeframe=timeframe,
+            trigger_source=trigger_source,
+            result_status=result_status,
+            pairs_scanned=total_pairs,
+            candidates_found=len(created) + len(reused),
+            persisted_count=len(created),
+            telegram_queued=telegram_queued,
+            rejection_reasons=rejection_reasons,
             created=created,
             reused=reused,
             rejected=rejected,
             errors=errors,
         )
     except ForexProviderNotConfigured as exc:
-        finish_scan_run(scan_id, created_count=0, reused_count=0, error_message=str(exc))
+        completed_at = datetime.now(UTC).replace(microsecond=0)
+        finish_scan_run(
+            scan_id,
+            created_count=0,
+            reused_count=0,
+            pairs_evaluated=0,
+            result_status="FAILED",
+            error_message=str(exc),
+        )
         return ForexScanRunResult(
             scan_id=scan_id,
             configured=False,
             scanned_at=now,
+            completed_at=completed_at,
+            timeframe=timeframe,
+            trigger_source=trigger_source,
+            result_status="FAILED",
+            pairs_scanned=0,
+            candidates_found=0,
+            persisted_count=0,
+            telegram_queued=0,
+            rejection_reasons=[],
             created=[],
             reused=[],
             rejected=[],

@@ -39,7 +39,8 @@ function analysisSymbolFromPath(pathname) {
 
 function appTabFromPath(pathname) {
   const match = String(pathname || "").match(/^\/app\/(home|scan|history|account|notifications)$/i);
-  return match ? match[1].toLowerCase() : "home";
+  if (match) return match[1].toLowerCase();
+  return /^\/app\/signal\/[^/]+$/i.test(String(pathname || "")) ? "scan" : "home";
 }
 
 function safeReturnTo(value, fallback = "/app/home") {
@@ -51,7 +52,9 @@ export default function App() {
   const [path, setPath] = useState(window.location.pathname);
   const isLandingPage = path === "/";
   const isLaunchPage = path === "/launch";
-  const isAppPage = path === "/app" || /^\/app\/(home|scan|history|account|notifications)$/.test(path);
+  const isAppPage = path === "/app"
+    || /^\/app\/(home|scan|history|account|notifications)$/.test(path)
+    || /^\/app\/signal\/[^/]+$/.test(path);
   const isAnalysisPage = path.startsWith("/analysis/");
   const hasWorkspaceChrome = isAppPage || isAnalysisPage;
   const isMobileDemoPage = path === "/mobile-demo";

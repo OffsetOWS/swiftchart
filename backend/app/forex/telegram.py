@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC
 import html
 import json
 import logging
 import os
 from pathlib import Path
 
+from app.forex.config import SUPPORTED_FOREX_PAIRS
 from app.forex.models import ForexSignalPlan
 from app.forex.storage import (
     claim_pending_dispatches,
@@ -31,22 +31,38 @@ def _telegram_subscribers() -> list[str]:
     return sorted(subscribers)
 
 
-def format_forex_signal(signal: ForexSignalPlan, app_url: str = "https://swiftchart.xyz") -> str:
+def _price(value: float, symbol: str) -> str:
+    pair = SUPPORTED_FOREX_PAIRS.get(symbol.upper())
+    precision = 3 if pair and pair.pip_size >= 0.01 else 5
+    return f"{value:.{precision}f}"
+
+
+def _application_url(app_url: str | None = None) -> str:
+    return (app_url or os.getenv("APP_BASE_URL") or "https://swiftchart.xyz").rstrip("/")
+
+
+def format_forex_signal(signal: ForexSignalPlan, app_url: str | None = None) -> str:
     direction = "LONG" if signal.direction == "LONG" else "SHORT"
-    detail_url = f"{app_url.rstrip('/')}/app/scan?market=forex&detail={signal.id}"
+    detail_url = f"{_application_url(app_url)}/app/signal/{signal.id}"
+    if signal.entry_low == signal.entry_high:
+        entry = _price(signal.entry_low, signal.symbol)
+    else:
+        entry = (
+            f"{_price(signal.entry_low, signal.symbol)} - "
+            f"{_price(signal.entry_high, signal.symbol)}"
+        )
     return "\n".join(
         [
-            f"<b>SwiftChart Forex Signal #{html.escape(signal.id)}</b>",
             f"<b>{html.escape(signal.symbol)} {direction}</b>",
-            f"Entry: {signal.entry_low:g} - {signal.entry_high:g}",
-            f"Stop: {signal.stop_loss:g}",
-            f"TP1: {signal.take_profit_1:g}",
-            f"TP2: {signal.take_profit_2:g}",
+            "",
+            f"Entry: {entry}",
+            f"Stop: {_price(signal.stop_loss, signal.symbol)}",
+            f"TP1: {_price(signal.take_profit_1, signal.symbol)}",
+            f"TP2: {_price(signal.take_profit_2, signal.symbol)}",
             f"Timeframe: {signal.timeframe}",
-            f"Bias: {html.escape(signal.htf_bias)}",
-            f"Strategy: {html.escape(signal.strategy_family)} v{html.escape(signal.strategy_version)}",
+            f"Bias: {html.escape(signal.bias.upper())}",
             f"Score: {signal.setup_score:g}",
-            f"Expires: {signal.expires_at.astimezone(UTC).isoformat()}",
+            "",
             f'<a href="{html.escape(detail_url)}">Open signal</a>',
         ]
     )
@@ -77,7 +93,7 @@ def reconcile_active_forex_dispatches() -> int:
     return queued
 
 
-async def dispatch_pending_forex(bot, *, app_url: str = "https://swiftchart.xyz") -> dict[str, int]:
+async def dispatch_pending_forex(bot, *, app_url: str | None = None) -> dict[str, int]:
     reconcile_active_forex_dispatches()
     attempted = delivered = failed = 0
     for dispatch in claim_pending_dispatches():

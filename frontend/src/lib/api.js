@@ -138,6 +138,13 @@ export function getForexSignal(signalId) {
   return request(`/api/forex/signals/${encodeURIComponent(signalId)}`);
 }
 
+export function runForexScan(timeframe, accessToken) {
+  return request(`/api/forex/scan?timeframe=${encodeURIComponent(timeframe)}`, {
+    method: "POST",
+    accessToken,
+  });
+}
+
 export function takeForexTrade(signalId, payload, accessToken) {
   return request(`/api/forex/signals/${encodeURIComponent(signalId)}/take-trade`, {
     method: "POST",

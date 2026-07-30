@@ -8021,6 +8021,108 @@ button:disabled {
     grid-template-columns: minmax(120px, 152px);
   }
 
+  .forex-manual-result {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--graphite-line);
+    border-radius: 18px;
+    background: var(--graphite-panel);
+  }
+
+  .forex-manual-result > span {
+    color: var(--graphite-teal);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .forex-manual-result h2 {
+    margin: 0;
+    color: var(--graphite-ink);
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .forex-scan-facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border: 1px solid var(--graphite-line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .forex-scan-facts p {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+    margin: 0;
+    padding: 9px;
+    border-right: 1px solid var(--graphite-line);
+  }
+
+  .forex-scan-facts p:last-child {
+    border-right: 0;
+  }
+
+  .forex-scan-facts small,
+  .forex-rejection-summary {
+    color: var(--graphite-muted);
+    font-size: 10px;
+    line-height: 1.45;
+  }
+
+  .forex-scan-facts strong {
+    color: var(--graphite-soft);
+    font-size: 12px;
+  }
+
+  .forex-rejection-summary {
+    margin: 0;
+  }
+
+  .forex-manual-signal {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--graphite-line);
+  }
+
+  .forex-manual-signal > div {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .forex-manual-signal strong {
+    color: var(--graphite-ink);
+    font-size: 12px;
+  }
+
+  .forex-manual-signal span {
+    overflow: hidden;
+    color: var(--graphite-muted);
+    font-size: 10px;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .forex-manual-signal button {
+    min-height: 36px;
+    padding: 0 10px;
+    color: #061112;
+    border: 0;
+    border-radius: 12px;
+    background: var(--graphite-teal);
+    font-size: 10px;
+    font-weight: 900;
+  }
+
   .graphite-filters label {
     position: relative;
     min-width: 0;

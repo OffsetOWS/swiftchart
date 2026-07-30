@@ -90,10 +90,34 @@ class ForexScanRunResult(BaseModel):
     scan_id: str
     configured: bool
     scanned_at: datetime
+    completed_at: datetime | None = None
+    timeframe: ForexTimeframe = "15M"
+    trigger_source: Literal["scheduled", "manual"] = "scheduled"
+    result_status: Literal["TRADE_FOUND", "NO_TRADE", "FAILED"] = "NO_TRADE"
+    pairs_scanned: int = 0
+    candidates_found: int = 0
+    persisted_count: int = 0
+    telegram_queued: int = 0
+    rejection_reasons: list[str] = Field(default_factory=list)
     created: list[ForexSignalPlan]
     reused: list[ForexSignalPlan]
     rejected: list[dict[str, str | float]]
     errors: list[str]
+
+
+class ForexScannerDiagnostics(BaseModel):
+    last_scheduled_scan_time: datetime | None = None
+    last_successful_scan_time: datetime | None = None
+    last_scan_timeframe: str | None = None
+    last_trigger_source: str | None = None
+    pairs_evaluated: int = 0
+    candidates_found: int = 0
+    rejected: int = 0
+    persisted: int = 0
+    telegram_queued: int = 0
+    telegram_delivered: int = 0
+    latest_scanner_error: str | None = None
+    latest_telegram_error: str | None = None
 
 
 class TakeTradeRequest(BaseModel):
