@@ -289,12 +289,12 @@ async def verify_oanda_startup() -> None:
         )
         if frame.empty:
             startup_logger.warning(
-                "OANDA startup verification returned no complete EUR_USD M15 candle."
+                "OANDA startup verification returned no complete EUR_USD H1 candle."
             )
             return
         candle = frame.iloc[-1]
         startup_logger.info(
-            "OANDA startup verification succeeded instrument=EUR_USD granularity=M15 "
+            "OANDA startup verification succeeded instrument=EUR_USD granularity=H1 "
             "time=%s open=%s high=%s low=%s close=%s",
             candle["timestamp"],
             candle["open"],
