@@ -8,11 +8,14 @@ from uuid import uuid4
 import pandas as pd
 
 from app.forex.config import (
-    DEFAULT_FOREX_TIMEFRAMES,
+    PROVIDER_TIMEFRAMES,
     STRATEGY_FAMILY,
     STRATEGY_VERSION,
     SUPPORTED_FOREX_PAIRS,
+    SUPPORTED_FOREX_TIMEFRAMES,
+    TIMEFRAME_EXPIRY_HOURS,
     ForexPairConfig,
+    normalize_forex_timeframe,
 )
 from app.forex.models import ForexPairInfo, ForexScanRunResult, ForexSignalPlan
 from app.forex.news import forex_news_risk
@@ -69,15 +72,16 @@ def _structure(df: pd.DataFrame) -> tuple[str, str]:
     else:
         structure = "neutral"
     candle_time = pd.Timestamp(recent.iloc[-1]["timestamp"]).isoformat()
-    # The setup candle is the immutable signal identity. Its in-progress
-    # high/low can change between provider requests without creating a new setup.
-    identifier = f"{candle_time}:{structure}"
-    return structure, identifier
+    return structure, f"{candle_time}:{structure}"
 
 
-def _entry_confirmation(df: pd.DataFrame, direction: str) -> tuple[bool, str]:
+def _entry_confirmation(
+    df: pd.DataFrame,
+    direction: str,
+    timeframe: str,
+) -> tuple[bool, str]:
     if len(df) < 12:
-        return False, "15M history is insufficient."
+        return False, f"{timeframe} history is insufficient."
     recent = df.tail(12)
     last = recent.iloc[-1]
     prior = recent.iloc[:-1]
@@ -86,19 +90,19 @@ def _entry_confirmation(df: pd.DataFrame, direction: str) -> tuple[bool, str]:
     prior_high, prior_low = float(prior["high"].max()), float(prior["low"].min())
     if direction == "LONG":
         if close > prior_high:
-            return True, "15M bullish breakout closed above the execution range."
+            return True, f"{timeframe} bullish breakout closed above its range."
         if low <= prior_low and close > open_:
-            return True, "15M downside liquidity sweep closed with bullish rejection."
+            return True, f"{timeframe} downside liquidity sweep closed with bullish rejection."
         if close > open_ and close > float(recent["close"].tail(5).mean()):
-            return True, "15M bullish continuation candle reclaimed momentum."
+            return True, f"{timeframe} bullish continuation reclaimed momentum."
     else:
         if close < prior_low:
-            return True, "15M bearish breakdown closed below the execution range."
+            return True, f"{timeframe} bearish breakdown closed below its range."
         if high >= prior_high and close < open_:
-            return True, "15M upside liquidity sweep closed with bearish rejection."
+            return True, f"{timeframe} upside liquidity sweep closed with bearish rejection."
         if close < open_ and close < float(recent["close"].tail(5).mean()):
-            return True, "15M bearish continuation candle rejected momentum."
-    return False, "15M execution trigger has not confirmed."
+            return True, f"{timeframe} bearish continuation rejected momentum."
+    return False, f"{timeframe} trigger has not confirmed."
 
 
 def _atr(df: pd.DataFrame) -> float:
@@ -119,51 +123,40 @@ def _grade(score: float) -> str:
     return "A+" if score >= 90 else "A" if score >= 80 else "B"
 
 
-async def fetch_timeframe_context(
-    provider: ForexDataProvider,
+def analyze_forex_timeframe(
     pair: ForexPairConfig,
-) -> dict[str, pd.DataFrame]:
-    """Fetch the only three timeframes used by the Forex decision engine."""
-    return {
-        "15m": await provider.candles(pair, "15m", 180),
-        "1h": await provider.candles(pair, "1h", 180),
-        "4h": await provider.candles(pair, "4h", 180),
-    }
-
-
-def analyze_forex_pair(
-    pair: ForexPairConfig,
-    candles: dict[str, pd.DataFrame],
+    candles: pd.DataFrame,
     *,
+    timeframe: str,
     scan_id: str,
     session_label: str,
     news_risk: str,
     now: datetime,
 ) -> tuple[dict | None, dict[str, str | float]]:
-    df15, df1h, df4h = candles["15m"], candles["1h"], candles["4h"]
-    if min(len(df15), len(df1h), len(df4h)) < 60:
-        return None, {"symbol": pair.pair, "reason": "Insufficient 4H/1H/15M candle history."}
+    timeframe = normalize_forex_timeframe(timeframe)
+    if len(candles) < 60:
+        return None, {"symbol": pair.pair, "reason": f"Insufficient {timeframe} candle history."}
     if news_risk == "HIGH":
         return None, {"symbol": pair.pair, "reason": "High-impact news risk."}
 
-    htf_bias = _trend(df4h)
-    setup_structure, structure_id = _structure(df1h)
-    if htf_bias not in {"bullish", "bearish"} or setup_structure != htf_bias:
+    regime = _trend(candles)
+    structure, structure_id = _structure(candles)
+    if regime not in {"bullish", "bearish"} or structure != regime:
         return None, {
             "symbol": pair.pair,
-            "reason": f"Alignment failed: 4H {htf_bias}, 1H {setup_structure}.",
+            "reason": f"{timeframe} regime={regime}, structure={structure}.",
         }
-    direction = "LONG" if htf_bias == "bullish" else "SHORT"
-    entry_ok, entry_trigger = _entry_confirmation(df15, direction)
+
+    direction = "LONG" if regime == "bullish" else "SHORT"
+    entry_ok, entry_trigger = _entry_confirmation(candles, direction, timeframe)
     if not entry_ok:
         return None, {"symbol": pair.pair, "reason": entry_trigger}
 
-    current = float(df15["close"].iloc[-1])
-    execution_atr = max(_atr(df15), pair.pip_size * 4)
-    setup_atr = max(_atr(df1h), pair.pip_size * 8)
-    half_zone = max(execution_atr * 0.12, pair.pip_size)
+    current = float(candles["close"].iloc[-1])
+    timeframe_atr = max(_atr(candles), pair.pip_size * 4)
+    half_zone = max(timeframe_atr * 0.12, pair.pip_size)
+    stop_distance = timeframe_atr * 0.75
     entry_low, entry_high = current - half_zone, current + half_zone
-    stop_distance = setup_atr * 0.75
     if direction == "LONG":
         stop = current - stop_distance
         tp1 = current + stop_distance * 1.5
@@ -173,30 +166,21 @@ def analyze_forex_pair(
         tp1 = current - stop_distance * 1.5
         tp2 = current - stop_distance * 2.4
 
-    volatility_pips = setup_atr / pair.pip_size
-    volatility_ok = pair.min_atr_pips_1h <= volatility_pips <= pair.max_atr_pips_1h
     session_ok = session_label in pair.relevant_sessions
-    score = round(
-        45
-        + 20
-        + 15
-        + (8 if session_ok else 3)
-        + (7 if volatility_ok else 2)
-        + (5 if news_risk == "LOW" else 2),
-        1,
-    )
+    score = round(45 + 20 + 15 + (8 if session_ok else 3) + (5 if news_risk == "LOW" else 2), 1)
     if score < 70:
         return None, {"symbol": pair.pair, "reason": "Setup score below 70.", "score": score}
 
-    alignment = f"4H {htf_bias} bias + 1H {setup_structure} structure + confirmed 15M trigger"
+    strategy_family = f"{STRATEGY_FAMILY}_{timeframe.lower()}"
     raw_key = "|".join(
-        [pair.pair, direction, STRATEGY_VERSION, "1h", structure_id, session_label]
+        [pair.pair, timeframe, direction, strategy_family, STRATEGY_VERSION, structure_id]
     )
     dedupe_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
     precision = 3 if pair.pip_size >= 0.01 else 5
     plan = {
         "id": str(uuid4()),
         "symbol": pair.pair,
+        "timeframe": timeframe,
         "direction": direction,
         "entry_type": "ZONE",
         "entry_price": round(current, precision),
@@ -207,26 +191,27 @@ def analyze_forex_pair(
         "take_profit_2": round(tp2, precision),
         "risk_reward_1": _rr(current, stop, tp1),
         "risk_reward_2": _rr(current, stop, tp2),
-        "execution_timeframe": DEFAULT_FOREX_TIMEFRAMES["execution"],
-        "setup_timeframe": DEFAULT_FOREX_TIMEFRAMES["setup"],
-        "bias_timeframe": DEFAULT_FOREX_TIMEFRAMES["bias"],
-        "timeframe_alignment": alignment,
-        "htf_bias": htf_bias.upper(),
-        "setup_structure": f"{setup_structure.upper()}:{structure_id}",
+        # Compatibility fields remain populated, but no cross-timeframe input is used.
+        "execution_timeframe": timeframe.lower(),
+        "setup_timeframe": timeframe.lower(),
+        "bias_timeframe": timeframe.lower(),
+        "timeframe_alignment": f"{timeframe} independent structure strategy",
+        "htf_bias": regime.upper(),
+        "setup_structure": f"{structure.upper()}:{structure_id}",
         "entry_trigger": entry_trigger,
         "market_session": session_label,
         "setup_score": score,
-        "strategy_family": STRATEGY_FAMILY,
+        "strategy_family": strategy_family,
         "strategy_version": STRATEGY_VERSION,
-        "market_regime": f"{htf_bias.title()} trend",
-        "bias": htf_bias.upper(),
+        "market_regime": f"{regime.title()} {timeframe} trend",
+        "bias": regime.upper(),
         "setup_reason": (
-            f"{pair.pair} aligned across 4H bias and 1H structure. {entry_trigger} "
-            f"Session={session_label}; 1H ATR={volatility_pips:.1f} pips."
+            f"{pair.pair} qualified independently on {timeframe}. {entry_trigger} "
+            f"{timeframe} structure is {structure}; session={session_label}."
         ),
         "status": "PENDING_ENTRY",
         "created_at": now,
-        "expires_at": now + timedelta(hours=12),
+        "expires_at": now + timedelta(hours=TIMEFRAME_EXPIRY_HOURS[timeframe]),
         "source_scan_id": scan_id,
         "dedupe_key": dedupe_key,
         "grade": _grade(score),
@@ -236,11 +221,16 @@ def analyze_forex_pair(
     return plan, {"symbol": pair.pair, "reason": "qualified", "score": score}
 
 
-async def scan_forex(provider: ForexDataProvider | None = None) -> ForexScanRunResult:
+async def scan_forex(
+    provider: ForexDataProvider | None = None,
+    timeframe: str = "15M",
+) -> ForexScanRunResult:
+    timeframe = normalize_forex_timeframe(timeframe)
+    provider_timeframe = PROVIDER_TIMEFRAMES[timeframe]
     now = datetime.now(UTC).replace(microsecond=0)
     scan_id = str(uuid4())
     provider = provider or get_forex_provider()
-    start_scan_run(scan_id, provider.name, now)
+    start_scan_run(scan_id, provider.name, now, timeframe)
     session = forex_session_state(now)
     news_risk, _ = forex_news_risk()
     created: list[ForexSignalPlan] = []
@@ -250,10 +240,11 @@ async def scan_forex(provider: ForexDataProvider | None = None) -> ForexScanRunR
     try:
         for pair in SUPPORTED_FOREX_PAIRS.values():
             try:
-                context = await fetch_timeframe_context(provider, pair)
-                plan, audit = analyze_forex_pair(
+                candles = await provider.candles(pair, provider_timeframe, 180)
+                plan, audit = analyze_forex_timeframe(
                     pair,
-                    context,
+                    candles,
+                    timeframe=timeframe,
                     scan_id=scan_id,
                     session_label=session.active_session,
                     news_risk=news_risk,
@@ -274,7 +265,9 @@ async def scan_forex(provider: ForexDataProvider | None = None) -> ForexScanRunR
             except ForexProviderError as exc:
                 errors.append(f"{pair.pair}: {exc}")
             except Exception as exc:
-                logger.exception("Forex scan failed pair=%s", pair.pair)
+                logger.exception(
+                    "Forex scan failed pair=%s timeframe=%s", pair.pair, timeframe
+                )
                 errors.append(f"{pair.pair}: {type(exc).__name__}")
         finish_scan_run(scan_id, created_count=len(created), reused_count=len(reused))
         return ForexScanRunResult(
@@ -300,6 +293,7 @@ async def scan_forex(provider: ForexDataProvider | None = None) -> ForexScanRunR
 
 
 def forex_pair_infos() -> list[ForexPairInfo]:
+    defaults = {"execution": "15m", "setup": "1h", "bias": "4h"}
     return [
         ForexPairInfo(
             pair=pair.pair,
@@ -310,7 +304,7 @@ def forex_pair_infos() -> list[ForexPairInfo]:
                 "min_atr_pips_1h": pair.min_atr_pips_1h,
                 "max_atr_pips_1h": pair.max_atr_pips_1h,
             },
-            default_timeframes=DEFAULT_FOREX_TIMEFRAMES,
+            default_timeframes=defaults,
         )
         for pair in SUPPORTED_FOREX_PAIRS.values()
     ]

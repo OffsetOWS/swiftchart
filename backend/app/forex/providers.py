@@ -31,7 +31,7 @@ class ForexDataProvider(ABC):
 
 class TwelveDataForexProvider(ForexDataProvider):
     name = "twelvedata"
-    interval_map = {"15m": "15min", "1h": "1h", "4h": "4h"}
+    interval_map = {"15m": "15min", "1h": "1h", "4h": "4h", "1d": "1day"}
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key if api_key is not None else get_settings().twelve_data_api_key

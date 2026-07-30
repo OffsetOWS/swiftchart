@@ -8017,6 +8017,10 @@ button:disabled {
     gap: 7px;
   }
 
+  .graphite-filters.forex-timeframe-filter {
+    grid-template-columns: minmax(120px, 152px);
+  }
+
   .graphite-filters label {
     position: relative;
     min-width: 0;

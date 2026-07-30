@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 
 ForexDirection = Literal["LONG", "SHORT", "WAIT"]
+ForexTimeframe = Literal["15M", "1H", "4H", "1D"]
 ForexStatus = Literal[
     "PENDING_ENTRY",
     "OPEN",
@@ -45,6 +46,7 @@ class ForexSignalPlan(BaseModel):
     take_profit_2: float
     risk_reward_1: float
     risk_reward_2: float
+    timeframe: ForexTimeframe = "15M"
     execution_timeframe: str = "15m"
     setup_timeframe: str = "1h"
     bias_timeframe: str = "4h"

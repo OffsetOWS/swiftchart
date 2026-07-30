@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     internal_api_secret: str = ""
     forex_scanner_enabled: bool = True
     forex_scan_interval_seconds: int = Field(default=900, ge=60)
+    forex_scan_15m_interval_seconds: int = Field(default=900, ge=60)
+    forex_scan_1h_interval_seconds: int = Field(default=3600, ge=60)
+    forex_scan_4h_interval_seconds: int = Field(default=14400, ge=60)
+    forex_scan_1d_interval_seconds: int = Field(default=86400, ge=60)
     forex_lifecycle_interval_seconds: int = Field(default=60, ge=30)
     forex_worker_startup_delay_seconds: int = Field(default=20, ge=0)
 

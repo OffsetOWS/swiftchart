@@ -20,6 +20,7 @@ FOREX_COLUMNS: dict[str, str] = {
     "take_profit_2": "REAL",
     "risk_reward_1": "REAL",
     "risk_reward_2": "REAL",
+    "timeframe": "TEXT",
     "execution_timeframe": "TEXT",
     "setup_timeframe": "TEXT",
     "bias_timeframe": "TEXT",
@@ -75,6 +76,8 @@ def ensure_forex_schema() -> None:
         for column, definition in FOREX_COLUMNS.items():
             if column not in existing:
                 connection.execute(f"ALTER TABLE forex_signals ADD COLUMN {column} {definition}")
+        # Backfills must run before the immutable-plan guard is restored.
+        connection.execute("DROP TRIGGER IF EXISTS preserve_forex_signal_plan")
         connection.execute(
             """
             UPDATE forex_signals
@@ -90,6 +93,7 @@ def ensure_forex_schema() -> None:
                 setup_score = COALESCE(setup_score, score),
                 market_session = COALESCE(market_session, session),
                 setup_reason = COALESCE(setup_reason, reason),
+                timeframe = UPPER(COALESCE(timeframe, execution_timeframe, '15M')),
                 execution_timeframe = COALESCE(execution_timeframe, '15m'),
                 setup_timeframe = COALESCE(setup_timeframe, '1h'),
                 bias_timeframe = COALESCE(bias_timeframe, '4h'),
@@ -110,6 +114,7 @@ def ensure_forex_schema() -> None:
                 started_at TEXT NOT NULL,
                 completed_at TEXT,
                 provider TEXT NOT NULL,
+                timeframe TEXT,
                 status TEXT NOT NULL,
                 created_count INTEGER NOT NULL DEFAULT 0,
                 reused_count INTEGER NOT NULL DEFAULT 0,
@@ -117,6 +122,11 @@ def ensure_forex_schema() -> None:
             )
             """
         )
+        scan_run_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(forex_scan_runs)")
+        }
+        if "timeframe" not in scan_run_columns:
+            connection.execute("ALTER TABLE forex_scan_runs ADD COLUMN timeframe TEXT")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS forex_telegram_dispatches (
@@ -151,6 +161,10 @@ def ensure_forex_schema() -> None:
         )
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_forex_signal_public_id ON forex_signals(public_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_signal_status ON forex_signals(status, created_at)")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forex_signal_timeframe_status "
+            "ON forex_signals(timeframe, status, created_at)"
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_signal_dedupe ON forex_signals(dedupe_key, status)")
         connection.execute(
             """
@@ -160,15 +174,48 @@ def ensure_forex_schema() -> None:
               AND status IN ('PENDING_ENTRY', 'OPEN', 'TP1_HIT')
             """
         )
+        connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS validate_forex_signal_timeframe_insert
+            BEFORE INSERT ON forex_signals
+            WHEN NEW.timeframe NOT IN ('15M', '1H', '4H', '1D')
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid forex signal timeframe');
+            END
+            """
+        )
+        connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS validate_forex_signal_timeframe_update
+            BEFORE UPDATE OF timeframe ON forex_signals
+            WHEN NEW.timeframe NOT IN ('15M', '1H', '4H', '1D')
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid forex signal timeframe');
+            END
+            """
+        )
+        connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS preserve_forex_signal_plan
+            BEFORE UPDATE OF timeframe, direction, entry_price, entry_low, entry_high,
+                stop_loss, take_profit_1, take_profit_2, risk_reward_1, risk_reward_2,
+                strategy_family, strategy_version, setup_score, market_regime
+            ON forex_signals
+            BEGIN
+                SELECT RAISE(ABORT, 'persisted forex signal plans are immutable');
+            END
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_dispatch_pending ON forex_telegram_dispatches(delivered_at, retry_count)")
 
 
-def start_scan_run(scan_id: str, provider: str, started_at: datetime) -> None:
+def start_scan_run(scan_id: str, provider: str, started_at: datetime, timeframe: str) -> None:
     ensure_forex_schema()
     with get_connection() as connection:
         connection.execute(
-            "INSERT INTO forex_scan_runs (id, started_at, provider, status) VALUES (?, ?, ?, 'RUNNING')",
-            (scan_id, started_at.isoformat(), provider),
+            "INSERT INTO forex_scan_runs (id, started_at, provider, timeframe, status) "
+            "VALUES (?, ?, ?, ?, 'RUNNING')",
+            (scan_id, started_at.isoformat(), provider, timeframe),
         )
 
 
@@ -220,6 +267,7 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         take_profit_2=float(row["take_profit_2"] or 0),
         risk_reward_1=float(row["risk_reward_1"] or 0),
         risk_reward_2=float(row["risk_reward_2"] or 0),
+        timeframe=(row["timeframe"] or row["execution_timeframe"] or "15M").upper(),
         execution_timeframe=row["execution_timeframe"] or "15m",
         setup_timeframe=row["setup_timeframe"] or "1h",
         bias_timeframe=row["bias_timeframe"] or "4h",
@@ -293,6 +341,7 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
                 public_id, market_type, pair, symbol, direction, score, grade, session,
                 entry, entry_type, entry_price, entry_low, entry_high, stop_loss, tp1, tp2,
                 take_profit_1, take_profit_2, rr, risk_reward_1, risk_reward_2,
+                timeframe,
                 news_risk, spread_status, reason, status, created_at,
                 execution_timeframe, setup_timeframe, bias_timeframe, timeframe_alignment,
                 htf_bias, setup_structure, entry_trigger, market_session, setup_score,
@@ -303,7 +352,7 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
                 :id, 'forex', :symbol, :symbol, :direction, :setup_score, :grade, :market_session,
                 :entry_price, :entry_type, :entry_price, :entry_low, :entry_high, :stop_loss,
                 :take_profit_1, :take_profit_2, :take_profit_1, :take_profit_2, :risk_reward_2,
-                :risk_reward_1, :risk_reward_2, :news_risk, :spread_status, :setup_reason,
+                :risk_reward_1, :risk_reward_2, :timeframe, :news_risk, :spread_status, :setup_reason,
                 :status, :created_at, :execution_timeframe, :setup_timeframe, :bias_timeframe,
                 :timeframe_alignment, :htf_bias, :setup_structure, :entry_trigger,
                 :market_session, :setup_score, :strategy_family, :strategy_version,
@@ -317,13 +366,23 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
     return _row_to_signal(row)
 
 
-def list_signals(statuses: tuple[str, ...] | None = None, limit: int = 100) -> list[ForexSignalPlan]:
+def list_signals(
+    statuses: tuple[str, ...] | None = None,
+    limit: int = 100,
+    timeframe: str | None = None,
+) -> list[ForexSignalPlan]:
     ensure_forex_schema()
     query = "SELECT * FROM forex_signals"
     parameters: list[Any] = []
+    conditions: list[str] = []
     if statuses:
-        query += f" WHERE status IN ({','.join('?' for _ in statuses)})"
+        conditions.append(f"status IN ({','.join('?' for _ in statuses)})")
         parameters.extend(statuses)
+    if timeframe:
+        conditions.append("timeframe = ?")
+        parameters.append(timeframe.upper())
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY created_at DESC LIMIT ?"
     parameters.append(max(1, min(limit, 500)))
     with get_connection() as connection:

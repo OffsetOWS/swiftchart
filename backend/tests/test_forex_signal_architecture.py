@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import sqlite3
 
 import pandas as pd
 import pytest
@@ -10,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.forex.config import SUPPORTED_FOREX_PAIRS
+from app.forex.config import SUPPORTED_FOREX_PAIRS, SUPPORTED_FOREX_TIMEFRAMES
 from app.forex.lifecycle import next_signal_status
 from app.forex.models import TakeTradeRequest
 from app.forex.providers import ForexDataProvider
@@ -32,7 +33,7 @@ class FakeProvider(ForexDataProvider):
     async def candles(self, pair, timeframe: str, limit: int = 240) -> pd.DataFrame:
         self.timeframes.append(timeframe)
         start = datetime(2026, 7, 1, tzinfo=UTC)
-        spacing = {"15m": 15, "1h": 60, "4h": 240}[timeframe]
+        spacing = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}[timeframe]
         rows = []
         for index in range(90):
             base = 1.0 + index * 0.001
@@ -81,11 +82,19 @@ def test_signal_list_does_not_call_scanner(monkeypatch, forex_database):
     assert response.count == 0
 
 
-def test_scanner_uses_alignment_and_persists_immutable_signal(forex_database):
+@pytest.mark.parametrize(
+    ("timeframe", "provider_timeframe"),
+    [("15M", "15m"), ("1H", "1h"), ("4H", "4h"), ("1D", "1d")],
+)
+def test_each_timeframe_scans_only_itself_and_persists_immutable_signal(
+    forex_database,
+    timeframe,
+    provider_timeframe,
+):
     provider = FakeProvider()
-    first = asyncio.run(scan_forex(provider))
+    first = asyncio.run(scan_forex(provider, timeframe=timeframe))
     assert first.created
-    assert set(provider.timeframes) == {"15m", "1h", "4h"}
+    assert set(provider.timeframes) == {provider_timeframe}
 
     signal = first.created[0]
     original_levels = (
@@ -96,12 +105,13 @@ def test_scanner_uses_alignment_and_persists_immutable_signal(forex_database):
         signal.take_profit_2,
     )
     assert signal.id
-    assert signal.bias_timeframe == "4h"
-    assert signal.setup_timeframe == "1h"
-    assert signal.execution_timeframe == "15m"
-    assert "4H" in signal.timeframe_alignment
+    assert signal.timeframe == timeframe
+    assert signal.bias_timeframe == provider_timeframe
+    assert signal.setup_timeframe == provider_timeframe
+    assert signal.execution_timeframe == provider_timeframe
+    assert timeframe in signal.timeframe_alignment
 
-    second = asyncio.run(scan_forex(provider))
+    second = asyncio.run(scan_forex(provider, timeframe=timeframe))
     assert not second.created
     assert second.reused
     persisted = get_signal(signal.id)
@@ -114,7 +124,39 @@ def test_scanner_uses_alignment_and_persists_immutable_signal(forex_database):
         persisted.take_profit_2,
     ) == original_levels
     assert persisted.id == signal.id
-    assert len(list_signals(("PENDING_ENTRY",))) == len(SUPPORTED_FOREX_PAIRS)
+    assert len(list_signals(("PENDING_ENTRY",), timeframe=timeframe)) == len(SUPPORTED_FOREX_PAIRS)
+
+
+def test_timeframes_coexist_and_dedupe_only_within_same_timeframe(forex_database):
+    provider = FakeProvider()
+    created = {}
+    for timeframe in SUPPORTED_FOREX_TIMEFRAMES:
+        result = asyncio.run(scan_forex(provider, timeframe=timeframe))
+        assert result.created
+        created[timeframe] = result.created[0]
+
+    assert len({signal.id for signal in created.values()}) == 4
+    assert len({signal.dedupe_key for signal in created.values()}) == 4
+    assert {signal.timeframe for signal in list_signals(("PENDING_ENTRY",))} == set(
+        SUPPORTED_FOREX_TIMEFRAMES
+    )
+
+    duplicate = asyncio.run(scan_forex(provider, timeframe="4H"))
+    assert not duplicate.created
+    assert duplicate.reused
+
+
+def test_persisted_signal_plan_fields_are_immutable(forex_database):
+    from app.utils.database import get_connection
+
+    signal = asyncio.run(scan_forex(FakeProvider(), timeframe="1H")).created[0]
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        with get_connection() as connection:
+            connection.execute(
+                "UPDATE forex_signals SET entry_price = ? WHERE public_id = ?",
+                (signal.entry_price + 1, signal.id),
+            )
+    assert get_signal(signal.id).entry_price == signal.entry_price
 
 
 def test_take_trade_uses_persisted_values_and_rejects_terminal(forex_database):
@@ -175,6 +217,7 @@ def test_telegram_uses_exact_persisted_values_and_is_idempotent(forex_database):
     assert f"{signal.stop_loss:g}" in message
     assert f"{signal.take_profit_1:g}" in message
     assert f"{signal.take_profit_2:g}" in message
+    assert f"Timeframe: {signal.timeframe}" in message
 
     bot = FakeBot()
     # The bot repairs an outbox gap if no subscriber existed at scan time.
@@ -244,6 +287,15 @@ def test_production_like_scanner_to_web_take_trade_and_telegram(forex_database):
     listed = next(item for item in listing.json()["signals"] if item["id"] == created.id)
     assert listed["entry_low"] == created.entry_low
     assert listed["stop_loss"] == created.stop_loss
+    assert listed["timeframe"] == "15M"
+
+    filtered = client.get("/api/forex/signals?timeframe=4H")
+    assert filtered.status_code == 200
+    assert filtered.json()["signals"] == []
+
+    generic_active = client.get("/api/signals?timeframe=15M")
+    assert generic_active.status_code == 200
+    assert all(item["timeframe"] == "15M" for item in generic_active.json()["signals"])
 
     detail = client.get(f"/api/forex/signals/{created.id}")
     assert detail.status_code == 200

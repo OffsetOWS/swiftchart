@@ -42,11 +42,7 @@ def format_forex_signal(signal: ForexSignalPlan, app_url: str = "https://swiftch
             f"Stop: {signal.stop_loss:g}",
             f"TP1: {signal.take_profit_1:g}",
             f"TP2: {signal.take_profit_2:g}",
-            (
-                f"Timeframes: {signal.bias_timeframe.upper()} bias / "
-                f"{signal.setup_timeframe.upper()} setup / "
-                f"{signal.execution_timeframe.upper()} execution"
-            ),
+            f"Timeframe: {signal.timeframe}",
             f"Bias: {html.escape(signal.htf_bias)}",
             f"Strategy: {html.escape(signal.strategy_family)} v{html.escape(signal.strategy_version)}",
             f"Score: {signal.setup_score:g}",

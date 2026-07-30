@@ -129,8 +129,9 @@ export function getForexOverview() {
   return request("/api/forex/overview");
 }
 
-export function getForexSignals() {
-  return request("/api/forex/signals");
+export function getForexSignals(timeframe = "") {
+  const query = timeframe ? `?timeframe=${encodeURIComponent(timeframe)}` : "";
+  return request(`/api/forex/signals${query}`);
 }
 
 export function getForexSignal(signalId) {

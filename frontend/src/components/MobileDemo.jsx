@@ -180,7 +180,7 @@ function normalizeForexSignal(signal, index = 0) {
     score,
     id: signal?.id || `${pair}-${index}`,
     grade: signal?.grade || (score >= 90 ? "A+" : score >= 80 ? "A" : "B"),
-    timeframe: signal?.execution_timeframe || signal?.timeframe || "15m",
+    timeframe: signal?.timeframe || signal?.execution_timeframe || "15M",
     setupTimeframe: signal?.setup_timeframe || "1h",
     biasTimeframe: signal?.bias_timeframe || "4h",
     timeframeAlignment: signal?.timeframe_alignment || "-",
@@ -519,25 +519,42 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onCryptoScan, cry
   }
 
   if (market === MARKET_TYPES.forex) {
+    const visibleForexSignals = timeframe === "all"
+      ? forexSignals
+      : forexSignals.filter((signal) => signal.timeframe.toLowerCase() === timeframe);
     return (
       <div className="graphite-screen">
         <section className="graphite-scan-card forex">
           <div>
             <span>Forex Signals</span>
             <h1>Persisted setups</h1>
-            <p>4H bias · 1H setup · 15M execution. Updated independently of page visits.</p>
+            <p>Independent 15M, 1H, 4H, and Daily strategies. Updated independently of page visits.</p>
           </div>
         </section>
 
         {forexError ? <EmptyState title="Could not load Forex signals" message={forexError} /> : null}
+
+        <div className="graphite-filters forex-timeframe-filter" aria-label="Forex timeframe filter">
+          <label>
+            <span className="sr-only">Timeframe</span>
+            <select value={timeframe} onChange={(event) => setTimeframe(event.target.value)} aria-label="Forex timeframe">
+              <option value="all">All</option>
+              <option value="15m">15M</option>
+              <option value="1h">1H</option>
+              <option value="4h">4H</option>
+              <option value="1d">Daily</option>
+            </select>
+            <ChevronDown size={14} aria-hidden="true" />
+          </label>
+        </div>
 
         <section className="graphite-section">
           <div className="graphite-section-head">
             <span>Stored Forex signals</span>
             <small>{scanningForex ? "Refreshing..." : "Read only"}</small>
           </div>
-          <ForexSignalGroups signals={forexSignals} onSelect={onSelect} compact />
-          {!forexSignals.length && !scanningForex ? (
+          <ForexSignalGroups signals={visibleForexSignals} onSelect={onSelect} compact />
+          {!visibleForexSignals.length && !scanningForex ? (
             <p className="graphite-no-results">No persisted Forex signal is available. Page refreshes do not run a scan.</p>
           ) : null}
         </section>

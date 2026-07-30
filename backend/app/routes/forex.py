@@ -16,6 +16,7 @@ from app.forex.models import (
     TakeTradePreparation,
     TakeTradeRequest,
 )
+from app.forex.config import normalize_forex_timeframe
 from app.forex.news import forex_news_risk
 from app.forex.scanner import forex_pair_infos, scan_forex
 from app.forex.sessions import forex_session_state
@@ -72,6 +73,7 @@ async def forex_overview():
 @router.get("/forex/signals", response_model=ForexSignalList)
 async def forex_signals(
     status_filter: str | None = Query(default=None, alias="status"),
+    timeframe: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
 ):
     statuses = (
@@ -79,7 +81,25 @@ async def forex_signals(
         if status_filter
         else None
     )
-    signals = list_signals(statuses, limit)
+    try:
+        normalized_timeframe = normalize_forex_timeframe(timeframe) if timeframe else None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    signals = list_signals(statuses, limit, normalized_timeframe)
+    return ForexSignalList(signals=signals, count=len(signals))
+
+
+@router.get("/signals", response_model=ForexSignalList)
+async def active_signals(
+    timeframe: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Read-only active signal feed; GET never initiates market analysis."""
+    try:
+        normalized_timeframe = normalize_forex_timeframe(timeframe) if timeframe else None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    signals = list_signals(ACTIVE_FOREX_STATUSES, limit, normalized_timeframe)
     return ForexSignalList(signals=signals, count=len(signals))
 
 
@@ -92,9 +112,16 @@ async def forex_signal_detail(signal_id: str):
 
 
 @router.post("/forex/scanner/run", response_model=ForexScanRunResult)
-async def forex_scanner_run(x_internal_api_secret: str | None = Header(default=None)):
+async def forex_scanner_run(
+    timeframe: str = Query(default="15M"),
+    x_internal_api_secret: str | None = Header(default=None),
+):
     _require_internal_secret(x_internal_api_secret)
-    return await scan_forex()
+    try:
+        normalized_timeframe = normalize_forex_timeframe(timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await scan_forex(timeframe=normalized_timeframe)
 
 
 @router.post("/forex/scan")

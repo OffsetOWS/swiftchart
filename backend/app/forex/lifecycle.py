@@ -52,7 +52,7 @@ async def update_forex_lifecycle(provider: ForexDataProvider | None = None) -> l
         if not pair:
             continue
         try:
-            candles = await provider.candles(pair, "15m", 2)
+            candles = await provider.candles(pair, signal.timeframe.lower(), 2)
             if candles.empty:
                 continue
             price = float(candles["close"].iloc[-1])
