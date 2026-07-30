@@ -19,6 +19,7 @@ from app.forex.providers import (
 )
 
 logger = logging.getLogger(__name__)
+startup_logger = logging.getLogger("uvicorn.error")
 
 OANDA_GRANULARITIES = {
     "15m": "M15",
@@ -274,7 +275,9 @@ class OandaForexProvider(ForexDataProvider):
 async def verify_oanda_startup() -> None:
     provider = OandaForexProvider()
     if not provider.configured:
-        logger.warning("OANDA startup verification skipped: provider is not configured.")
+        startup_logger.warning(
+            "OANDA startup verification skipped: provider is not configured."
+        )
         return
     from app.forex.config import SUPPORTED_FOREX_PAIRS
 
@@ -285,10 +288,12 @@ async def verify_oanda_startup() -> None:
             2,
         )
         if frame.empty:
-            logger.warning("OANDA startup verification returned no complete EUR_USD M15 candle.")
+            startup_logger.warning(
+                "OANDA startup verification returned no complete EUR_USD M15 candle."
+            )
             return
         candle = frame.iloc[-1]
-        logger.info(
+        startup_logger.info(
             "OANDA startup verification succeeded instrument=EUR_USD granularity=M15 "
             "time=%s open=%s high=%s low=%s close=%s",
             candle["timestamp"],
@@ -298,4 +303,4 @@ async def verify_oanda_startup() -> None:
             candle["close"],
         )
     except ForexProviderError as exc:
-        logger.warning("OANDA startup verification failed: %s", exc)
+        startup_logger.warning("OANDA startup verification failed: %s", exc)
