@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../lib/AuthContext.jsx";
-import { getForexOverview, getForexSignals, takeForexTrade } from "../lib/api.js";
+import { getForexOverview, getForexSignal, getForexSignals, takeForexTrade } from "../lib/api.js";
 import { MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
 import { formatSessionCountdown, formatUtcClock, getForexSessionState } from "../lib/forexSessions.js";
 import { createPaperTradeFromSignal, listPaperTrades, signalIdForIdea } from "../lib/paperTrades.js";
@@ -32,6 +32,7 @@ import InstrumentLogo from "./InstrumentLogo.jsx";
 import NotificationCenter from "./NotificationCenter.jsx";
 import SettingsSupport from "./SettingsSupport.jsx";
 import { normalizeCryptoSymbol } from "../lib/instruments.js";
+import { executionLadderState } from "../lib/executionLadder.js";
 
 const APP_SPLASH_SESSION_KEY = "swiftchart.appSplashSeen.v1";
 const TELEGRAM_BOT_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || "https://t.me/SwiftChartBot";
@@ -201,7 +202,13 @@ function normalizeForexSignal(signal, index = 0) {
     createdAt: dt(signal?.created_at || signal?.lastUpdated),
     updatedAt: dt(signal?.last_price_updated_at || signal?.lastUpdated),
     expiresAt: dt(signal?.expires_at),
-    lastMarketPrice: signal?.last_market_price,
+    latestPrice: signal?.latest_price ?? signal?.last_market_price,
+    latestPriceAt: signal?.latest_price_at ?? signal?.last_price_updated_at,
+    activatedEntryPrice: signal?.activated_entry_price,
+    tp1HitAt: signal?.tp1_hit_at,
+    tp2HitAt: signal?.tp2_hit_at,
+    stoppedAt: signal?.stopped_at,
+    lastMarketPrice: signal?.latest_price ?? signal?.last_market_price,
     rawIdea: signal,
   };
 }
@@ -624,13 +631,29 @@ function ScanScreen({ signals, onSelect, market, forexSignals, onCryptoScan, cry
 }
 
 function ExecutionLadder({ signal }) {
+  const progress = executionLadderState(signal);
+  const priceDigits = /JPY/i.test(signal.symbol) ? 3 : /XAU/i.test(signal.symbol) ? 2 : 5;
+  const updatedAt = signal.latestPriceAt || signal.rawIdea?.latest_price_at || signal.rawIdea?.last_price_updated_at;
   return (
-    <section className="graphite-execution-ladder" aria-label="Execution ladder">
-      <span className="graphite-ladder-title">Execution ladder</span>
+    <section className={`graphite-execution-ladder is-${progress.tone}${progress.disabled ? " is-disabled" : ""}`} aria-label="Execution ladder">
+      <div className="graphite-ladder-heading">
+        <span className="graphite-ladder-title">Execution ladder</span>
+        <strong>{progress.label}</strong>
+      </div>
+      <div className="graphite-ladder-live">
+        <span>Current: <strong>{progress.currentPrice === null ? "-" : fmt(progress.currentPrice, priceDigits)}</strong></span>
+        <span>Updated: {updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"}</span>
+      </div>
       <div className="graphite-ladder-rail" aria-hidden="true">
-        <i className="target" />
-        <i className="entry" />
-        <i className="stop" />
+        <i className={`target tp2${progress.tp2Complete ? " complete" : ""}`} style={{ left: `${progress.tp2Position}%` }} />
+        <i className={`target tp1${progress.tp1Complete ? " complete" : ""}`} style={{ left: `${progress.tp1Position}%` }} />
+        <i className="entry-zone" style={{ left: `${progress.entryStart}%`, width: `${Math.max(2, progress.entryEnd - progress.entryStart)}%` }} />
+        <i className={`stop${progress.stopComplete ? " complete" : ""}`} style={{ left: `${progress.stopPosition}%` }} />
+        {progress.currentPrice !== null ? (
+          <i className="current-price" style={{ left: `${progress.markerPosition}%` }}>
+            <b />
+          </i>
+        ) : null}
       </div>
       <div className="graphite-ladder-values">
         <div className="target">
@@ -993,6 +1016,26 @@ export default function MobileDemo({
     );
     if (matchedSignal) setSelectedSignal(matchedSignal);
   }, [forexSignals, selectedSignal, signals]);
+
+  useEffect(() => {
+    if (!selectedSignal || selectedSignal.market !== MARKET_TYPES.forex || !selectedSignal.id) return undefined;
+    let cancelled = false;
+    const refreshPersistedSignal = () => {
+      getForexSignal(selectedSignal.id)
+        .then((signal) => {
+          if (!cancelled) setSelectedSignal(normalizeForexSignal(signal));
+        })
+        .catch(() => {
+          // Keep the last persisted snapshot visible during transient refresh failures.
+        });
+    };
+    refreshPersistedSignal();
+    const timer = window.setInterval(refreshPersistedSignal, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [selectedSignal?.id, selectedSignal?.market]);
 
   useEffect(() => {
     setMarketPreferenceReady(true);

@@ -20,6 +20,7 @@ from app.forex.storage import (
     get_signal,
     list_signals,
     queue_dispatches,
+    update_signal_market_state,
 )
 from app.forex.telegram import dispatch_pending_forex, format_forex_signal
 
@@ -259,6 +260,78 @@ def test_signal_lifecycle_transitions_and_expiry(forex_database):
     )
     assert expired == "EXPIRED"
     assert expired_at == signal.expires_at
+
+
+def test_lifecycle_persists_live_price_activation_and_hit_timestamps_without_mutating_plan(
+    forex_database,
+):
+    signal = asyncio.run(scan_forex(FakeProvider(), timeframe="1H")).created[0]
+    original_plan = (
+        signal.entry_low,
+        signal.entry_high,
+        signal.stop_loss,
+        signal.take_profit_1,
+        signal.take_profit_2,
+        signal.created_at,
+    )
+    opened_at = signal.created_at + timedelta(minutes=30)
+    opened = update_signal_market_state(
+        signal.id,
+        status="OPEN",
+        price=signal.entry_price,
+        checked_at=opened_at,
+        activated_at=opened_at,
+    )
+    assert opened.latest_price == signal.entry_price
+    assert opened.latest_price_at == opened_at
+    assert opened.activated_entry_price == signal.entry_price
+    assert opened.latest_price_at != opened.created_at
+
+    tp1_at = opened_at + timedelta(hours=1)
+    tp1 = update_signal_market_state(
+        signal.id,
+        status="TP1_HIT",
+        price=signal.take_profit_1,
+        checked_at=tp1_at,
+    )
+    assert tp1.tp1_hit_at == tp1_at
+    assert tp1.tp2_hit_at is None
+
+    tp2_at = tp1_at + timedelta(hours=1)
+    completed = update_signal_market_state(
+        signal.id,
+        status="TP2_HIT",
+        price=signal.take_profit_2,
+        checked_at=tp2_at,
+        closed_at=tp2_at,
+    )
+    assert completed.tp1_hit_at == tp1_at
+    assert completed.tp2_hit_at == tp2_at
+    assert completed.closed_at == tp2_at
+    assert (
+        completed.entry_low,
+        completed.entry_high,
+        completed.stop_loss,
+        completed.take_profit_1,
+        completed.take_profit_2,
+        completed.created_at,
+    ) == original_plan
+
+
+def test_lifecycle_persists_stopped_timestamp_and_closing_price(forex_database):
+    signal = asyncio.run(scan_forex(FakeProvider(), timeframe="4H")).created[0]
+    stopped_at = signal.created_at + timedelta(hours=4)
+    stopped = update_signal_market_state(
+        signal.id,
+        status="STOPPED",
+        price=signal.stop_loss,
+        checked_at=stopped_at,
+        closed_at=stopped_at,
+    )
+    assert stopped.latest_price == signal.stop_loss
+    assert stopped.latest_price_at == stopped_at
+    assert stopped.stopped_at == stopped_at
+    assert stopped.status == "STOPPED"
 
 
 def test_scanner_endpoint_is_not_available_to_normal_page_requests(monkeypatch, forex_database):

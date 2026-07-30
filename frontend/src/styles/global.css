@@ -8452,6 +8452,32 @@ button:disabled {
     box-shadow: none;
   }
 
+  .graphite-ladder-heading,
+  .graphite-ladder-live {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .graphite-ladder-heading > strong {
+    color: var(--graphite-soft);
+    font-size: 11px;
+  }
+
+  .graphite-execution-ladder.is-profit .graphite-ladder-heading > strong { color: var(--graphite-profit); }
+  .graphite-execution-ladder.is-loss .graphite-ladder-heading > strong { color: var(--graphite-loss); }
+
+  .graphite-ladder-live {
+    color: var(--graphite-soft);
+    font-size: 10px;
+  }
+
+  .graphite-ladder-live strong {
+    color: var(--graphite-ink);
+    font-size: 12px;
+  }
+
   .graphite-ladder-rail {
     position: relative;
     height: 16px;
@@ -8477,9 +8503,59 @@ button:disabled {
     background: var(--graphite-ink);
   }
 
-  .graphite-ladder-rail i.target { left: 0; background: var(--graphite-profit); }
-  .graphite-ladder-rail i.entry { left: 50%; transform: translateX(-50%); }
-  .graphite-ladder-rail i.stop { right: 0; background: var(--graphite-loss); }
+  .graphite-ladder-rail i.target,
+  .graphite-ladder-rail i.stop {
+    transform: translateX(-50%);
+  }
+
+  .graphite-ladder-rail i.target { background: var(--graphite-profit); }
+  .graphite-ladder-rail i.tp1 { height: 13px; top: 2px; opacity: 0.72; }
+  .graphite-ladder-rail i.entry-zone {
+    top: 4px;
+    height: 8px;
+    min-width: 5px;
+    border: 1px solid var(--graphite-ink);
+    background: rgba(255,255,255,0.18);
+  }
+  .graphite-ladder-rail i.stop { background: var(--graphite-loss); }
+  .graphite-ladder-rail i.complete {
+    width: 6px;
+    box-shadow: 0 0 0 3px rgba(49, 211, 157, 0.16);
+  }
+  .graphite-ladder-rail i.stop.complete {
+    box-shadow: 0 0 0 3px rgba(255, 92, 105, 0.16);
+  }
+
+  .graphite-ladder-rail i.current-price {
+    top: -5px;
+    z-index: 4;
+    width: 3px;
+    height: 26px;
+    transform: translateX(-50%);
+    background: var(--graphite-ink);
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.65);
+    transition: left 450ms ease;
+  }
+
+  .graphite-ladder-rail i.current-price b {
+    position: absolute;
+    top: -3px;
+    left: 50%;
+    width: 9px;
+    height: 9px;
+    border: 2px solid #080a0b;
+    border-radius: 50%;
+    background: var(--graphite-teal);
+    transform: translate(-50%, -50%);
+  }
+
+  .graphite-execution-ladder.is-loss .graphite-ladder-rail i.current-price b { background: var(--graphite-loss); }
+  .graphite-execution-ladder.is-disabled .graphite-ladder-rail { opacity: 0.45; }
+  .graphite-execution-ladder.is-disabled .graphite-ladder-rail i.current-price { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .graphite-ladder-rail i.current-price { transition: none; }
+  }
 
   .graphite-ladder-values {
     display: grid;

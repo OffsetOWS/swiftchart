@@ -69,6 +69,12 @@ class ForexSignalPlan(BaseModel):
     telegram_dispatched_at: datetime | None = None
     source_scan_id: str
     dedupe_key: str
+    latest_price: float | None = None
+    latest_price_at: datetime | None = None
+    activated_entry_price: float | None = None
+    tp1_hit_at: datetime | None = None
+    tp2_hit_at: datetime | None = None
+    stopped_at: datetime | None = None
     last_market_price: float | None = None
     last_price_updated_at: datetime | None = None
     is_legacy: bool = False

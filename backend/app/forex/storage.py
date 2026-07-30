@@ -41,6 +41,12 @@ FOREX_COLUMNS: dict[str, str] = {
     "telegram_dispatched_at": "TEXT",
     "source_scan_id": "TEXT",
     "dedupe_key": "TEXT",
+    "latest_price": "REAL",
+    "latest_price_at": "TEXT",
+    "activated_entry_price": "REAL",
+    "tp1_hit_at": "TEXT",
+    "tp2_hit_at": "TEXT",
+    "stopped_at": "TEXT",
     "last_market_price": "REAL",
     "last_price_updated_at": "TEXT",
     "is_legacy": "INTEGER NOT NULL DEFAULT 0",
@@ -99,6 +105,8 @@ def ensure_forex_schema() -> None:
                 bias_timeframe = COALESCE(bias_timeframe, '4h'),
                 strategy_family = COALESCE(strategy_family, 'legacy'),
                 strategy_version = COALESCE(strategy_version, 'legacy'),
+                latest_price = COALESCE(latest_price, last_market_price),
+                latest_price_at = COALESCE(latest_price_at, last_price_updated_at),
                 is_legacy = CASE WHEN source_scan_id IS NULL THEN 1 ELSE is_legacy END,
                 expires_at = COALESCE(expires_at, datetime(created_at, '+24 hours')),
                 status = CASE
@@ -290,6 +298,16 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         telegram_dispatched_at=_parse_datetime(row["telegram_dispatched_at"]),
         source_scan_id=row["source_scan_id"] or f"legacy-{row['id']}",
         dedupe_key=row["dedupe_key"] or f"legacy-{row['id']}",
+        latest_price=float(row["latest_price"]) if row["latest_price"] is not None else None,
+        latest_price_at=_parse_datetime(row["latest_price_at"]),
+        activated_entry_price=(
+            float(row["activated_entry_price"])
+            if row["activated_entry_price"] is not None
+            else None
+        ),
+        tp1_hit_at=_parse_datetime(row["tp1_hit_at"]),
+        tp2_hit_at=_parse_datetime(row["tp2_hit_at"]),
+        stopped_at=_parse_datetime(row["stopped_at"]),
         last_market_price=float(row["last_market_price"]) if row["last_market_price"] is not None else None,
         last_price_updated_at=_parse_datetime(row["last_price_updated_at"]),
         is_legacy=bool(row["is_legacy"]),
@@ -413,8 +431,26 @@ def update_signal_market_state(
         connection.execute(
             """
             UPDATE forex_signals
-            SET status = ?, last_market_price = ?, last_price_updated_at = ?,
+            SET status = ?,
+                latest_price = ?, latest_price_at = ?,
+                last_market_price = ?, last_price_updated_at = ?,
                 activated_at = COALESCE(activated_at, ?),
+                activated_entry_price = COALESCE(
+                    activated_entry_price,
+                    CASE WHEN ? IS NOT NULL THEN ? ELSE NULL END
+                ),
+                tp1_hit_at = COALESCE(
+                    tp1_hit_at,
+                    CASE WHEN ? IN ('TP1_HIT', 'TP2_HIT') THEN ? ELSE NULL END
+                ),
+                tp2_hit_at = COALESCE(
+                    tp2_hit_at,
+                    CASE WHEN ? = 'TP2_HIT' THEN ? ELSE NULL END
+                ),
+                stopped_at = COALESCE(
+                    stopped_at,
+                    CASE WHEN ? = 'STOPPED' THEN ? ELSE NULL END
+                ),
                 closed_at = COALESCE(closed_at, ?)
             WHERE public_id = ?
             """,
@@ -422,7 +458,17 @@ def update_signal_market_state(
                 status,
                 price,
                 checked_at.isoformat(),
+                price,
+                checked_at.isoformat(),
                 activated_at.isoformat() if activated_at else None,
+                activated_at.isoformat() if activated_at else None,
+                price,
+                status,
+                checked_at.isoformat(),
+                status,
+                checked_at.isoformat(),
+                status,
+                checked_at.isoformat(),
                 closed_at.isoformat() if closed_at else None,
                 signal_id,
             ),
