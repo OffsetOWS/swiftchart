@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CheckCircle2,
@@ -39,8 +39,13 @@ import NotificationCenter from "./NotificationCenter.jsx";
 import SettingsSupport from "./SettingsSupport.jsx";
 import { normalizeCryptoSymbol } from "../lib/instruments.js";
 import { executionLadderState } from "../lib/executionLadder.js";
+import {
+  canonicalForexTimeframe,
+  filterForexSignalsByTimeframe,
+} from "../lib/forexSignals.js";
 
 const APP_SPLASH_SESSION_KEY = "swiftchart.appSplashSeen.v1";
+const FOREX_SIGNAL_CACHE_KEY = "swiftchart.forexSignals.v1";
 const TELEGRAM_BOT_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || "https://t.me/SwiftChartBot";
 
 function hasSeenAppSplash() {
@@ -187,7 +192,7 @@ function normalizeForexSignal(signal, index = 0) {
     score,
     id: signal?.id || `${pair}-${index}`,
     grade: signal?.grade || (score >= 90 ? "A+" : score >= 80 ? "A" : "B"),
-    timeframe: signal?.timeframe || signal?.execution_timeframe || "1H",
+    timeframe: canonicalForexTimeframe(signal?.timeframe || signal?.execution_timeframe),
     setupTimeframe: signal?.setup_timeframe || "1h",
     biasTimeframe: signal?.bias_timeframe || "4h",
     timeframeAlignment: signal?.timeframe_alignment || "-",
@@ -505,7 +510,9 @@ function ScanScreen({
   cryptoLoading,
   scanningForex,
   forexScanResult,
-  forexError,
+  forexFeedState,
+  forexScanError,
+  onRetryForex,
   tradingPreferences,
 }) {
   const [scanState, setScanState] = useState("idle");
@@ -515,6 +522,7 @@ function ScanScreen({
   const [timeframe, setTimeframe] = useState("all");
   const [forexTimeframe, setForexTimeframe] = useState("1H");
   const [forexCooldown, setForexCooldown] = useState(0);
+  const forexScanInFlight = useRef(false);
   const [exchange, setExchange] = useState(() => tradingPreferences.preferredExchange);
   const visibleSignals = useMemo(() => {
     const query = tokenSymbol(appliedCoinQuery);
@@ -555,16 +563,19 @@ function ScanScreen({
   }, [forexCooldown > 0]);
 
   async function startForexScan() {
-    if (scanningForex || forexCooldown) return;
-    const completed = await onForexScan?.(forexTimeframe);
-    if (completed) setForexCooldown(30);
+    if (scanningForex || forexCooldown || forexScanInFlight.current) return;
+    forexScanInFlight.current = true;
+    try {
+      const completed = await onForexScan?.(forexTimeframe);
+      if (completed) setForexCooldown(30);
+    } finally {
+      forexScanInFlight.current = false;
+    }
   }
 
   if (market === MARKET_TYPES.forex) {
-    const filterTimeframe = forexTimeframe.toLowerCase();
-    const visibleForexSignals = timeframe === "all"
-      ? forexSignals
-      : forexSignals.filter((signal) => signal.timeframe.toLowerCase() === timeframe);
+    const filterTimeframe = canonicalForexTimeframe(forexTimeframe);
+    const visibleForexSignals = filterForexSignalsByTimeframe(forexSignals, filterTimeframe);
     const resultSignals = [
       ...(forexScanResult?.created || []),
       ...(forexScanResult?.reused || []),
@@ -583,25 +594,57 @@ function ScanScreen({
             type="button"
             onClick={startForexScan}
             disabled={scanningForex || forexCooldown > 0}
+            aria-busy={scanningForex}
           >
-            <ScanLine size={16} />
+            {scanningForex ? <span className="graphite-button-spinner" aria-hidden="true" /> : <ScanLine size={16} />}
             {scanningForex
-              ? "Scanning..."
+              ? "Scanning…"
               : forexCooldown
                 ? `Wait ${forexCooldown}s`
                 : "Scan Forex"}
           </button>
         </section>
 
-        {forexError ? <EmptyState title="Could not load Forex signals" message={forexError} /> : null}
+        {forexFeedState.status === "loading" && !forexSignals.length ? (
+          <EmptyState title="Loading Forex signals" message="Fetching the latest persisted setups." />
+        ) : null}
+        {forexFeedState.status === "auth_unavailable" ? (
+          <EmptyState
+            title="Authentication unavailable"
+            message="Public Forex signals remain available in read-only mode. Sign-in actions may be temporarily unavailable."
+            action="Retry"
+            onAction={onRetryForex}
+          />
+        ) : null}
+        {forexFeedState.status === "network_unavailable" || forexFeedState.status === "api_unavailable" ? (
+          <EmptyState
+            title="Could not load Forex signals"
+            message={forexFeedState.message}
+            action="Retry"
+            onAction={onRetryForex}
+          />
+        ) : null}
+        {forexFeedState.cached ? (
+          <p className="graphite-cache-notice">
+            Showing cached signals — last updated {forexFeedState.lastUpdated || "recently"}.
+          </p>
+        ) : null}
+        {forexScanError ? (
+          <EmptyState
+            title="Forex scan could not complete"
+            message={forexScanError}
+            action="Retry"
+            onAction={startForexScan}
+          />
+        ) : null}
 
         <div className="graphite-filters forex-timeframe-filter" aria-label="Forex timeframe filter">
           <label>
             <span className="sr-only">Timeframe</span>
             <select value={forexTimeframe} onChange={(event) => setForexTimeframe(event.target.value)} aria-label="Forex timeframe">
-              <option value="1H">1 Hour</option>
-              <option value="4H">4 Hours</option>
-              <option value="1D">Daily</option>
+              <option value="1H">1H</option>
+              <option value="4H">4H</option>
+              <option value="1D">1D</option>
             </select>
             <ChevronDown size={14} aria-hidden="true" />
           </label>
@@ -650,11 +693,11 @@ function ScanScreen({
         <section className="graphite-section">
           <div className="graphite-section-head">
             <span>Stored Forex signals</span>
-            <small>{scanningForex ? `Scanning ${forexTimeframe}...` : filterTimeframe.toUpperCase()}</small>
+            <small>{scanningForex ? `Scanning ${filterTimeframe}…` : `${filterTimeframe} · ${visibleForexSignals.length}`}</small>
           </div>
           <ForexSignalGroups signals={visibleForexSignals} onSelect={onSelect} compact />
-          {!visibleForexSignals.length && !scanningForex ? (
-            <p className="graphite-no-results">No persisted Forex signal is available. Page refreshes do not run a scan.</p>
+          {!visibleForexSignals.length && !scanningForex && forexFeedState.status === "success" ? (
+            <p className="graphite-no-results">No signals are available for {filterTimeframe}. Select another timeframe or retry later.</p>
           ) : null}
         </section>
       </div>
@@ -1057,7 +1100,14 @@ export default function MobileDemo({
   const [forexOverview, setForexOverview] = useState(null);
   const [forexSignals, setForexSignals] = useState([]);
   const [forexPairs, setForexPairs] = useState([]);
-  const [forexError, setForexError] = useState("");
+  const [forexFeedState, setForexFeedState] = useState({
+    status: "idle",
+    message: "",
+    cached: false,
+    lastUpdated: "",
+  });
+  const [forexScanError, setForexScanError] = useState("");
+  const [forexReloadVersion, setForexReloadVersion] = useState(0);
   const [forexLoading, setForexLoading] = useState(false);
   const [forexScanLoading, setForexScanLoading] = useState(false);
   const [forexScanResult, setForexScanResult] = useState(null);
@@ -1207,28 +1257,63 @@ export default function MobileDemo({
   useEffect(() => {
     if (activeMarket !== MARKET_TYPES.forex) return;
     let cancelled = false;
-    const loadForex = () => {
+    const loadForex = async () => {
       setForexLoading(true);
-      setForexError("");
-      Promise.allSettled([getForexOverview(), getForexSignals()])
-        .then(([overviewResult, signalsResult]) => {
-          if (cancelled) return;
-          if (overviewResult.status === "fulfilled") {
-            setForexOverview(overviewResult.value);
-            setForexPairs(overviewResult.value?.supported_pairs || overviewResult.value?.supportedPairs || []);
-          }
-          if (signalsResult.status === "fulfilled") {
-            const data = signalsResult.value;
-            const raw = data.signals || [];
-            setForexSignals(raw.map(normalizeForexSignal));
-            setForexPairs((current) => current.length ? current : data.supported_pairs || data.supportedPairs || []);
-          }
-          const failed = [overviewResult, signalsResult].find((result) => result.status === "rejected");
-          if (failed) setForexError(failed.reason?.message || "Could not load Forex data.");
-        })
-        .finally(() => {
-          if (!cancelled) setForexLoading(false);
+      setForexFeedState((current) => ({ ...current, status: "loading", message: "", cached: false }));
+      const [overviewResult, signalsResult] = await Promise.allSettled([getForexOverview(), getForexSignals()]);
+      if (cancelled) return;
+
+      if (overviewResult.status === "fulfilled") {
+        setForexOverview(overviewResult.value);
+        setForexPairs(overviewResult.value?.supported_pairs || overviewResult.value?.supportedPairs || []);
+      } else {
+        console.error("SwiftChart Forex overview request failed", {
+          kind: overviewResult.reason?.kind || "request",
+          status: overviewResult.reason?.status,
+          message: overviewResult.reason?.message,
         });
+      }
+
+      if (signalsResult.status === "fulfilled") {
+        const data = signalsResult.value;
+        const raw = data.signals || [];
+        const normalized = raw.map(normalizeForexSignal);
+        const updatedAt = new Date().toISOString();
+        setForexSignals(normalized);
+        setForexPairs((current) => current.length ? current : data.supported_pairs || data.supportedPairs || []);
+        setForexFeedState({ status: "success", message: "", cached: false, lastUpdated: dt(updatedAt) });
+        try {
+          window.localStorage?.setItem(FOREX_SIGNAL_CACHE_KEY, JSON.stringify({ signals: raw, updatedAt }));
+        } catch {
+          // Public feed remains usable when storage is blocked.
+        }
+      } else {
+        const error = signalsResult.reason;
+        console.error("SwiftChart public Forex signal request failed", {
+          kind: error?.kind || "request",
+          status: error?.status,
+          message: error?.message,
+        });
+        let cached = null;
+        try {
+          cached = JSON.parse(window.localStorage?.getItem(FOREX_SIGNAL_CACHE_KEY) || "null");
+        } catch {
+          cached = null;
+        }
+        if (Array.isArray(cached?.signals)) setForexSignals(cached.signals.map(normalizeForexSignal));
+        const authUnavailable = error?.kind === "authentication"
+          || /authentication service|session/i.test(String(error?.message || ""));
+        const networkUnavailable = error?.kind === "network";
+        setForexFeedState({
+          status: authUnavailable ? "auth_unavailable" : networkUnavailable ? "network_unavailable" : "api_unavailable",
+          message: networkUnavailable
+            ? "The Forex signal service could not be reached. Check your connection and retry."
+            : "The Forex signal service is temporarily unavailable. Please retry.",
+          cached: Array.isArray(cached?.signals),
+          lastUpdated: cached?.updatedAt ? dt(cached.updatedAt) : "",
+        });
+      }
+      if (!cancelled) setForexLoading(false);
     };
     loadForex();
     const refreshTimer = window.setInterval(loadForex, 60_000);
@@ -1236,7 +1321,7 @@ export default function MobileDemo({
       cancelled = true;
       window.clearInterval(refreshTimer);
     };
-  }, [activeMarket]);
+  }, [activeMarket, forexReloadVersion]);
 
   useEffect(() => {
     const signalMatch = window.location.pathname.match(/^\/app\/signal\/([^/]+)$/i);
@@ -1256,7 +1341,13 @@ export default function MobileDemo({
         setSelectedSignal(normalized);
       })
       .catch((error) => {
-        if (!cancelled) setForexError(error.message || "Forex signal could not be opened.");
+        if (!cancelled) {
+          console.error("SwiftChart Forex signal detail request failed", {
+            kind: error?.kind || "request",
+            status: error?.status,
+            message: error?.message,
+          });
+        }
       });
     return () => {
       cancelled = true;
@@ -1264,11 +1355,16 @@ export default function MobileDemo({
   }, []);
 
   async function scanForexNow(timeframe) {
-    if (forexScanLoading || !auth.session?.access_token) return null;
+    if (forexScanLoading) return null;
+    if (!auth.session?.access_token) {
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+      return null;
+    }
     setForexScanLoading(true);
-    setForexError("");
+    setForexScanError("");
     try {
-      const result = await runForexScan(timeframe, auth.session.access_token);
+      const result = await runForexScan(canonicalForexTimeframe(timeframe), auth.session.access_token);
       setForexScanResult(result);
       const persisted = [...(result.created || []), ...(result.reused || [])]
         .map(normalizeForexSignal);
@@ -1281,7 +1377,12 @@ export default function MobileDemo({
       }
       return result;
     } catch (error) {
-      setForexError(error.message || "Forex scan could not complete.");
+      console.error("SwiftChart authenticated Forex scan failed", {
+        kind: error?.kind || "request",
+        status: error?.status,
+        message: error?.message,
+      });
+      setForexScanError(error.message || "Forex scan could not complete.");
       return null;
     } finally {
       setForexScanLoading(false);
@@ -1335,6 +1436,13 @@ export default function MobileDemo({
   }
 
   function selectTab(nextTab) {
+    if (!auth.isAuthenticated && (nextTab === "history" || nextTab === "account")) {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.pathname = `/app/${nextTab}`;
+      nextUrl.searchParams.set("market", activeMarket);
+      window.location.assign(`/login?returnTo=${encodeURIComponent(`${nextUrl.pathname}${nextUrl.search}`)}`);
+      return;
+    }
     setNotificationsOpen(false);
     setTab(nextTab);
     setSelectedSignal(null);
@@ -1467,7 +1575,7 @@ export default function MobileDemo({
           ) : null}
           <main className="graphite-content">
             {tab === "home" ? <HomeScreen signals={preferredSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} /> : null}
-            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexError={forexError} tradingPreferences={preferences.trading} /> : null}
+            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} /> : null}
             {tab === "account" && accountView === "main" ? (
               <AccountScreen

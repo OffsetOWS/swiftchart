@@ -41,11 +41,23 @@ async function request(path, options = {}) {
           return text;
         }
       });
-      throw new Error(friendlyErrorMessage(detail || response.statusText || `Request failed (${response.status})`));
+      const requestError = new Error(friendlyErrorMessage(detail || response.statusText || `Request failed (${response.status})`));
+      requestError.status = response.status;
+      requestError.kind = response.status === 401 || response.status === 403
+        ? "authentication"
+        : response.status >= 500
+          ? "service"
+          : "request";
+      throw requestError;
     }
     return response.json();
   } catch (error) {
-    throw new Error(friendlyErrorMessage(error.message));
+    if (error?.status) throw error;
+    const requestError = new Error(friendlyErrorMessage(error?.message));
+    requestError.kind = /Failed to fetch|NetworkError|Load failed/i.test(String(error?.message || ""))
+      ? "network"
+      : "request";
+    throw requestError;
   }
 }
 

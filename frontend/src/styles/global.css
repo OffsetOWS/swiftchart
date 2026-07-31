@@ -7201,6 +7201,7 @@ button:disabled {
   }
 
   .graphite-app {
+    --bottom-nav-height: 76px;
     --graphite-bg: #050607;
     --graphite-panel: #101214;
     --graphite-panel-2: #16191c;
@@ -7216,7 +7217,8 @@ button:disabled {
     --graphite-shadow: 0 24px 58px rgba(0,0,0,0.34);
     position: relative;
     isolation: isolate;
-    min-height: 100svh;
+    min-height: 100vh;
+    min-height: 100dvh;
     overflow-x: hidden;
     color: var(--graphite-ink);
     background:
@@ -7227,7 +7229,8 @@ button:disabled {
   }
 
   .mobile-demo-page .graphite-app {
-    min-height: 100svh;
+    min-height: 100vh;
+    min-height: 100dvh;
     max-height: none;
     border-radius: 0;
     box-shadow: none;
@@ -7430,12 +7433,17 @@ button:disabled {
   }
 
   .graphite-content {
-    padding: 0 14px calc(96px + env(safe-area-inset-bottom));
+    width: 100%;
+    min-width: 0;
+    padding: 0 14px calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 32px);
+    overflow-x: hidden;
   }
 
   .graphite-screen {
+    min-width: 0;
     display: grid;
     gap: 12px;
+    overflow-x: clip;
   }
 
   .graphite-hero-card,
@@ -7685,7 +7693,7 @@ button:disabled {
     width: 100%;
     min-height: 66px;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    grid-template-columns: 42px minmax(0, 1fr) minmax(42px, auto) minmax(48px, 76px) 18px;
     align-items: center;
     gap: 10px;
     padding: 9px 11px;
@@ -8255,6 +8263,31 @@ button:disabled {
     gap: 12px;
     padding: 14px;
     box-shadow: none;
+  }
+
+  .graphite-cache-notice {
+    margin: 0;
+    padding: 9px 12px;
+    color: var(--graphite-muted);
+    border: 1px solid var(--graphite-line);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.025);
+    font-size: 11px;
+    font-weight: 750;
+  }
+
+  .graphite-button-spinner {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    border: 2px solid rgba(6,17,18,0.3);
+    border-top-color: #061112;
+    border-radius: 50%;
+    animation: graphite-spin 700ms linear infinite;
+  }
+
+  @keyframes graphite-spin {
+    to { transform: rotate(360deg); }
   }
 
   .graphite-empty-state svg {
@@ -9204,7 +9237,7 @@ button:disabled {
     .graphite-row,
     .graphite-row.compact {
       min-height: 60px;
-      grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+      grid-template-columns: 36px minmax(0, 1fr) 36px minmax(42px, 58px) 14px;
       gap: 6px;
       padding: 8px;
     }

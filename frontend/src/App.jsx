@@ -58,11 +58,15 @@ export default function App() {
   const isAnalysisPage = path.startsWith("/analysis/");
   const hasWorkspaceChrome = isAppPage || isAnalysisPage;
   const isMobileDemoPage = path === "/mobile-demo";
+  const isPublicReadOnlyAppPage = /^\/app\/(?:home|scan)(?:\/|$)/i.test(path)
+    || /^\/app\/signal\/[^/]+$/i.test(path);
   const isDisabledCommercePage = /^\/(?:admin\/payments?|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path)
     || /^\/app\/(?:upgrade|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path);
   const isAuthPage = ["/auth", "/login", "/signup", "/forgot-password", "/reset-password"].includes(path);
   const isCredentialEntryPage = ["/auth", "/login", "/signup"].includes(path);
-  const isProtectedPage = isAppPage || isMobileDemoPage || isDisabledCommercePage;
+  const isProtectedPage = (isAppPage && !isPublicReadOnlyAppPage)
+    || isMobileDemoPage
+    || isDisabledCommercePage;
   const isDocsPage = path === "/docs" || path.startsWith("/docs/");
   const [page, setPage] = useState(isAnalysisPage ? "markets" : "dashboard");
   const [nightMode, setNightMode] = useState(true);
