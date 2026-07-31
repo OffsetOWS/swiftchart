@@ -45,7 +45,7 @@ def candle_database(monkeypatch, tmp_path: Path):
     import app.utils.database as database
 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'candles.db'}")
-    monkeypatch.setenv("FOREX_ENABLED_TIMEFRAMES", "1H,4H,1D")
+    monkeypatch.setenv("FOREX_ENABLED_TIMEFRAMES", "15M,1H,4H,1D")
     get_settings.cache_clear()
     database._INITIALIZED = False
     yield
@@ -53,8 +53,8 @@ def candle_database(monkeypatch, tmp_path: Path):
     database._INITIALIZED = False
 
 
-def test_active_timeframes_exclude_15m(candle_database):
-    assert enabled_forex_timeframes() == ("1H", "4H", "1D")
+def test_active_timeframes_include_15m(candle_database):
+    assert enabled_forex_timeframes() == ("15M", "1H", "4H", "1D")
 
 
 def test_repeated_and_concurrent_reads_use_one_provider_request(candle_database):

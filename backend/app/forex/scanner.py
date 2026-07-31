@@ -184,7 +184,7 @@ def analyze_forex_timeframe(
 
     settings = get_settings()
     stop_pips = stop_distance / pair.pip_size
-    timeframe_stop_multiplier = {"1H": 1.0, "4H": 2.5, "1D": 6.0}[timeframe]
+    timeframe_stop_multiplier = {"15M": 1.0, "1H": 1.0, "4H": 2.5, "1D": 6.0}[timeframe]
     maximum_stop = min(
         settings.forex_max_stop_pips,
         pair.max_atr_pips_1h * timeframe_stop_multiplier,

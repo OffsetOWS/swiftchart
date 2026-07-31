@@ -40,6 +40,7 @@ import SettingsSupport from "./SettingsSupport.jsx";
 import { normalizeCryptoSymbol } from "../lib/instruments.js";
 import { executionLadderState } from "../lib/executionLadder.js";
 import {
+  activeForexSignals,
   canonicalForexTimeframe,
   filterForexSignalsByTimeframe,
 } from "../lib/forexSignals.js";
@@ -138,8 +139,8 @@ function paperTradeIdeaForSignal(signal) {
   return {
     symbol: signal.symbol,
     timeframe: signal.timeframe,
-    exchange: signal.exchange || "hyperliquid",
-    source: "mobile-demo",
+    exchange: signal.market === MARKET_TYPES.forex ? "forex" : signal.exchange || "hyperliquid",
+    source: signal.market === MARKET_TYPES.forex ? "forex" : "mobile-demo",
     direction: /short|sell/i.test(signal.direction) ? "Short" : "Long",
     entry_zone: [entryValues[0], entryValues[1] ?? entryValues[0]],
     stop_loss: stopLoss,
@@ -435,8 +436,6 @@ function HomeScreen({ signals, onSelect, onViewAll, market, forexSignals, forexO
 const FOREX_STATUS_GROUPS = [
   ["Active", ["OPEN", "TP1_HIT"]],
   ["Pending Entry", ["PENDING_ENTRY"]],
-  ["Completed", ["TP2_HIT", "STOPPED", "CANCELLED"]],
-  ["Expired", ["EXPIRED"]],
 ];
 
 function ForexSignalGroups({ signals, onSelect, compact = false }) {
@@ -463,7 +462,7 @@ function ForexHomeScreen({ signals, overview, onSelect }) {
   const [sessionClock, setSessionClock] = useState(() => new Date());
   const session = useMemo(() => getForexSessionState(sessionClock), [sessionClock]);
   const homeSignals = useMemo(
-    () => signals.filter((signal) => String(signal.status).toUpperCase() !== "EXPIRED"),
+    () => activeForexSignals(signals),
     [signals],
   );
 
@@ -575,7 +574,7 @@ function ScanScreen({
 
   if (market === MARKET_TYPES.forex) {
     const filterTimeframe = canonicalForexTimeframe(forexTimeframe);
-    const visibleForexSignals = filterForexSignalsByTimeframe(forexSignals, filterTimeframe);
+    const visibleForexSignals = filterForexSignalsByTimeframe(activeForexSignals(forexSignals), filterTimeframe);
     const resultSignals = [
       ...(forexScanResult?.created || []),
       ...(forexScanResult?.reused || []),
@@ -642,6 +641,7 @@ function ScanScreen({
           <label>
             <span className="sr-only">Timeframe</span>
             <select value={forexTimeframe} onChange={(event) => setForexTimeframe(event.target.value)} aria-label="Forex timeframe">
+              <option value="15M">15M</option>
               <option value="1H">1H</option>
               <option value="4H">4H</option>
               <option value="1D">1D</option>
@@ -933,7 +933,7 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
               disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved" || terminalForexStatus}
               onClick={isForex ? () => setShowTakeTrade(true) : () => onTakeTrade(signal)}
             >
-              {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? (isForex ? "Trade prepared" : "Saved to History") : "Take Trade"}
+              {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
             </button>
           </div>
         )}
@@ -956,7 +956,7 @@ function HistoryScreen({ market, paperTrades = [] }) {
     state: trade.status === "taken" ? "Open" : trade.status || "Open",
     r: trade.pnl === null || trade.pnl === undefined ? "Tracking" : `${Number(trade.pnl) >= 0 ? "+" : ""}${Number(trade.pnl).toFixed(1)}R`,
     date: trade.taken_at ? new Date(trade.taken_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "Today",
-    market: MARKET_TYPES.crypto,
+    market: String(trade.exchange || "").toLowerCase() === "forex" ? MARKET_TYPES.forex : MARKET_TYPES.crypto,
     id: trade.id,
   }));
   const rows = savedRows
@@ -1410,8 +1410,10 @@ export default function MobileDemo({
           : [saved, ...current];
       });
       setTradeSaveState({ signalId, symbol: signal.symbol, status: "saved" });
+      return saved;
     } catch (error) {
       setTradeSaveState({ signalId, symbol: signal.symbol, status: "error", message: error.message || "Could not save trade to History." });
+      return undefined;
     }
   }
 
@@ -1427,7 +1429,18 @@ export default function MobileDemo({
     setTradeSaveState({ signalId: signal.id, symbol: signal.symbol, status: "saving" });
     try {
       const prepared = await takeForexTrade(signal.id, payload, auth.session.access_token);
-      setTradeSaveState({ signalId: signal.id, symbol: signal.symbol, status: "saved", prepared });
+      const saved = await createPaperTradeFromSignal(
+        paperTradeIdeaForSignal(signal),
+        auth.user.id,
+        auth.session.access_token,
+      );
+      setPaperTrades((current) => {
+        const matchingTrade = (trade) => trade.id === saved.id || (saved.signal_id && trade.signal_id === saved.signal_id);
+        return current.some(matchingTrade)
+          ? current.map((trade) => matchingTrade(trade) ? saved : trade)
+          : [saved, ...current];
+      });
+      setTradeSaveState({ signalId: signal.id, symbol: signal.symbol, status: "saved", prepared, saved });
       return prepared;
     } catch (error) {
       setTradeSaveState({ signalId: signal.id, symbol: signal.symbol, status: "error", message: error.message || "Could not prepare trade." });

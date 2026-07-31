@@ -132,7 +132,7 @@ async def forex_signals(
     statuses = (
         tuple(item.strip().upper() for item in status_filter.split(",") if item.strip())
         if status_filter
-        else None
+        else ACTIVE_FOREX_STATUSES
     )
     try:
         normalized_timeframe = normalize_forex_timeframe(timeframe) if timeframe else None

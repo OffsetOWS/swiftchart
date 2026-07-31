@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     twelve_data_api_key: str = ""
     internal_api_secret: str = ""
     forex_scanner_enabled: bool = True
-    forex_enabled_timeframes: str = "1H,4H,1D"
+    forex_enabled_timeframes: str = "15M,1H,4H,1D"
     forex_candle_close_delay_seconds: int = Field(default=15, ge=0, le=300)
     forex_bootstrap_candle_limit: int = Field(default=500, ge=60, le=5000)
     forex_incremental_candle_limit: int = Field(default=8, ge=2, le=100)

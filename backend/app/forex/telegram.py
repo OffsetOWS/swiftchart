@@ -17,6 +17,7 @@ from app.forex.storage import (
 )
 
 logger = logging.getLogger(__name__)
+TELEGRAM_FOREX_TIMEFRAMES = frozenset({"1H", "4H", "1D"})
 
 
 def _telegram_subscribers() -> list[str]:
@@ -69,6 +70,13 @@ def format_forex_signal(signal: ForexSignalPlan, app_url: str | None = None) -> 
 
 
 def enqueue_forex_signal(signal: ForexSignalPlan) -> int:
+    if signal.timeframe not in TELEGRAM_FOREX_TIMEFRAMES:
+        logger.info(
+            "Forex Telegram skipped website-only timeframe signal_id=%s timeframe=%s",
+            signal.id,
+            signal.timeframe,
+        )
+        return 0
     try:
         subscribers = _telegram_subscribers()
     except Exception:
@@ -88,7 +96,7 @@ def reconcile_active_forex_dispatches() -> int:
         return 0
     queued = 0
     for signal in list_signals(statuses=("PENDING_ENTRY", "OPEN", "TP1_HIT"), limit=200):
-        if not signal.is_legacy:
+        if not signal.is_legacy and signal.timeframe in TELEGRAM_FOREX_TIMEFRAMES:
             queued += queue_dispatches(signal.id, subscribers)
     return queued
 
@@ -105,6 +113,14 @@ async def dispatch_pending_forex(bot, *, app_url: str | None = None) -> dict[str
                 error_message="Signal no longer exists.",
             )
             failed += 1
+            continue
+        if signal.timeframe not in TELEGRAM_FOREX_TIMEFRAMES:
+            mark_dispatch_attempt(dispatch["id"], delivered=True)
+            logger.info(
+                "Forex Telegram suppressed queued website-only signal_id=%s timeframe=%s",
+                signal.id,
+                signal.timeframe,
+            )
             continue
         attempted += 1
         try:

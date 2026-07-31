@@ -28,7 +28,7 @@ from app.forex.storage import (
     queue_dispatches,
     update_signal_market_state,
 )
-from app.forex.telegram import dispatch_pending_forex, format_forex_signal
+from app.forex.telegram import dispatch_pending_forex, enqueue_forex_signal, format_forex_signal
 
 
 class FakeProvider(ForexDataProvider):
@@ -221,8 +221,8 @@ def test_timeframes_coexist_and_dedupe_only_within_same_timeframe(forex_database
         assert result.created
         created[timeframe] = result.created[0]
 
-    assert len({signal.id for signal in created.values()}) == 3
-    assert len({signal.dedupe_key for signal in created.values()}) == 3
+    assert len({signal.id for signal in created.values()}) == 4
+    assert len({signal.dedupe_key for signal in created.values()}) == 4
     assert {signal.timeframe for signal in list_signals(("PENDING_ENTRY",))} == set(
         enabled_forex_timeframes()
     )
@@ -334,6 +334,22 @@ def test_telegram_keeps_supported_timeframe_and_compact_template(
     assert f' href="https://swiftchart.xyz/app/signal/{signal.id}"' in message
     assert "Strategy:" not in message
     assert "Expires:" not in message
+
+
+def test_15m_signal_is_persisted_but_not_queued_for_telegram(forex_database):
+    from bot.storage import add_subscriber
+
+    add_subscriber(123)
+    signal = asyncio.run(scan_forex(FakeProvider(), timeframe="15M")).created[0]
+
+    assert signal.timeframe == "15M"
+    assert get_signal(signal.id) is not None
+    assert enqueue_forex_signal(signal) == 0
+
+    bot = FakeBot()
+    result = asyncio.run(dispatch_pending_forex(bot))
+    assert result == {"attempted": 0, "delivered": 0, "failed": 0}
+    assert bot.messages == []
 
 
 def test_no_trade_manual_scan_records_history_without_signal(forex_database):
@@ -548,7 +564,8 @@ def test_production_like_scanner_to_web_take_trade_and_telegram(forex_database):
     assert filtered.json()["signals"] == []
 
     generic_active = client.get("/api/signals?timeframe=15M")
-    assert generic_active.status_code == 422
+    assert generic_active.status_code == 200
+    assert generic_active.json()["signals"] == []
 
     detail = client.get(f"/api/forex/signals/{created.id}")
     assert detail.status_code == 200

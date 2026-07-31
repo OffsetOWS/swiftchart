@@ -25,7 +25,7 @@ from app.forex.storage import (
 
 logger = logging.getLogger(__name__)
 NEW_YORK = ZoneInfo("America/New_York")
-TIMEFRAME_SECONDS = {"1H": 3600, "4H": 14_400, "1D": 86_400}
+TIMEFRAME_SECONDS = {"15M": 900, "1H": 3600, "4H": 14_400, "1D": 86_400}
 
 
 def forex_market_is_open(now: datetime | None = None) -> bool:

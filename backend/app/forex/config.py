@@ -6,8 +6,7 @@ from app.config import get_settings
 
 
 ALL_FOREX_TIMEFRAMES = ("15M", "1H", "4H", "1D")
-# Compatibility catalog for historical records and provider-level tests. Active
-# scanning uses enabled_forex_timeframes(), which excludes 15M by default.
+# Compatibility catalog for historical records and provider-level tests.
 SUPPORTED_FOREX_TIMEFRAMES = ALL_FOREX_TIMEFRAMES
 PROVIDER_TIMEFRAMES = {value: value.lower() for value in ALL_FOREX_TIMEFRAMES}
 TIMEFRAME_EXPIRY_HOURS = {"15M": 3, "1H": 12, "4H": 48, "1D": 240}
@@ -28,7 +27,7 @@ def enabled_forex_timeframes() -> tuple[str, ...]:
         for item in configured.split(",")
         if (alias := _normalize_timeframe_value(item)) in ALL_FOREX_TIMEFRAMES
     )
-    return values or ("1H", "4H", "1D")
+    return values or ALL_FOREX_TIMEFRAMES
 
 
 def _normalize_timeframe_value(value: str) -> str:
