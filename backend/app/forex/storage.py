@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 from uuid import uuid4
 
+from app.config import get_settings
 from app.forex.models import ACTIVE_FOREX_STATUSES, ForexSignalPlan
 from app.utils.database import get_connection
 
@@ -52,10 +53,19 @@ FOREX_COLUMNS: dict[str, str] = {
     "last_price_updated_at": "TEXT",
     "is_legacy": "INTEGER NOT NULL DEFAULT 0",
 }
+_FOREX_SCHEMA_READY_FOR: str | None = None
 
 
 def ensure_forex_schema() -> None:
+    global _FOREX_SCHEMA_READY_FOR
+    database_url = get_settings().database_url
+    if _FOREX_SCHEMA_READY_FOR == database_url:
+        return
     with get_connection() as connection:
+        # API, scheduler, and bot processes may initialize together. Serialize
+        # the one-time migration so another process cannot restore the
+        # immutable-plan trigger while legacy rows are being backfilled.
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS forex_signals (
@@ -83,10 +93,26 @@ def ensure_forex_schema() -> None:
         for column, definition in FOREX_COLUMNS.items():
             if column not in existing:
                 connection.execute(f"ALTER TABLE forex_signals ADD COLUMN {column} {definition}")
-        # Backfills must run before the immutable-plan guard is restored.
-        connection.execute("DROP TRIGGER IF EXISTS preserve_forex_signal_plan")
-        connection.execute(
+        needs_backfill = connection.execute(
             """
+            SELECT 1 FROM forex_signals
+            WHERE public_id IS NULL OR symbol IS NULL OR entry_price IS NULL
+               OR entry_low IS NULL OR entry_high IS NULL OR take_profit_1 IS NULL
+               OR take_profit_2 IS NULL OR risk_reward_2 IS NULL
+               OR setup_score IS NULL OR market_session IS NULL
+               OR setup_reason IS NULL OR timeframe IS NULL
+               OR execution_timeframe IS NULL OR setup_timeframe IS NULL
+               OR bias_timeframe IS NULL OR strategy_family IS NULL
+               OR strategy_version IS NULL OR expires_at IS NULL
+               OR status IN ('active', 'wait')
+            LIMIT 1
+            """
+        ).fetchone()
+        if needs_backfill:
+            # Backfills must run before the immutable-plan guard is restored.
+            connection.execute("DROP TRIGGER IF EXISTS preserve_forex_signal_plan")
+            connection.execute(
+                """
             UPDATE forex_signals
             SET
                 public_id = COALESCE(public_id, 'legacy-' || id),
@@ -114,8 +140,8 @@ def ensure_forex_schema() -> None:
                     WHEN status IN ('active', 'wait') THEN 'EXPIRED'
                     ELSE status
                 END
-            """
-        )
+                """
+            )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS forex_scan_runs (
@@ -286,6 +312,7 @@ def ensure_forex_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_forex_evaluations_candle "
             "ON forex_candle_evaluations(symbol, timeframe, candle_open_at)"
         )
+    _FOREX_SCHEMA_READY_FOR = database_url
 
 
 def upsert_forex_candles(rows: list[dict[str, Any]]) -> int:
