@@ -52,7 +52,14 @@ def latest_expected_candle_open(
         else delay_seconds
     )
     local = delayed.astimezone(NEW_YORK)
-    if timeframe == "1H":
+    if timeframe == "15M":
+        close_local = local.replace(
+            minute=(local.minute // 15) * 15,
+            second=0,
+            microsecond=0,
+        )
+        open_local = close_local - timedelta(minutes=15)
+    elif timeframe == "1H":
         close_local = local.replace(minute=0, second=0, microsecond=0)
         open_local = close_local - timedelta(hours=1)
     elif timeframe == "4H":

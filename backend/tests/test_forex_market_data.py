@@ -9,7 +9,11 @@ import pytest
 
 from app.config import get_settings
 from app.forex.config import SUPPORTED_FOREX_PAIRS, enabled_forex_timeframes
-from app.forex.market_data import ForexMarketDataService, latest_expected_candle_open
+from app.forex.market_data import (
+    ForexMarketDataService,
+    latest_expected_candle_open,
+    seconds_until_next_candle_close,
+)
 from app.forex.providers import ForexDataProvider
 from app.forex.storage import list_forex_candles
 
@@ -24,7 +28,7 @@ class CountingProvider(ForexDataProvider):
     async def candles(self, pair, timeframe: str, limit: int = 240) -> pd.DataFrame:
         self.calls += 1
         await asyncio.sleep(0.05)
-        spacing = {"1h": 1, "4h": 4, "1d": 24}[timeframe]
+        spacing = {"15m": 0.25, "1h": 1, "4h": 4, "1d": 24}[timeframe]
         return pd.DataFrame(
             [
                 {
@@ -55,6 +59,24 @@ def candle_database(monkeypatch, tmp_path: Path):
 
 def test_active_timeframes_include_15m(candle_database):
     assert enabled_forex_timeframes() == ("15M", "1H", "4H", "1D")
+
+
+def test_15m_expected_candle_uses_quarter_hour_boundary(candle_database):
+    before_close_delay = datetime(2026, 8, 4, 1, 45, 10, tzinfo=UTC)
+    after_close_delay = datetime(2026, 8, 4, 1, 45, 20, tzinfo=UTC)
+
+    assert latest_expected_candle_open("15M", before_close_delay) == datetime(
+        2026, 8, 4, 1, 15, tzinfo=UTC
+    )
+    assert latest_expected_candle_open("15M", after_close_delay) == datetime(
+        2026, 8, 4, 1, 30, tzinfo=UTC
+    )
+
+
+def test_15m_scheduler_waits_for_next_completed_candle(candle_database):
+    now = datetime(2026, 8, 4, 1, 40, 0, tzinfo=UTC)
+
+    assert seconds_until_next_candle_close("15M", now) == pytest.approx(315.0)
 
 
 def test_repeated_and_concurrent_reads_use_one_provider_request(candle_database):
