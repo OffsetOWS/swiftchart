@@ -11113,60 +11113,6 @@ button.settings-row:active {
   font-weight: 800;
 }
 
-.graphite-forex-trade-form {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--graphite-line);
-  border-radius: 18px;
-  background: var(--graphite-panel);
-}
-
-.graphite-forex-trade-form label {
-  display: grid;
-  gap: 5px;
-}
-
-.graphite-forex-trade-form label:nth-child(3),
-.graphite-forex-trade-form > button {
-  grid-column: 1 / -1;
-}
-
-.graphite-forex-trade-form label span,
-.graphite-position-size span {
-  color: var(--graphite-muted);
-  font-size: 9px;
-  font-weight: 850;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.graphite-forex-trade-form input,
-.graphite-forex-trade-form select {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 10px;
-  color: var(--graphite-ink);
-  border: 1px solid var(--graphite-line);
-  border-radius: 12px;
-  background: var(--graphite-bg);
-}
-
-.graphite-position-size {
-  display: grid;
-  gap: 4px;
-  align-content: center;
-  padding: 8px 10px;
-  border: 1px solid var(--graphite-line);
-  border-radius: 12px;
-}
-
-.graphite-position-size strong {
-  color: var(--graphite-teal);
-  font-size: 17px;
-}
-
 @media (max-width: 350px) {
   .settings-row {
     gap: 7px;

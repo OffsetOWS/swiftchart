@@ -26,7 +26,6 @@ import {
   getForexSignal,
   getForexSignals,
   runForexScan,
-  takeForexTrade,
 } from "../lib/api.js";
 import { MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
 import { formatSessionCountdown, formatUtcClock, getForexSessionState } from "../lib/forexSessions.js";
@@ -129,20 +128,25 @@ function numbersFromDisplay(value) {
 }
 
 function paperTradeIdeaForSignal(signal) {
-  if (signal.rawIdea) return signal.rawIdea;
   const entryValues = numbersFromDisplay(signal.entry);
-  const stopLoss = numbersFromDisplay(signal.sl)[0];
-  const takeProfit = numbersFromDisplay(signal.tp)[0];
-  const takeProfit2 = numbersFromDisplay(signal.tp2)[0] ?? takeProfit;
-  const riskReward = numbersFromDisplay(signal.rr)[0];
+  const rawIdea = signal.rawIdea || {};
+  if (signal.market !== MARKET_TYPES.forex && signal.rawIdea) return signal.rawIdea;
+
+  const entryLow = signal.entryLow ?? rawIdea.entry_low ?? rawIdea.entry_price ?? entryValues[0];
+  const entryHigh = signal.entryHigh ?? rawIdea.entry_high ?? rawIdea.entry_price ?? entryValues[1] ?? entryLow;
+  const stopLoss = rawIdea.stop_loss ?? numbersFromDisplay(signal.sl)[0];
+  const takeProfit = rawIdea.take_profit_1 ?? numbersFromDisplay(signal.tp)[0];
+  const takeProfit2 = rawIdea.take_profit_2 ?? numbersFromDisplay(signal.tp2)[0] ?? takeProfit;
+  const riskReward = rawIdea.risk_reward_2 ?? rawIdea.risk_reward ?? numbersFromDisplay(signal.rr)[0];
 
   return {
+    ...rawIdea,
     symbol: signal.symbol,
     timeframe: signal.timeframe,
     exchange: signal.market === MARKET_TYPES.forex ? "forex" : signal.exchange || "hyperliquid",
     source: signal.market === MARKET_TYPES.forex ? "forex" : "mobile-demo",
     direction: /short|sell/i.test(signal.direction) ? "Short" : "Long",
-    entry_zone: [entryValues[0], entryValues[1] ?? entryValues[0]],
+    entry_zone: [entryLow, entryHigh],
     stop_loss: stopLoss,
     take_profit_1: takeProfit,
     take_profit_2: takeProfit2,
@@ -839,30 +843,10 @@ function tradeReasoning(signal, { isForex }) {
 }
 
 function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
-  const [showTakeTrade, setShowTakeTrade] = useState(false);
-  const [accountBalance, setAccountBalance] = useState("10000");
-  const [riskPercentage, setRiskPercentage] = useState("1");
-  const [executionMethod, setExecutionMethod] = useState("Copy setup");
-  useEffect(() => {
-    setShowTakeTrade(false);
-  }, [signal?.id]);
   if (!signal) return null;
   const isForex = signal.market === MARKET_TYPES.forex;
   const activeTradeSaveState = tradeSaveState?.symbol === signal.symbol ? tradeSaveState : { status: "idle" };
   const terminalForexStatus = ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(String(signal.status).toUpperCase());
-  const stopDistance = Math.abs(Number(signal.entryLow ?? String(signal.entry).split("-")[0]) - Number(signal.sl));
-  const estimatedSize = stopDistance > 0
-    ? (Number(accountBalance || 0) * Number(riskPercentage || 0) / 100) / stopDistance
-    : 0;
-
-  async function submitForexTrade(event) {
-    event.preventDefault();
-    await onTakeTrade(signal, {
-      account_balance: Number(accountBalance),
-      risk_percentage: Number(riskPercentage),
-      execution_method: executionMethod,
-    });
-  }
   return (
     <div className="graphite-detail-backdrop" role="dialog" aria-modal="true" aria-label={`${signal.symbol} trade analysis`}>
       <article className="graphite-detail">
@@ -899,44 +883,16 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
           <p>{tradeReasoning(signal, { isForex })}</p>
         </section>
 
-        {isForex && showTakeTrade ? (
-          <form className="graphite-forex-trade-form" onSubmit={submitForexTrade}>
-            <label>
-              <span>Account balance</span>
-              <input type="number" min="1" step="0.01" required value={accountBalance} onChange={(event) => setAccountBalance(event.target.value)} />
-            </label>
-            <label>
-              <span>Risk percentage</span>
-              <input type="number" min="0.01" max="20" step="0.01" required value={riskPercentage} onChange={(event) => setRiskPercentage(event.target.value)} />
-            </label>
-            <label>
-              <span>Execution method</span>
-              <select value={executionMethod} onChange={(event) => setExecutionMethod(event.target.value)}>
-                <option>Copy setup</option>
-                <option>Manual broker</option>
-                <option>MetaTrader 5</option>
-              </select>
-            </label>
-            <div className="graphite-position-size">
-              <span>Calculated position size</span>
-              <strong>{Number.isFinite(estimatedSize) ? estimatedSize.toFixed(4) : "-"}</strong>
-            </div>
-            <button type="submit" disabled={activeTradeSaveState.status === "saving" || terminalForexStatus}>
-              {activeTradeSaveState.status === "saving" ? "Preparing..." : activeTradeSaveState.status === "saved" ? "Trade prepared" : "Confirm Trade"}
-            </button>
-          </form>
-        ) : (
-          <div className="graphite-detail-actions">
-            <button type="button" className="ghost">View Chart</button>
-            <button
-              type="button"
-              disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved" || terminalForexStatus}
-              onClick={isForex ? () => setShowTakeTrade(true) : () => onTakeTrade(signal)}
-            >
-              {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
-            </button>
-          </div>
-        )}
+        <div className="graphite-detail-actions">
+          <button type="button" className="ghost">View Chart</button>
+          <button
+            type="button"
+            disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved" || terminalForexStatus}
+            onClick={() => onTakeTrade(signal)}
+          >
+            {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
+          </button>
+        </div>
         {activeTradeSaveState.status === "error" ? <p className="graphite-action-error" role="alert">{activeTradeSaveState.message}</p> : null}
       </article>
     </div>
@@ -1417,35 +1373,8 @@ export default function MobileDemo({
     }
   }
 
-  async function takeTrade(signal, payload) {
-    if (signal.market !== MARKET_TYPES.forex) {
-      return saveTradeToHistory(signal);
-    }
-    if (!auth.isAuthenticated || !auth.session?.access_token) {
-      const returnTo = `${window.location.pathname}${window.location.search}`;
-      window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo)}`);
-      return undefined;
-    }
-    setTradeSaveState({ signalId: signal.id, symbol: signal.symbol, status: "saving" });
-    try {
-      const prepared = await takeForexTrade(signal.id, payload, auth.session.access_token);
-      const saved = await createPaperTradeFromSignal(
-        paperTradeIdeaForSignal(signal),
-        auth.user.id,
-        auth.session.access_token,
-      );
-      setPaperTrades((current) => {
-        const matchingTrade = (trade) => trade.id === saved.id || (saved.signal_id && trade.signal_id === saved.signal_id);
-        return current.some(matchingTrade)
-          ? current.map((trade) => matchingTrade(trade) ? saved : trade)
-          : [saved, ...current];
-      });
-      setTradeSaveState({ signalId: signal.id, symbol: signal.symbol, status: "saved", prepared, saved });
-      return prepared;
-    } catch (error) {
-      setTradeSaveState({ signalId: signal.id, symbol: signal.symbol, status: "error", message: error.message || "Could not prepare trade." });
-      return undefined;
-    }
+  async function takeTrade(signal) {
+    return saveTradeToHistory(signal);
   }
 
   function selectTab(nextTab) {

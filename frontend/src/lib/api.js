@@ -6,8 +6,22 @@ const API_BASE = configuredApiBase && (!isLocalApiBase || import.meta.env.DEV)
     ? "http://127.0.0.1:8000"
     : "";
 
+function readableErrorText(value) {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => readableErrorText(item?.msg || item?.message || item?.detail || item))
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (value && typeof value === "object") {
+    return readableErrorText(value.message || value.detail || value.msg || value.error);
+  }
+  return "";
+}
+
 function friendlyErrorMessage(message) {
-  const text = String(message || "").trim();
+  const text = readableErrorText(message);
   if (!text) return "Request failed. Please try again.";
   if (/api\.hyperliquid\.xyz|Internal Server Error|Server error '500'|HTTPStatusError/i.test(text)) {
     return "Hyperliquid market data is temporarily unavailable. Please try again shortly.";
@@ -153,14 +167,6 @@ export function getForexSignal(signalId) {
 export function runForexScan(timeframe, accessToken) {
   return request(`/api/forex/scan?timeframe=${encodeURIComponent(timeframe)}`, {
     method: "POST",
-    accessToken,
-  });
-}
-
-export function takeForexTrade(signalId, payload, accessToken) {
-  return request(`/api/forex/signals/${encodeURIComponent(signalId)}/take-trade`, {
-    method: "POST",
-    body: JSON.stringify(payload),
     accessToken,
   });
 }
