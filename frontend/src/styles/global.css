@@ -10324,7 +10324,7 @@ button:disabled {
 
 .settings-page-header {
   position: sticky;
-  top: 72px;
+  top: 0;
   z-index: 12;
   min-height: 48px;
   display: grid;

@@ -1173,6 +1173,16 @@ export default function MobileDemo({
   }, [initialTab]);
 
   useEffect(() => {
+    if (tab !== "account" || accountView === "main") return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [accountView, tab]);
+
+  useEffect(() => {
     if (!auth.user?.id) {
       setPaperTrades([]);
       return;
