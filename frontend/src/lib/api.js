@@ -119,6 +119,11 @@ export function getPaperTrades(userId, accessToken) {
   return request(`/api/paper-trades${query}`, { accessToken });
 }
 
+export function getPaperTrade(id, userId, accessToken) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  return request(`/api/paper-trades/${id}${query}`, { accessToken });
+}
+
 export function updatePaperTrade(id, payload, userId, accessToken) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
   return request(`/api/paper-trades/${id}${query}`, {

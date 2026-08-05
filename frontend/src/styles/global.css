@@ -7887,7 +7887,8 @@ button:disabled {
   }
 
   .graphite-activity article,
-  .graphite-timeline article {
+  .graphite-timeline article,
+  .graphite-history-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -7896,8 +7897,30 @@ button:disabled {
     border-top: 1px solid var(--graphite-line);
   }
 
-  .graphite-timeline article {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+  .graphite-timeline article,
+  .graphite-history-row {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+
+  .graphite-history-row {
+    width: 100%;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    background: transparent;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    cursor: pointer;
+  }
+
+  .graphite-history-row > svg {
+    color: var(--graphite-muted);
+  }
+
+  .graphite-history-row:focus-visible {
+    outline: 2px solid var(--graphite-teal);
+    outline-offset: 3px;
   }
 
   .history-asset-visual {
@@ -7932,6 +7955,41 @@ button:disabled {
   .graphite-timeline em.loss {
     color: var(--graphite-loss);
   }
+
+  .graphite-history-result {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 13px 15px;
+    border: 1px solid var(--graphite-line);
+    border-radius: 16px;
+    background: var(--graphite-panel);
+  }
+
+  .graphite-history-result div {
+    display: grid;
+    gap: 3px;
+  }
+
+  .graphite-history-result span {
+    color: var(--graphite-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .graphite-history-result strong,
+  .graphite-history-result em {
+    color: var(--graphite-ink);
+    font-size: 17px;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .graphite-history-result.profit em { color: var(--graphite-profit); }
+  .graphite-history-result.loss em { color: var(--graphite-loss); }
 
   .graphite-scan-card {
     grid-template-columns: minmax(0, 1fr) 118px;

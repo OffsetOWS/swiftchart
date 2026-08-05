@@ -29,7 +29,7 @@ import {
 } from "../lib/api.js";
 import { MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
 import { formatSessionCountdown, formatUtcClock, getForexSessionState } from "../lib/forexSessions.js";
-import { createPaperTradeFromSignal, listPaperTrades, signalIdForIdea } from "../lib/paperTrades.js";
+import { createPaperTradeFromSignal, getPaperTradeDetail, listPaperTrades, signalIdForIdea } from "../lib/paperTrades.js";
 import { useNotifications } from "../lib/notifications.js";
 import { useAppPreferences } from "../lib/appPreferences.js";
 import AppSplashScreen from "./AppSplashScreen.jsx";
@@ -226,6 +226,56 @@ function normalizeForexSignal(signal, index = 0) {
     stoppedAt: signal?.stopped_at,
     lastMarketPrice: signal?.latest_price ?? signal?.last_market_price,
     rawIdea: signal,
+  };
+}
+
+function normalizeSavedTrade(trade) {
+  const isForex = String(trade.exchange || "").toLowerCase() === MARKET_TYPES.forex;
+  const resultR = trade.result_r ?? trade.pnl;
+  const lifecycleLabel = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
+  if (isForex) {
+    return {
+      ...normalizeForexSignal({
+        ...trade,
+        id: trade.source_signal_id || trade.signal_id || `paper-${trade.id}`,
+        pair: trade.symbol,
+        entry_low: trade.entry_low ?? trade.entry_price,
+        entry_high: trade.entry_high ?? trade.entry_price,
+        risk_reward_1: trade.risk_reward_1,
+        risk_reward_2: trade.risk_reward,
+        setup_score: trade.setup_score ?? trade.confidence,
+        market_session: trade.market_session,
+        setup_reason: trade.setup_reason || trade.reason,
+        status: trade.lifecycle_status || "OPEN",
+      }),
+      isHistory: true,
+      historyTradeId: trade.id,
+      historyResult: lifecycleLabel,
+      historyResultR: resultR,
+      takenAt: dt(trade.taken_at),
+    };
+  }
+
+  return {
+    ...normalizeIdea({
+      symbol: trade.symbol,
+      direction: /short|sell/i.test(trade.direction) ? "Short" : "Long",
+      timeframe: trade.timeframe,
+      entry_zone: [trade.entry_price, trade.entry_price],
+      stop_loss: trade.stop_loss,
+      take_profit_1: trade.take_profit_1,
+      take_profit_2: trade.take_profit_2,
+      risk_reward_ratio: trade.risk_reward,
+      setup_score: trade.setup_score ?? trade.confidence,
+      confidence_score: trade.confidence ?? trade.setup_score,
+      market_regime: trade.market_regime || trade.market_bias,
+      reason: trade.reason || "Saved SwiftChart setup.",
+    }, 0),
+    isHistory: true,
+    historyTradeId: trade.id,
+    historyResult: lifecycleLabel,
+    historyResultR: resultR,
+    takenAt: dt(trade.taken_at),
   };
 }
 
@@ -866,6 +916,16 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
           <StatTile label="R/R" value={signal.rr} tone="reward" />
         </div>
 
+        {signal.isHistory ? (
+          <section className={`graphite-history-result ${Number(signal.historyResultR) < 0 ? "loss" : Number(signal.historyResultR) > 0 ? "profit" : ""}`}>
+            <div>
+              <span>Trade result</span>
+              <strong>{signal.historyResult || "Tracking"}</strong>
+            </div>
+            <em>{signal.historyResultR === null || signal.historyResultR === undefined ? "Tracking" : `${Number(signal.historyResultR) >= 0 ? "+" : ""}${Number(signal.historyResultR).toFixed(1)}R`}</em>
+          </section>
+        ) : null}
+
         <ExecutionLadder signal={signal} />
 
         <div className="graphite-context-pills" aria-label="Trade context">
@@ -885,13 +945,15 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
 
         <div className="graphite-detail-actions">
           <button type="button" className="ghost">View Chart</button>
-          <button
-            type="button"
-            disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved" || terminalForexStatus}
-            onClick={() => onTakeTrade(signal)}
-          >
-            {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
-          </button>
+          {signal.isHistory ? <button type="button" onClick={onClose}>Close</button> : (
+            <button
+              type="button"
+              disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved" || terminalForexStatus}
+              onClick={() => onTakeTrade(signal)}
+            >
+              {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
+            </button>
+          )}
         </div>
         {activeTradeSaveState.status === "error" ? <p className="graphite-action-error" role="alert">{activeTradeSaveState.message}</p> : null}
       </article>
@@ -899,25 +961,35 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
   );
 }
 
-function HistoryScreen({ market, paperTrades = [] }) {
+function HistoryScreen({ market, paperTrades = [], onSelect }) {
   const [marketFilter, setMarketFilter] = useState(market);
   const [statusFilter, setStatusFilter] = useState("all");
   useEffect(() => {
     setMarketFilter(market);
   }, [market]);
-  const savedRows = paperTrades.map((trade) => ({
-    symbol: trade.symbol,
-    score: Math.round(Number(trade.confidence || trade.setup_score || 0)),
-    result: trade.result || "Open",
-    state: trade.status === "taken" ? "Open" : trade.status || "Open",
-    r: trade.pnl === null || trade.pnl === undefined ? "Tracking" : `${Number(trade.pnl) >= 0 ? "+" : ""}${Number(trade.pnl).toFixed(1)}R`,
-    date: trade.taken_at ? new Date(trade.taken_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "Today",
-    market: String(trade.exchange || "").toLowerCase() === "forex" ? MARKET_TYPES.forex : MARKET_TYPES.crypto,
-    id: trade.id,
-  }));
+  const savedRows = paperTrades.map((trade) => {
+    const lifecycleStatus = String(trade.lifecycle_status || "").toUpperCase();
+    const resultR = trade.result_r ?? trade.pnl;
+    const state = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
+    const displayResult = resultR === null || resultR === undefined
+      ? lifecycleStatus === "TP1_HIT" ? "TP1 Hit" : ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(lifecycleStatus) ? state : "Tracking"
+      : `${Number(resultR) >= 0 ? "+" : ""}${Number(resultR).toFixed(1)}R`;
+    return {
+      symbol: trade.symbol,
+      score: Math.round(Number(trade.confidence || trade.setup_score || 0)),
+      result: trade.lifecycle_result || trade.result || "Open",
+      filterStatus: lifecycleStatus === "STOPPED" ? "sl" : lifecycleStatus.toLowerCase(),
+      state,
+      r: displayResult,
+      date: trade.taken_at ? new Date(trade.taken_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "Today",
+      market: String(trade.exchange || "").toLowerCase() === "forex" ? MARKET_TYPES.forex : MARKET_TYPES.crypto,
+      id: trade.id,
+      trade,
+    };
+  });
   const rows = savedRows
     .filter((item) => (marketFilter === "all" ? true : item.market === marketFilter))
-    .filter((item) => statusFilter === "all" || item.result.toLowerCase().includes(statusFilter));
+    .filter((item) => statusFilter === "all" || item.filterStatus.includes(statusFilter) || item.result.toLowerCase().includes(statusFilter));
   const totalR = rows.reduce((sum, item) => {
     const value = Number.parseFloat(item.r);
     return Number.isFinite(value) ? sum + value : sum;
@@ -941,7 +1013,7 @@ function HistoryScreen({ market, paperTrades = [] }) {
         <span>Trade timeline</span>
         {rows.length === 0 ? <p>No {marketFilter} historical signals yet.</p> : null}
         {rows.map((item) => (
-          <article key={item.id || `${item.symbol}-${item.date}`}>
+          <button type="button" className="graphite-history-row" key={item.id || `${item.symbol}-${item.date}`} onClick={() => onSelect?.(item.trade)}>
             <div className="history-asset-visual">
               <InstrumentLogo symbol={item.symbol} marketType={item.market} size={34} />
               <ScoreBadge score={item.score} />
@@ -951,7 +1023,8 @@ function HistoryScreen({ market, paperTrades = [] }) {
               <p>{item.market.toUpperCase()} · {item.date} · {item.state}</p>
             </div>
             <em className={item.r.startsWith("-") ? "loss" : item.r === "Tracking" ? "" : "profit"}>{item.r}</em>
-          </article>
+            <ChevronRight size={17} aria-hidden="true" />
+          </button>
         ))}
       </section>
     </div>
@@ -1118,7 +1191,7 @@ export default function MobileDemo({
   }, [forexSignals, selectedSignal, signals]);
 
   useEffect(() => {
-    if (!selectedSignal || selectedSignal.market !== MARKET_TYPES.forex || !selectedSignal.id) return undefined;
+    if (!selectedSignal || selectedSignal.isHistory || selectedSignal.market !== MARKET_TYPES.forex || !selectedSignal.id) return undefined;
     let cancelled = false;
     const refreshPersistedSignal = () => {
       getForexSignal(selectedSignal.id)
@@ -1387,6 +1460,22 @@ export default function MobileDemo({
     return saveTradeToHistory(signal);
   }
 
+  async function openHistoryTrade(trade) {
+    setSelectedSignal(normalizeSavedTrade(trade));
+    if (!trade?.id || !auth.user?.id) return;
+    try {
+      const freshTrade = await getPaperTradeDetail(trade.id, auth.user.id, auth.session?.access_token);
+      setPaperTrades((current) => current.map((item) => item.id === freshTrade.id ? freshTrade : item));
+      setSelectedSignal(normalizeSavedTrade(freshTrade));
+    } catch (error) {
+      console.error("SwiftChart saved trade detail request failed", {
+        kind: error?.kind || "request",
+        status: error?.status,
+        message: error?.message,
+      });
+    }
+  }
+
   function selectTab(nextTab) {
     if (!auth.isAuthenticated && (nextTab === "history" || nextTab === "account")) {
       const nextUrl = new URL(window.location.href);
@@ -1528,7 +1617,7 @@ export default function MobileDemo({
           <main className="graphite-content">
             {tab === "home" ? <HomeScreen signals={preferredSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} /> : null}
             {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} /> : null}
-            {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} /> : null}
+            {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} onSelect={openHistoryTrade} /> : null}
             {tab === "account" && accountView === "main" ? (
               <AccountScreen
                 onSettings={() => navigateAccountView("settings")}

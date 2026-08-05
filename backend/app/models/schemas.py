@@ -301,6 +301,24 @@ class PaperTrade(PaperTradeCreate):
     created_at: datetime
     taken_at: datetime | None = None
     already_taken: bool = False
+    source_signal_id: str | None = None
+    lifecycle_status: str | None = None
+    lifecycle_label: str | None = None
+    lifecycle_result: str | None = None
+    result_r: float | None = None
+    latest_price: float | None = None
+    latest_price_at: datetime | None = None
+    activated_at: datetime | None = None
+    tp1_hit_at: datetime | None = None
+    tp2_hit_at: datetime | None = None
+    stopped_at: datetime | None = None
+    closed_at: datetime | None = None
+    expires_at: datetime | None = None
+    entry_low: float | None = None
+    entry_high: float | None = None
+    risk_reward_1: float | None = None
+    market_session: str | None = None
+    setup_reason: str | None = None
 
 
 class TradeHistoryRecord(BaseModel):

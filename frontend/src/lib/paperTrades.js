@@ -1,4 +1,4 @@
-import { createPaperTrade, getPaperTrades, updatePaperTrade } from "./api.js";
+import { createPaperTrade, getPaperTrade, getPaperTrades, updatePaperTrade } from "./api.js";
 import { freshnessForIdea, liquidityForIdea, signalTimestamp, statusForIdea } from "./signalQuality.js";
 
 function numberOrNull(value) {
@@ -13,6 +13,7 @@ function notesForIdea(idea, userId) {
   return JSON.stringify({
     user_id: userId,
     signal_id: signalIdForIdea(idea),
+    source_signal_id: idea.id || idea.public_id || null,
     risk_reward: numberOrNull(idea.risk_reward_ratio),
     confidence: numberOrNull(idea.confidence_score ?? idea.setup_score),
     market_bias: idea.regime_bias || idea.regime_label || idea.market_regime || idea.trend_alignment || null,
@@ -40,6 +41,7 @@ function normalizeTrade(row) {
     ...row,
     direction: String(row.direction || "").toLowerCase(),
     signal_id: row.signal_id || notes.signal_id || null,
+    source_signal_id: row.source_signal_id || notes.source_signal_id || null,
     entry_price: row.entry_price,
     take_profit: row.take_profit_1,
     risk_reward: notes.risk_reward ?? null,
@@ -109,6 +111,10 @@ export async function createPaperTradeFromSignal(idea, userId, accessToken) {
 export async function listPaperTrades(_userId, accessToken) {
   const trades = await getPaperTrades(_userId, accessToken);
   return (trades || []).map(normalizeTrade);
+}
+
+export async function getPaperTradeDetail(id, userId, accessToken) {
+  return normalizeTrade(await getPaperTrade(id, userId, accessToken));
 }
 
 export async function listPaperTradesForSignals(_userId, signalIds, accessToken) {
