@@ -7217,9 +7217,10 @@ button:disabled {
     --graphite-shadow: 0 24px 58px rgba(0,0,0,0.34);
     position: relative;
     isolation: isolate;
-    min-height: 100vh;
+    height: 100dvh;
     min-height: 100dvh;
-    overflow-x: hidden;
+    max-height: 100dvh;
+    overflow: hidden;
     color: var(--graphite-ink);
     background:
       radial-gradient(circle at 78% 2%, rgba(255,255,255,0.08), transparent 24%),
@@ -7229,9 +7230,9 @@ button:disabled {
   }
 
   .mobile-demo-page .graphite-app {
-    min-height: 100vh;
+    height: 100dvh;
     min-height: 100dvh;
-    max-height: none;
+    max-height: 100dvh;
     border-radius: 0;
     box-shadow: none;
   }
@@ -7433,10 +7434,15 @@ button:disabled {
   }
 
   .graphite-content {
+    flex: 1 1 auto;
     width: 100%;
     min-width: 0;
+    min-height: 0;
     padding: 0 14px calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 32px);
     overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .graphite-screen {
@@ -9060,7 +9066,7 @@ button:disabled {
 
   .graphite-nav {
     --active-index: 0;
-    position: fixed;
+    position: absolute;
     left: 50%;
     width: min(calc(100% - 28px), 430px);
     bottom: max(10px, env(safe-area-inset-bottom));
