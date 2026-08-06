@@ -22,3 +22,12 @@ test("mobile Take Trade and History flows remain present", () => {
   assert.match(mobileApp, /async function saveTradeToHistory/);
   assert.match(mobileApp, /async function takeTrade/);
 });
+
+test("the canonical mobile UI remains visible on desktop-width viewports", () => {
+  const styles = readFileSync(new URL("../styles/global.css", import.meta.url), "utf8");
+
+  assert.match(
+    styles,
+    /The graphite application is the canonical UI at every viewport width\. \*\/[\s\n]*@media \(min-width: 0px\) \{[\s\S]*?\.graphite-app \{[\s\S]*?display: flex;/,
+  );
+});

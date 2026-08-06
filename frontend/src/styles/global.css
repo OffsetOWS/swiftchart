@@ -7194,7 +7194,8 @@ button:disabled {
   }
 }
 
-@media (max-width: 760px) {
+/* The graphite application is the canonical UI at every viewport width. */
+@media (min-width: 0px) {
   .mobile-demo-page,
   .app-view.dark-mode {
     background: #050607;
@@ -7216,6 +7217,8 @@ button:disabled {
     --graphite-loss: #ff646d;
     --graphite-shadow: 0 24px 58px rgba(0,0,0,0.34);
     position: relative;
+    display: flex;
+    flex-direction: column;
     isolation: isolate;
     min-height: 100vh;
     min-height: 100dvh;
