@@ -10,6 +10,7 @@ from app.forex.config import SUPPORTED_FOREX_PAIRS
 from app.forex.models import ForexLimitOpportunity, ForexSignalPlan
 from app.forex.storage import (
     claim_pending_dispatches,
+    discard_dispatch,
     get_signal,
     list_signals,
     mark_dispatch_attempt,
@@ -171,6 +172,13 @@ async def dispatch_pending_forex_limits(bot, *, app_url: str | None = None) -> d
 
 
 def enqueue_forex_signal(signal: ForexSignalPlan) -> int:
+    if signal.status != "PENDING_ENTRY":
+        logger.info(
+            "Forex Telegram skipped unapproved signal_id=%s status=%s",
+            signal.id,
+            signal.status,
+        )
+        return 0
     if signal.timeframe not in TELEGRAM_FOREX_TIMEFRAMES:
         logger.info(
             "Forex Telegram skipped website-only timeframe signal_id=%s timeframe=%s",
@@ -196,7 +204,7 @@ def reconcile_active_forex_dispatches() -> int:
     if not subscribers:
         return 0
     queued = 0
-    for signal in list_signals(statuses=("PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING"), limit=200):
+    for signal in list_signals(statuses=("PENDING_ENTRY", "OPEN"), limit=200):
         if not signal.is_legacy and signal.timeframe in TELEGRAM_FOREX_TIMEFRAMES:
             queued += queue_dispatches(signal.id, subscribers)
     return queued
@@ -215,8 +223,16 @@ async def dispatch_pending_forex(bot, *, app_url: str | None = None) -> dict[str
             )
             failed += 1
             continue
+        if signal.status not in {"PENDING_ENTRY", "OPEN"}:
+            discard_dispatch(dispatch["id"])
+            logger.info(
+                "Forex Telegram suppressed unapproved signal_id=%s status=%s",
+                signal.id,
+                signal.status,
+            )
+            continue
         if signal.timeframe not in TELEGRAM_FOREX_TIMEFRAMES:
-            mark_dispatch_attempt(dispatch["id"], delivered=True)
+            discard_dispatch(dispatch["id"])
             logger.info(
                 "Forex Telegram suppressed queued website-only signal_id=%s timeframe=%s",
                 signal.id,

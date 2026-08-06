@@ -12,7 +12,6 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 from app.config import get_settings
 from app.forex.models import (
     DISPLAY_ACTIVE_FOREX_STATUSES,
-    TERMINAL_FOREX_STATUSES,
     ForexOverview,
     ForexLimitOpportunityList,
     ForexScannerDiagnostics,
@@ -273,8 +272,8 @@ async def take_forex_trade(
     signal = get_signal(signal_id)
     if signal is None:
         raise HTTPException(status_code=404, detail="Forex signal not found.")
-    if signal.status in TERMINAL_FOREX_STATUSES or signal.direction == "WAIT":
-        raise HTTPException(status_code=409, detail="This Forex signal is no longer eligible to take.")
+    if signal.status not in {"PENDING_ENTRY", "OPEN"} or signal.direction == "WAIT":
+        raise HTTPException(status_code=409, detail="This Forex signal is not a fully approved trade.")
     stop_distance = abs(signal.entry_price - signal.stop_loss)
     if stop_distance <= 0:
         raise HTTPException(status_code=409, detail="This signal has invalid risk levels.")

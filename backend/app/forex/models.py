@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 ForexDirection = Literal["LONG", "SHORT", "WAIT"]
 ForexTimeframe = Literal["15M", "1H", "4H", "1D"]
 ForexStatus = Literal[
+    "WAIT_FOR_RETEST",
     "PENDING_ENTRY",
     "OPEN",
     "TP1_HIT",
@@ -18,7 +19,7 @@ ForexStatus = Literal[
     "EXPIRED",
     "CANCELLED",
 ]
-ACTIVE_FOREX_STATUSES = ("PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING")
+ACTIVE_FOREX_STATUSES = ("WAIT_FOR_RETEST", "PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING")
 DISPLAY_ACTIVE_FOREX_STATUSES = ("PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING")
 TERMINAL_FOREX_STATUSES = ("TP1_HIT", "TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED")
 
@@ -169,6 +170,8 @@ class ForexSignalPlan(BaseModel):
     entry_trigger: str
     market_session: str
     setup_score: float = Field(ge=0, le=100)
+    trend_score: float = Field(default=0, ge=0, le=100)
+    entry_quality_score: float = Field(default=0, ge=0, le=100)
     technical_score: float | None = Field(default=None, ge=0, le=100)
     context_adjustment: float = Field(default=0, ge=-10, le=10)
     cross_market_context: ForexCrossMarketContext | None = None
@@ -185,6 +188,9 @@ class ForexSignalPlan(BaseModel):
     telegram_dispatched_at: datetime | None = None
     source_scan_id: str
     dedupe_key: str
+    retest_level: float | None = None
+    setup_candle_time: datetime | None = None
+    retest_confirmed_at: datetime | None = None
     latest_price: float | None = None
     latest_price_at: datetime | None = None
     activated_entry_price: float | None = None
