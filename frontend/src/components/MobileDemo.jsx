@@ -435,7 +435,7 @@ function HomeScreen({ signals, onSelect, onViewAll, market, forexSignals, forexO
 }
 
 const FOREX_STATUS_GROUPS = [
-  ["Active", ["OPEN", "TP1_HIT"]],
+  ["Active", ["OPEN", "TP1_HIT_TP2_RUNNING"]],
   ["Pending Entry", ["PENDING_ENTRY"]],
 ];
 
@@ -463,7 +463,7 @@ function LimitOpportunitiesSection({ opportunities = [] }) {
   const [filter, setFilter] = useState("waiting");
   const groups = {
     waiting: ["WAIT_FOR_RETEST", "PENDING_LIMIT"],
-    filled: ["ACTIVE_TRADE", "TP1_HIT", "TP2_HIT", "SL_HIT"],
+    filled: ["ACTIVE_TRADE", "TP1_HIT_TP2_RUNNING", "TP1_HIT", "TP2_HIT", "SL_HIT"],
     expired: ["EXPIRED", "MISSED_NO_RETEST", "TARGET_REACHED_BEFORE_ENTRY"],
     cancelled: ["CANCELLED", "INVALIDATED", "NEWS_CANCELLED"],
   };

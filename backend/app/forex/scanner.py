@@ -222,6 +222,7 @@ def analyze_forex_timeframe(
         "stop_loss": round(stop, precision),
         "take_profit_1": round(tp1, precision),
         "take_profit_2": round(tp2, precision),
+        "tp1_closes_position": get_settings().forex_close_entire_position_at_tp1,
         "risk_reward_1": _rr(current, stop, tp1),
         "risk_reward_2": _rr(current, stop, tp2),
         # Compatibility fields remain populated, but no cross-timeframe input is used.

@@ -47,10 +47,14 @@ test("SHORT marker moves favorably down toward TP1 and unfavorably up toward sto
 
 test("terminal and target states complete the correct ladder points", () => {
   const tp1 = executionLadderState({ ...long, status: "TP1_HIT", latest_price: 112 });
+  const partial = executionLadderState({ ...long, status: "TP1_HIT_TP2_RUNNING", latest_price: 112 });
   const tp2 = executionLadderState({ ...long, status: "TP2_HIT", latest_price: 125 });
   const stopped = executionLadderState({ ...short, status: "STOPPED", latest_price: 110 });
   assert.equal(tp1.tp1Complete, true);
   assert.equal(tp1.tp2Complete, false);
+  assert.equal(tp1.label, "TP1 reached · position closed");
+  assert.equal(partial.tp1Complete, true);
+  assert.equal(partial.label, "TP1 reached · TP2 running");
   assert.equal(tp2.markerPosition, 100);
   assert.equal(tp2.tp1Complete, true);
   assert.equal(tp2.tp2Complete, true);

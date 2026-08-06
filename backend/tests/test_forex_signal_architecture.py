@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.forex.config import SUPPORTED_FOREX_PAIRS, enabled_forex_timeframes
 from app.forex.lifecycle import next_signal_status
+from app.forex import storage as forex_storage
 from app.forex.models import TakeTradeRequest
 from app.forex.providers import (
     ForexDataProvider,
@@ -448,7 +449,16 @@ def test_signal_lifecycle_transitions_and_expiry(forex_database):
         price=tp1_price,
         checked_at=signal.created_at + timedelta(hours=1),
     )
-    assert tp1 == "TP1_HIT"
+    assert tp1 == "TP1_HIT_TP2_RUNNING"
+
+    full_close_signal = open_signal.model_copy(update={"tp1_closes_position": True})
+    full_close, _, full_close_at = next_signal_status(
+        full_close_signal,
+        price=tp1_price,
+        checked_at=signal.created_at + timedelta(hours=1),
+    )
+    assert full_close == "TP1_HIT"
+    assert full_close_at == signal.created_at + timedelta(hours=1)
 
     expired, _, expired_at = next_signal_status(
         signal,
@@ -487,10 +497,11 @@ def test_lifecycle_persists_live_price_activation_and_hit_timestamps_without_mut
     tp1_at = opened_at + timedelta(hours=1)
     tp1 = update_signal_market_state(
         signal.id,
-        status="TP1_HIT",
+        status="TP1_HIT_TP2_RUNNING",
         price=signal.take_profit_1,
         checked_at=tp1_at,
     )
+    assert tp1.status == "TP1_HIT_TP2_RUNNING"
     assert tp1.tp1_hit_at == tp1_at
     assert tp1.tp2_hit_at is None
 
@@ -513,6 +524,17 @@ def test_lifecycle_persists_live_price_activation_and_hit_timestamps_without_mut
         completed.take_profit_2,
         completed.created_at,
     ) == original_plan
+
+
+def test_schema_migrates_legacy_running_tp1_state(forex_database):
+    signal = asyncio.run(scan_forex(FakeProvider(), timeframe="1H")).created[0]
+    update_signal_market_state(
+        signal.id, status="TP1_HIT", price=signal.take_profit_1,
+        checked_at=signal.created_at + timedelta(hours=1),
+    )
+    forex_storage._FOREX_SCHEMA_READY_FOR = None
+    forex_storage.ensure_forex_schema()
+    assert get_signal(signal.id).status == "TP1_HIT_TP2_RUNNING"
 
 
 def test_lifecycle_persists_stopped_timestamp_and_closing_price(forex_database):

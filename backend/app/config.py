@@ -90,9 +90,11 @@ class Settings(BaseSettings):
     forex_fvg_min_gap_pips: float = Field(default=2.0, gt=0)
     forex_fvg_displacement_atr: float = Field(default=1.0, gt=0, le=5)
     forex_fvg_sweep_lookback: int = Field(default=20, ge=8, le=100)
+    forex_fvg_max_candles_after_sweep: int = Field(default=3, ge=1, le=3)
     forex_fvg_expiry_1h_candles: int = Field(default=8, ge=1, le=100)
     forex_fvg_expiry_4h_candles: int = Field(default=6, ge=1, le=100)
     forex_fvg_expiry_1d_candles: int = Field(default=3, ge=1, le=100)
+    forex_close_entire_position_at_tp1: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

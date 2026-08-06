@@ -56,8 +56,14 @@ async def scan_limit_opportunities(
     timeframe = timeframe.upper()
     if timeframe not in LIMIT_SCAN_TIMEFRAMES:
         raise ValueError(f"Unsupported limit-strategy timeframe: {timeframe}")
-    if not settings.forex_liquidity_fvg_limit_enabled:
+    scan_enabled = (
+        settings.forex_liquidity_fvg_limit_enabled
+        or settings.forex_liquidity_fvg_limit_shadow_mode
+    )
+    if not scan_enabled:
         return {"enabled": False, "shadow_mode": settings.forex_liquidity_fvg_limit_shadow_mode, "created": [], "reused": [], "rejected": []}
+    if settings.forex_liquidity_fvg_auto_execution_enabled and settings.forex_liquidity_fvg_limit_shadow_mode:
+        raise RuntimeError("Shadow-mode limit opportunities cannot enable broker execution.")
     if settings.forex_liquidity_fvg_auto_execution_enabled:
         raise RuntimeError("Liquidity Sweep + FVG auto execution is intentionally unsupported.")
 
@@ -89,14 +95,14 @@ async def scan_limit_opportunities(
             )
             persisted, was_created = insert_limit_opportunity(opportunity)
             (created if was_created else reused).append(persisted)
-            if was_created:
+            if was_created and not persisted.shadow_mode:
                 enqueue_forex_limit_event(persisted, "OPPORTUNITY")
         except Exception as exc:
             logger.exception("Limit strategy scan failed pair=%s timeframe=%s", pair.pair, timeframe)
             rejected.append({"pair": pair.pair, "reason": type(exc).__name__})
     return {
         "enabled": True,
-        "shadow_mode": True,
+        "shadow_mode": settings.forex_liquidity_fvg_limit_shadow_mode,
         "created": [item.model_dump(mode="json") for item in created],
         "reused": [item.model_dump(mode="json") for item in reused],
         "rejected": rejected,
@@ -111,7 +117,7 @@ async def update_limit_lifecycle(
     checked_at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
     market_data = ForexMarketDataService(provider)
     tracked = list_limit_opportunities(
-        ("WAIT_FOR_RETEST", "PENDING_LIMIT", "ACTIVE_TRADE", "TP1_HIT"), limit=500
+        ("WAIT_FOR_RETEST", "PENDING_LIMIT", "ACTIVE_TRADE", "TP1_HIT_TP2_RUNNING"), limit=500
     )
     updated = []
     for opportunity in tracked:
@@ -134,7 +140,10 @@ async def update_limit_lifecycle(
             )
             if advanced != opportunity:
                 update_limit_opportunity(advanced)
-                if advanced.opportunity_status != opportunity.opportunity_status:
+                if (
+                    advanced.opportunity_status != opportunity.opportunity_status
+                    and not advanced.shadow_mode
+                ):
                     enqueue_forex_limit_event(advanced, advanced.opportunity_status)
                 updated.append(advanced)
         except Exception:

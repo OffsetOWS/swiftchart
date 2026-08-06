@@ -11,9 +11,11 @@ from app.forex.config import SUPPORTED_FOREX_PAIRS
 from app.forex.context import (
     _adjustment,
     _desired_currency_direction,
+    _synthetic_usd_state,
     classify_external_market,
     evaluate_cross_market_context,
 )
+from app.forex import limit_service
 from app.forex.limit_lifecycle import advance_limit_opportunity
 from app.forex.limit_storage import (
     insert_limit_opportunity,
@@ -327,3 +329,174 @@ def test_pending_safety_guards_cancel_before_fill(limit_db, guard, expected):
     )
     assert updated.opportunity_status == expected
     assert updated.fill_time is None
+
+
+def earlier_sweep_candles(candles_after_sweep: int) -> pd.DataFrame:
+    frame = candles("LONG")
+    displacement_index = len(frame) - 2
+    sweep_index = displacement_index - candles_after_sweep
+    frame.loc[len(frame) - 3, ["open", "high", "low", "close"]] = [1.0995, 1.1000, 1.0993, 1.0998]
+    frame.loc[sweep_index, ["open", "high", "low", "close"]] = [1.0990, 1.1000, 1.0987, 1.0997]
+    return frame
+
+
+@pytest.mark.parametrize("candles_after_sweep", [2, 3])
+def test_sweep_can_precede_fvg_candle_one(limit_db, candles_after_sweep):
+    result, reason = detect_liquidity_sweep_fvg_limit(
+        SUPPORTED_FOREX_PAIRS["EURUSD"], earlier_sweep_candles(candles_after_sweep),
+        timeframe="1H", htf_bias="BULLISH", context=context(), now=NOW,
+    )
+    assert reason == "Qualified shadow-mode limit opportunity."
+    assert result.order_type == "BUY_LIMIT"
+    assert result.sweep_candle_time == earlier_sweep_candles(candles_after_sweep).iloc[-2-candles_after_sweep]["timestamp"]
+
+
+def test_sweep_outside_configured_sequence_window_is_rejected(limit_db):
+    frame = earlier_sweep_candles(4)
+    result, reason = detect_liquidity_sweep_fvg_limit(
+        SUPPORTED_FOREX_PAIRS["EURUSD"], frame, timeframe="1H",
+        htf_bias="BULLISH", context=context(), now=NOW,
+    )
+    assert result is None
+    assert "within 3 completed candles" in reason
+
+
+def synthetic_frame(pair: str, *, strength: float = 0.15) -> pd.DataFrame:
+    usd_sign = -1 if pair.endswith("USD") else 1
+    step = strength * usd_sign
+    rows = []
+    for index in range(70):
+        price = 100 + index * step
+        rows.append({
+            "timestamp": NOW - timedelta(hours=69-index), "open": price - step / 2,
+            "high": price + 0.3, "low": price - 0.3, "close": price,
+            "volume": 1, "complete": True,
+        })
+    return pd.DataFrame(rows)
+
+
+class SyntheticUsdData:
+    async def completed_candles(self, pair, timeframe, **kwargs):
+        if pair.pair == "DXY":
+            raise RuntimeError("provider DXY unavailable")
+        if pair.pair == "WTI":
+            raise RuntimeError("WTI not needed")
+        return synthetic_frame(pair.pair)
+
+
+class ProviderDxyData:
+    async def completed_candles(self, pair, timeframe, **kwargs):
+        return market_frame("up")
+
+
+def test_provider_dxy_remains_preferred_when_available(monkeypatch):
+    monkeypatch.setenv("FOREX_DXY_CONTEXT_ENABLED", "true")
+    get_settings.cache_clear()
+    result = asyncio.run(
+        evaluate_cross_market_context("EURUSD", "SHORT", "1H", ProviderDxyData(), now=NOW)
+    )
+    assert result.usd_context.source == "PROVIDER_DXY"
+    assert "Synthetic USD fallback" not in result.usd_context.explanation
+
+
+def test_synthetic_usd_fallback_is_used_and_inverts_quote_pairs(monkeypatch):
+    monkeypatch.setenv("FOREX_DXY_CONTEXT_ENABLED", "true")
+    get_settings.cache_clear()
+    result = asyncio.run(
+        evaluate_cross_market_context("EURUSD", "LONG", "1H", SyntheticUsdData(), now=NOW)
+    )
+    assert result.usd_context.source == "SYNTHETIC_USD_BASKET"
+    assert result.usd_context.direction == "BULLISH"
+    assert result.usd_context.alignment_status in {"CONFLICT", "STRONG_CONFLICT"}
+    assert result.total_adjustment < 0
+    assert "Synthetic USD fallback used" in result.usd_context.explanation
+
+
+class OnePairDominatesData:
+    async def completed_candles(self, pair, timeframe, **kwargs):
+        return synthetic_frame(pair.pair, strength=10 if pair.pair == "USDJPY" else 0)
+
+
+def test_synthetic_usd_caps_each_equal_weight_component():
+    state, direction, strength, _, contributions = asyncio.run(
+        _synthetic_usd_state(OnePairDominatesData(), timeframe="1H", now=NOW)
+    )
+    assert contributions["USDJPY"] == 1
+    assert state == "NEUTRAL"
+    assert direction == "NEUTRAL"
+    assert strength == pytest.approx(100 / 7, abs=0.1)
+
+
+class IncompleteSyntheticUsdData:
+    async def completed_candles(self, pair, timeframe, **kwargs):
+        if pair.pair == "DXY":
+            raise RuntimeError("provider DXY unavailable")
+        frame = synthetic_frame(pair.pair)
+        frame.loc[frame.index[-1], "complete"] = False
+        return frame
+
+
+def test_incomplete_synthetic_usd_components_are_not_used(monkeypatch):
+    monkeypatch.setenv("FOREX_DXY_CONTEXT_ENABLED", "true")
+    get_settings.cache_clear()
+    result = asyncio.run(
+        evaluate_cross_market_context("EURUSD", "LONG", "1H", IncompleteSyntheticUsdData(), now=NOW)
+    )
+    assert result.usd_context.source == "UNAVAILABLE"
+    assert result.usd_context.confidence_adjustment == 0
+
+
+def test_shadow_mode_scans_persists_and_suppresses_alerts(limit_db, monkeypatch):
+    monkeypatch.setenv("FOREX_LIQUIDITY_FVG_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("FOREX_LIQUIDITY_FVG_LIMIT_SHADOW_MODE", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(limit_service, "SUPPORTED_FOREX_PAIRS", {"EURUSD": SUPPORTED_FOREX_PAIRS["EURUSD"]})
+
+    async def completed_candles(*args, **kwargs):
+        return candles("LONG")
+
+    monkeypatch.setattr(limit_service.ForexMarketDataService, "completed_candles", completed_candles)
+    alerts = []
+    monkeypatch.setattr(limit_service, "enqueue_forex_limit_event", lambda *args: alerts.append(args))
+    result = asyncio.run(limit_service.scan_limit_opportunities(timeframe="1H", now=NOW))
+    assert result["enabled"] is True
+    assert result["shadow_mode"] is True
+    assert len(result["created"]) == 1
+    stored = list_limit_opportunities()[0]
+    assert len(list_limit_opportunities()) == 1
+    assert alerts == []
+
+    async def fill_candle(*args, **kwargs):
+        return pd.DataFrame([{
+            "timestamp": NOW + timedelta(hours=1), "open": stored.current_price,
+            "high": stored.current_price, "low": stored.entry_price,
+            "close": stored.entry_price, "volume": 1, "complete": True,
+        }])
+
+    monkeypatch.setattr(limit_service.ForexMarketDataService, "completed_candles", fill_candle)
+    lifecycle_updates = asyncio.run(limit_service.update_limit_lifecycle(now=NOW + timedelta(hours=1)))
+    assert lifecycle_updates[0].opportunity_status == "ACTIVE_TRADE"
+    assert list_limit_opportunities()[0].opportunity_status == "ACTIVE_TRADE"
+    assert alerts == []
+
+
+def test_tp1_partial_position_remains_active_and_full_close_is_terminal(limit_db):
+    item, _ = opportunity("LONG")
+    filled = advance_limit_opportunity(
+        item, candle_high=item.current_price, candle_low=item.entry_price,
+        candle_close=item.entry_price, candle_time=NOW + timedelta(hours=1),
+    )
+    partial = advance_limit_opportunity(
+        filled, candle_high=item.take_profit_1, candle_low=item.entry_price,
+        candle_close=item.take_profit_1, candle_time=NOW + timedelta(hours=2),
+    )
+    assert partial.opportunity_status == "TP1_HIT_TP2_RUNNING"
+    assert partial.closed_at is None
+
+    full_close = advance_limit_opportunity(
+        filled.model_copy(update={"tp1_closes_position": True}),
+        candle_high=item.take_profit_1, candle_low=item.entry_price,
+        candle_close=item.take_profit_1, candle_time=NOW + timedelta(hours=2),
+    )
+    assert full_close.opportunity_status == "TP1_HIT"
+    assert full_close.closed_at is not None

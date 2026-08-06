@@ -20,6 +20,7 @@ FOREX_COLUMNS: dict[str, str] = {
     "entry_high": "REAL",
     "take_profit_1": "REAL",
     "take_profit_2": "REAL",
+    "tp1_closes_position": "INTEGER NOT NULL DEFAULT 0",
     "risk_reward_1": "REAL",
     "risk_reward_2": "REAL",
     "timeframe": "TEXT",
@@ -96,6 +97,17 @@ def ensure_forex_schema() -> None:
         for column, definition in FOREX_COLUMNS.items():
             if column not in existing:
                 connection.execute(f"ALTER TABLE forex_signals ADD COLUMN {column} {definition}")
+        # Before this explicit state existed, TP1_HIT was still lifecycle-tracked
+        # toward TP2. Preserve that open remainder instead of treating it as closed.
+        connection.execute(
+            """
+            UPDATE forex_signals
+            SET status = 'TP1_HIT_TP2_RUNNING'
+            WHERE status = 'TP1_HIT'
+              AND closed_at IS NULL
+              AND COALESCE(tp1_closes_position, 0) = 0
+            """
+        )
         needs_backfill = connection.execute(
             """
             SELECT 1 FROM forex_signals
@@ -266,12 +278,13 @@ def ensure_forex_schema() -> None:
             "ON forex_signals(timeframe, status, created_at)"
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_signal_dedupe ON forex_signals(dedupe_key, status)")
+        connection.execute("DROP INDEX IF EXISTS idx_forex_signal_active_dedupe")
         connection.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_forex_signal_active_dedupe
+            CREATE UNIQUE INDEX idx_forex_signal_active_dedupe
             ON forex_signals(dedupe_key)
             WHERE dedupe_key IS NOT NULL
-              AND status IN ('PENDING_ENTRY', 'OPEN', 'TP1_HIT')
+              AND status IN ('PENDING_ENTRY', 'OPEN', 'TP1_HIT_TP2_RUNNING')
             """
         )
         connection.execute(
@@ -298,7 +311,8 @@ def ensure_forex_schema() -> None:
             """
             CREATE TRIGGER IF NOT EXISTS preserve_forex_signal_plan
             BEFORE UPDATE OF timeframe, direction, entry_price, entry_low, entry_high,
-                stop_loss, take_profit_1, take_profit_2, risk_reward_1, risk_reward_2,
+                stop_loss, take_profit_1, take_profit_2, tp1_closes_position,
+                risk_reward_1, risk_reward_2,
                 strategy_family, strategy_version, setup_score, market_regime
             ON forex_signals
             BEGIN
@@ -613,6 +627,7 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         stop_loss=float(row["stop_loss"] or 0),
         take_profit_1=float(row["take_profit_1"] or 0),
         take_profit_2=float(row["take_profit_2"] or 0),
+        tp1_closes_position=bool(row["tp1_closes_position"]),
         risk_reward_1=float(row["risk_reward_1"] or 0),
         risk_reward_2=float(row["risk_reward_2"] or 0),
         timeframe=(row["timeframe"] or row["execution_timeframe"] or "15M").upper(),
@@ -710,7 +725,7 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
             INSERT INTO forex_signals (
                 public_id, market_type, pair, symbol, direction, score, grade, session,
                 entry, entry_type, entry_price, entry_low, entry_high, stop_loss, tp1, tp2,
-                take_profit_1, take_profit_2, rr, risk_reward_1, risk_reward_2,
+                take_profit_1, take_profit_2, tp1_closes_position, rr, risk_reward_1, risk_reward_2,
                 timeframe,
                 news_risk, spread_status, reason, status, created_at,
                 execution_timeframe, setup_timeframe, bias_timeframe, timeframe_alignment,
@@ -722,7 +737,7 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
             VALUES (
                 :id, 'forex', :symbol, :symbol, :direction, :setup_score, :grade, :market_session,
                 :entry_price, :entry_type, :entry_price, :entry_low, :entry_high, :stop_loss,
-                :take_profit_1, :take_profit_2, :take_profit_1, :take_profit_2, :risk_reward_2,
+                :take_profit_1, :take_profit_2, :take_profit_1, :take_profit_2, :tp1_closes_position, :risk_reward_2,
                 :risk_reward_1, :risk_reward_2, :timeframe, :news_risk, :spread_status, :setup_reason,
                 :status, :created_at, :execution_timeframe, :setup_timeframe, :bias_timeframe,
                 :timeframe_alignment, :htf_bias, :setup_structure, :entry_trigger,
@@ -795,7 +810,7 @@ def update_signal_market_state(
                 ),
                 tp1_hit_at = COALESCE(
                     tp1_hit_at,
-                    CASE WHEN ? IN ('TP1_HIT', 'TP2_HIT') THEN ? ELSE NULL END
+                    CASE WHEN ? IN ('TP1_HIT', 'TP1_HIT_TP2_RUNNING', 'TP2_HIT') THEN ? ELSE NULL END
                 ),
                 tp2_hit_at = COALESCE(
                     tp2_hit_at,

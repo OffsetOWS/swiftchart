@@ -7,8 +7,8 @@ from app.forex.models import ForexLimitOpportunity
 from app.utils.database import get_connection
 
 
-TERMINAL_FILLED_STATUSES = frozenset({"TP2_HIT", "SL_HIT"})
-FILLED_STATUSES = frozenset({"ACTIVE_TRADE", "TP1_HIT", *TERMINAL_FILLED_STATUSES})
+TERMINAL_FILLED_STATUSES = frozenset({"TP1_HIT", "TP2_HIT", "SL_HIT"})
+FILLED_STATUSES = frozenset({"ACTIVE_TRADE", "TP1_HIT_TP2_RUNNING", *TERMINAL_FILLED_STATUSES})
 CANCELLED_STATUSES = frozenset(
     {"CANCELLED", "INVALIDATED", "NEWS_CANCELLED", "TARGET_REACHED_BEFORE_ENTRY"}
 )
@@ -292,7 +292,7 @@ def limit_strategy_stats() -> dict:
         "average_time_to_fill_hours": round(average(fill_seconds) / 3600, 2),
         "average_mae_pips": average([item.mae_pips for item in filled_items]),
         "average_mfe_pips": average([item.mfe_pips for item in filled_items]),
-        "tp1_rate": rate(counts.get("TP1_HIT", 0) + counts.get("TP2_HIT", 0), filled),
+        "tp1_rate": rate(counts.get("TP1_HIT", 0) + counts.get("TP1_HIT_TP2_RUNNING", 0) + counts.get("TP2_HIT", 0), filled),
         "tp2_rate": rate(counts.get("TP2_HIT", 0), filled),
         "sl_rate": rate(counts.get("SL_HIT", 0), filled),
         "expired": expired,

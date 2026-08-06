@@ -12,14 +12,15 @@ ForexStatus = Literal[
     "PENDING_ENTRY",
     "OPEN",
     "TP1_HIT",
+    "TP1_HIT_TP2_RUNNING",
     "TP2_HIT",
     "STOPPED",
     "EXPIRED",
     "CANCELLED",
 ]
-ACTIVE_FOREX_STATUSES = ("PENDING_ENTRY", "OPEN", "TP1_HIT")
-DISPLAY_ACTIVE_FOREX_STATUSES = ("PENDING_ENTRY", "OPEN")
-TERMINAL_FOREX_STATUSES = ("TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED")
+ACTIVE_FOREX_STATUSES = ("PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING")
+DISPLAY_ACTIVE_FOREX_STATUSES = ("PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING")
+TERMINAL_FOREX_STATUSES = ("TP1_HIT", "TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED")
 
 CrossMarketState = Literal[
     "STRONG_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "STRONG_BEARISH", "UNAVAILABLE"
@@ -29,7 +30,7 @@ OilMarketState = Literal[
 ]
 LimitOrderType = Literal["BUY_LIMIT", "SELL_LIMIT"]
 LimitOpportunityStatus = Literal[
-    "WAIT_FOR_RETEST", "PENDING_LIMIT", "ACTIVE_TRADE", "TP1_HIT", "TP2_HIT", "SL_HIT",
+    "WAIT_FOR_RETEST", "PENDING_LIMIT", "ACTIVE_TRADE", "TP1_HIT", "TP1_HIT_TP2_RUNNING", "TP2_HIT", "SL_HIT",
     "EXPIRED", "CANCELLED", "INVALIDATED", "MISSED_NO_RETEST",
     "TARGET_REACHED_BEFORE_ENTRY", "NEWS_CANCELLED",
 ]
@@ -37,6 +38,7 @@ LimitOpportunityStatus = Literal[
 
 class MarketContextComponent(BaseModel):
     instrument: Literal["DXY", "WTI"]
+    source: Literal["PROVIDER_DXY", "SYNTHETIC_USD_BASKET", "PROVIDER_WTI", "UNAVAILABLE"] = "UNAVAILABLE"
     state: str
     direction: Literal["BULLISH", "BEARISH", "NEUTRAL", "UNAVAILABLE"]
     strength_score: float = Field(ge=0, le=100)
@@ -100,6 +102,7 @@ class ForexLimitOpportunity(BaseModel):
     stop_loss: float
     take_profit_1: float
     take_profit_2: float
+    tp1_closes_position: bool = False
     risk_pips: float
     reward_1_pips: float
     reward_2_pips: float
@@ -153,6 +156,7 @@ class ForexSignalPlan(BaseModel):
     stop_loss: float
     take_profit_1: float
     take_profit_2: float
+    tp1_closes_position: bool = False
     risk_reward_1: float
     risk_reward_2: float
     timeframe: ForexTimeframe = "1H"

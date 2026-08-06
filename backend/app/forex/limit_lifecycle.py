@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from app.forex.models import ForexLimitOpportunity
 
 TERMINAL_LIMIT_STATUSES = frozenset(
-    {"TP2_HIT", "SL_HIT", "EXPIRED", "CANCELLED", "INVALIDATED", "MISSED_NO_RETEST", "TARGET_REACHED_BEFORE_ENTRY", "NEWS_CANCELLED"}
+    {"TP1_HIT", "TP2_HIT", "SL_HIT", "EXPIRED", "CANCELLED", "INVALIDATED", "MISSED_NO_RETEST", "TARGET_REACHED_BEFORE_ENTRY", "NEWS_CANCELLED"}
 )
 PENDING_LIMIT_STATUSES = frozenset({"WAIT_FOR_RETEST", "PENDING_LIMIT"})
 
@@ -67,7 +67,7 @@ def advance_limit_opportunity(
                 )
             elif filled:
                 next_status, fill_time = "ACTIVE_TRADE", at
-    elif opportunity.opportunity_status in {"ACTIVE_TRADE", "TP1_HIT"}:
+    elif opportunity.opportunity_status in {"ACTIVE_TRADE", "TP1_HIT_TP2_RUNNING"}:
         long_side = opportunity.direction == "LONG"
         pip_size = abs(opportunity.entry_price - opportunity.stop_loss) / opportunity.risk_pips
         favorable = (
@@ -90,7 +90,10 @@ def advance_limit_opportunity(
         elif tp2:
             next_status, closed_at, pnl_r = "TP2_HIT", at, opportunity.risk_reward_2
         elif tp1:
-            next_status = "TP1_HIT"
+            if opportunity.tp1_closes_position:
+                next_status, closed_at, pnl_r = "TP1_HIT", at, opportunity.risk_reward_1
+            else:
+                next_status = "TP1_HIT_TP2_RUNNING"
 
     status_changed = next_status != opportunity.opportunity_status
     metrics_changed = (

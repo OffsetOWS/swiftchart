@@ -196,7 +196,7 @@ def reconcile_active_forex_dispatches() -> int:
     if not subscribers:
         return 0
     queued = 0
-    for signal in list_signals(statuses=("PENDING_ENTRY", "OPEN", "TP1_HIT"), limit=200):
+    for signal in list_signals(statuses=("PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING"), limit=200):
         if not signal.is_legacy and signal.timeframe in TELEGRAM_FOREX_TIMEFRAMES:
             queued += queue_dispatches(signal.id, subscribers)
     return queued

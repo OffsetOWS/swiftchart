@@ -22,7 +22,8 @@ test("keeps only live and pending Forex opportunities in the app feed", () => {
   const signals = [
     { id: "pending", status: "PENDING_ENTRY" },
     { id: "open", status: "OPEN" },
-    { id: "partial", status: "TP1_HIT" },
+    { id: "partial", status: "TP1_HIT_TP2_RUNNING" },
+    { id: "closed-at-tp1", status: "TP1_HIT" },
     { id: "won", status: "TP2_HIT" },
     { id: "lost", status: "STOPPED" },
     { id: "expired", status: "EXPIRED" },
@@ -30,7 +31,7 @@ test("keeps only live and pending Forex opportunities in the app feed", () => {
 
   assert.deepEqual(
     activeForexSignals(signals).map((signal) => signal.id),
-    ["pending", "open"],
+    ["pending", "open", "partial"],
   );
 });
 

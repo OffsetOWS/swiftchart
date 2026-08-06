@@ -34,13 +34,15 @@ def next_signal_status(
         tp1_hit = price <= signal.take_profit_1
         tp2_hit = price <= signal.take_profit_2
 
-    if signal.status in {"OPEN", "TP1_HIT"}:
+    if signal.status in {"OPEN", "TP1_HIT_TP2_RUNNING"}:
         if stopped:
             return "STOPPED", None, checked_at
         if tp2_hit:
             return "TP2_HIT", None, checked_at
         if tp1_hit:
-            return "TP1_HIT", None, None
+            if signal.tp1_closes_position:
+                return "TP1_HIT", None, checked_at
+            return "TP1_HIT_TP2_RUNNING", None, None
     return signal.status, None, None
 
 
@@ -50,7 +52,7 @@ async def update_forex_lifecycle(provider: ForexDataProvider | None = None) -> l
     if not forex_market_is_open(checked_at):
         return []
     updated: list[ForexSignalPlan] = []
-    for signal in list_signals(("PENDING_ENTRY", "OPEN", "TP1_HIT"), limit=200):
+    for signal in list_signals(("PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING"), limit=200):
         pair = SUPPORTED_FOREX_PAIRS.get(signal.symbol)
         if not pair:
             continue

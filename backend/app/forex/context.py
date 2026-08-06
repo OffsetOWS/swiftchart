@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import asyncio
 import logging
 
 import pandas as pd
 
 from app.config import get_settings
-from app.forex.config import CROSS_MARKET_INSTRUMENTS
+from app.forex.config import CROSS_MARKET_INSTRUMENTS, SUPPORTED_FOREX_PAIRS
 from app.forex.market_data import ForexMarketDataService, TIMEFRAME_SECONDS
 from app.forex.models import ForexCrossMarketContext, MarketContextComponent
 
@@ -14,11 +15,14 @@ logger = logging.getLogger(__name__)
 
 PRIMARY_TIMEFRAMES = {"15M": "1H", "1H": "1H", "4H": "4H", "1D": "1D"}
 HIGHER_TIMEFRAMES = {"15M": "4H", "1H": "4H", "4H": "1D", "1D": None}
+SYNTHETIC_USD_PAIRS = ("EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDJPY", "USDCHF", "USDCAD")
+SYNTHETIC_USD_MIN_COMPONENTS = 4
+SYNTHETIC_USD_COMPONENT_CAP_ATR = 2.5
 
 
 def _unavailable(instrument: str, timeframe: str, reason: str) -> MarketContextComponent:
     return MarketContextComponent(
-        instrument=instrument,
+        instrument=instrument, source="UNAVAILABLE",
         state="UNAVAILABLE",
         direction="UNAVAILABLE",
         strength_score=0,
@@ -142,6 +146,128 @@ def _adjustment(
     return (strong_negative if strong else normal_negative), ("STRONG_CONFLICT" if strong else "CONFLICT")
 
 
+def _synthetic_usd_contribution(
+    frame: pd.DataFrame,
+    *,
+    pair: str,
+    timeframe: str,
+    now: datetime,
+) -> tuple[float, datetime]:
+    """Return an equal-weight USD move in [-1, 1], normalized and capped by ATR."""
+    if frame is None or len(frame) < 20:
+        raise ValueError(f"Insufficient completed candles for {pair}.")
+    if "complete" in frame and not bool(frame["complete"].astype(bool).all()):
+        raise ValueError(f"Incomplete synthetic USD candles for {pair}.")
+    ordered = frame.sort_values("timestamp").reset_index(drop=True)
+    candle_time = pd.Timestamp(ordered.iloc[-1]["timestamp"]).to_pydatetime()
+    candle_time = candle_time if candle_time.tzinfo else candle_time.replace(tzinfo=UTC)
+    candle_time = candle_time.astimezone(UTC)
+    stale_after = timedelta(
+        seconds=TIMEFRAME_SECONDS[timeframe] * get_settings().forex_cross_market_stale_multiplier
+    )
+    if now - candle_time > stale_after:
+        raise ValueError(f"Stale synthetic USD candles for {pair}.")
+    atr = _atr(ordered)
+    normalized_move = (float(ordered["close"].iloc[-1]) - float(ordered["close"].iloc[-6])) / atr
+    usd_sign = -1.0 if pair.endswith("USD") else 1.0
+    capped = max(-SYNTHETIC_USD_COMPONENT_CAP_ATR, min(SYNTHETIC_USD_COMPONENT_CAP_ATR, normalized_move * usd_sign))
+    return capped / SYNTHETIC_USD_COMPONENT_CAP_ATR, candle_time
+
+
+async def _synthetic_usd_state(
+    market_data: ForexMarketDataService,
+    *,
+    timeframe: str,
+    now: datetime,
+) -> tuple[str, str, float, datetime, dict[str, float]]:
+    frames = await asyncio.gather(
+        *[
+            market_data.completed_candles(
+                SUPPORTED_FOREX_PAIRS[pair], timeframe, limit=80, now=now
+            )
+            for pair in SYNTHETIC_USD_PAIRS
+        ],
+        return_exceptions=True,
+    )
+    contributions: dict[str, float] = {}
+    candle_times: list[datetime] = []
+    for pair, frame in zip(SYNTHETIC_USD_PAIRS, frames, strict=True):
+        if isinstance(frame, Exception):
+            continue
+        try:
+            contribution, candle_time = _synthetic_usd_contribution(
+                frame, pair=pair, timeframe=timeframe, now=now
+            )
+        except (TypeError, ValueError):
+            continue
+        contributions[pair] = contribution
+        candle_times.append(candle_time)
+    if len(contributions) < SYNTHETIC_USD_MIN_COMPONENTS:
+        raise ValueError(
+            f"Synthetic USD needs {SYNTHETIC_USD_MIN_COMPONENTS} fresh components; got {len(contributions)}."
+        )
+    signed_score = max(-100.0, min(100.0, sum(contributions.values()) / len(contributions) * 100))
+    if signed_score >= 65:
+        state, direction = "STRONG_BULLISH", "BULLISH"
+    elif signed_score >= 25:
+        state, direction = "BULLISH", "BULLISH"
+    elif signed_score <= -65:
+        state, direction = "STRONG_BEARISH", "BEARISH"
+    elif signed_score <= -25:
+        state, direction = "BEARISH", "BEARISH"
+    else:
+        state, direction = "NEUTRAL", "NEUTRAL"
+    return state, direction, abs(round(signed_score, 1)), min(candle_times), contributions
+
+
+async def _synthetic_usd_component(
+    market_data: ForexMarketDataService,
+    *,
+    scan_timeframe: str,
+    desired_direction: int,
+    now: datetime,
+) -> MarketContextComponent:
+    primary_tf = PRIMARY_TIMEFRAMES[scan_timeframe]
+    higher_tf = HIGHER_TIMEFRAMES[scan_timeframe]
+    try:
+        state, direction, strength, candle_time, contributions = await _synthetic_usd_state(
+            market_data, timeframe=primary_tf, now=now
+        )
+        higher_state = None
+        higher_time = None
+        if higher_tf:
+            higher_state, higher_direction, _, higher_time, _ = await _synthetic_usd_state(
+                market_data, timeframe=higher_tf, now=now
+            )
+            if direction != "NEUTRAL" and higher_direction == direction:
+                strength = min(100, strength + 10)
+                if not state.startswith("STRONG_") and strength >= 65:
+                    state = f"STRONG_{direction}"
+        adjustment, alignment = _adjustment(
+            market_direction=direction, market_state=state, desired_direction=desired_direction,
+            strong_positive=6, normal_positive=3, normal_negative=-4, strong_negative=-7,
+        )
+        component_text = ", ".join(f"{pair}={value:+.2f}" for pair, value in contributions.items())
+        explanation = (
+            "Synthetic USD fallback used because provider DXY was unavailable. "
+            f"Equal-weight mean of five-candle ATR-normalized USD moves, each capped at ±{SYNTHETIC_USD_COMPONENT_CAP_ATR:g} ATR: "
+            f"{component_text}."
+        )
+        if higher_state:
+            explanation += f" Higher-timeframe synthetic state is {higher_state.replace('_', ' ').title()}."
+        return MarketContextComponent(
+            instrument="DXY", source="SYNTHETIC_USD_BASKET", state=state,
+            direction=direction, strength_score=strength, primary_timeframe=primary_tf,
+            higher_timeframe_state=higher_state, alignment_status=alignment,
+            confidence_adjustment=adjustment, explanation=explanation,
+            candle_timestamp=candle_time, higher_timeframe_candle_timestamp=higher_time,
+            stale=False,
+        )
+    except Exception as exc:
+        logger.warning("Synthetic USD context unavailable error=%s", type(exc).__name__)
+        return _unavailable("DXY", primary_tf, "Provider DXY and synthetic USD basket are unavailable; technical setup is unchanged.")
+
+
 async def _component(
     market_data: ForexMarketDataService,
     *,
@@ -188,7 +314,9 @@ async def _component(
                 strong_positive=4, normal_positive=2, normal_negative=-3, strong_negative=-5,
             )
         return MarketContextComponent(
-            instrument=instrument, state=state, direction=direction, strength_score=strength,
+            instrument=instrument,
+            source="PROVIDER_DXY" if instrument == "DXY" else "PROVIDER_WTI",
+            state=state, direction=direction, strength_score=strength,
             primary_timeframe=primary_tf, higher_timeframe_state=higher_state,
             alignment_status=alignment, confidence_adjustment=adjustment,
             explanation=explanation, candle_timestamp=candle_time,
@@ -216,6 +344,12 @@ async def evaluate_cross_market_context(
             market_data, instrument="DXY", scan_timeframe=timeframe,
             desired_direction=_desired_currency_direction(pair, trade_direction, "USD"), now=evaluated_at,
         )
+        if usd.state == "UNAVAILABLE":
+            usd = await _synthetic_usd_component(
+                market_data, scan_timeframe=timeframe,
+                desired_direction=_desired_currency_direction(pair, trade_direction, "USD"),
+                now=evaluated_at,
+            )
     if "CAD" in pair and settings.forex_oil_context_enabled:
         oil = await _component(
             market_data, instrument="WTI", scan_timeframe=timeframe,

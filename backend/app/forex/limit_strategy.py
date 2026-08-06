@@ -117,25 +117,42 @@ def detect_liquidity_sweep_fvg_limit(
     if htf_bias.upper() not in allowed_biases[direction]:
         return None, "Higher-timeframe bias does not allow this limit direction."
 
-    sweep_index = len(frame) - 3
-    swing_window = frame.iloc[
-        max(0, sweep_index - settings.forex_fvg_sweep_lookback) : max(0, sweep_index - 2)
-    ]
-    if len(swing_window) < 5:
-        return None, "No meaningful confirmed swing preceded displacement."
-    internal = frame.iloc[max(0, sweep_index - 6) : sweep_index + 1]
-    if direction == "LONG":
-        swing_level = float(swing_window["low"].min())
-        swept = float(c1["low"]) < swing_level and float(c1["close"]) > swing_level
-        structure_broken = float(displacement["close"]) > float(internal["high"].max())
-        sweep_extreme = float(c1["low"])
-    else:
-        swing_level = float(swing_window["high"].max())
-        swept = float(c1["high"]) > swing_level and float(c1["close"]) < swing_level
-        structure_broken = float(displacement["close"]) < float(internal["low"].min())
-        sweep_extreme = float(c1["high"])
-    if not swept:
-        return None, "No confirmed liquidity sweep and reclaim preceded the FVG."
+    displacement_index = len(frame) - 2
+    sweep_match: tuple[int, float, float, datetime] | None = None
+    earliest_sweep = max(0, displacement_index - settings.forex_fvg_max_candles_after_sweep)
+    for sweep_index in range(displacement_index - 1, earliest_sweep - 1, -1):
+        swing_window = frame.iloc[
+            max(0, sweep_index - settings.forex_fvg_sweep_lookback) : max(0, sweep_index - 2)
+        ]
+        if len(swing_window) < 5:
+            continue
+        sweep_candle = frame.iloc[sweep_index]
+        reclaim_candles = frame.iloc[sweep_index:displacement_index]
+        if direction == "LONG":
+            swing_level = float(swing_window["low"].min())
+            swept = float(sweep_candle["low"]) < swing_level
+            reclaimed = bool((reclaim_candles["close"].astype(float) > swing_level).any())
+            sweep_extreme = float(sweep_candle["low"])
+        else:
+            swing_level = float(swing_window["high"].max())
+            swept = float(sweep_candle["high"]) > swing_level
+            reclaimed = bool((reclaim_candles["close"].astype(float) < swing_level).any())
+            sweep_extreme = float(sweep_candle["high"])
+        if swept and reclaimed:
+            sweep_match = (sweep_index, swing_level, sweep_extreme, _utc(sweep_candle["timestamp"]))
+            break
+    if sweep_match is None:
+        return None, (
+            "No confirmed liquidity sweep and reclaim occurred within "
+            f"{settings.forex_fvg_max_candles_after_sweep} completed candles before displacement."
+        )
+    sweep_index, swing_level, sweep_extreme, sweep_time = sweep_match
+    internal = frame.iloc[max(0, displacement_index - 6):displacement_index]
+    structure_broken = (
+        float(displacement["close"]) > float(internal["high"].max())
+        if direction == "LONG"
+        else float(displacement["close"]) < float(internal["low"].min())
+    )
     if not structure_broken and body < atr * settings.forex_fvg_displacement_atr * 1.35:
         return None, "Displacement did not break internal structure or expand sufficiently."
 
@@ -177,7 +194,6 @@ def detect_liquidity_sweep_fvg_limit(
         min(settings.forex_max_position_size, risk_amount / risk),
     )
     fvg_time = _utc(c3["timestamp"])
-    sweep_time = _utc(c1["timestamp"])
     dedupe_raw = "|".join(
         [pair.pair, timeframe, STRATEGY_ID, direction, sweep_time.isoformat(), fvg_time.isoformat()]
     )
@@ -203,7 +219,9 @@ def detect_liquidity_sweep_fvg_limit(
             gap_size_atr=round(gap_size / atr, 3), creation_candle_time=fvg_time,
         ),
         stop_loss=round(stop, precision), take_profit_1=round(tp1, precision),
-        take_profit_2=round(tp2, precision), risk_pips=round(risk_pips, 1),
+        take_profit_2=round(tp2, precision),
+        tp1_closes_position=settings.forex_close_entire_position_at_tp1,
+        risk_pips=round(risk_pips, 1),
         reward_1_pips=round(abs(tp1 - entry) / pair.pip_size, 1),
         reward_2_pips=round(abs(tp2 - entry) / pair.pip_size, 1),
         risk_reward_1=round(rr1, 2), risk_reward_2=round(rr2, 2),
@@ -212,7 +230,8 @@ def detect_liquidity_sweep_fvg_limit(
         expiry_candle_count=expiry_count, technical_score=round(technical_score, 1),
         final_score=round(final_score, 1), context=context,
         reasoning=[
-            f"{'Sell-side' if direction == 'LONG' else 'Buy-side'} liquidity swept and reclaimed.",
+            f"{'Sell-side' if direction == 'LONG' else 'Buy-side'} liquidity sweep detected.",
+            "Reclaim confirmed before displacement.",
             f"{direction.title()} displacement broke structure or exceeded expansion threshold.",
             f"Strict three-candle {direction.lower()} FVG created.",
             "Waiting for retracement; this is not an active trade.",
