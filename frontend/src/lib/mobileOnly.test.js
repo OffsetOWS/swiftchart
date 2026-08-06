@@ -4,6 +4,8 @@ import test from "node:test";
 
 const app = readFileSync(new URL("../App.jsx", import.meta.url), "utf8");
 const mobileApp = readFileSync(new URL("../components/MobileDemo.jsx", import.meta.url), "utf8");
+const deployScript = readFileSync(new URL("../../../scripts/deploy_frontend.sh", import.meta.url), "utf8");
+const vercelConfig = JSON.parse(readFileSync(new URL("../../../vercel.json", import.meta.url), "utf8"));
 
 test("the active application has no legacy desktop view", () => {
   assert.match(app, /import MobileDemo/);
@@ -30,4 +32,15 @@ test("the canonical mobile UI remains visible on desktop-width viewports", () =>
     styles,
     /The graphite application is the canonical UI at every viewport width\. \*\/[\s\n]*@media \(min-width: 0px\) \{[\s\S]*?\.graphite-app \{[\s\S]*?display: flex;/,
   );
+});
+
+test("frontend deployments advance and verify the public custom domain", () => {
+  assert.match(deployScript, /vercel alias set[\s\S]*swiftchart\.xyz/);
+  assert.match(deployScript, /PUBLIC_RELEASE=.*swiftchart\.xyz\/release\.json/);
+  assert.deepEqual(vercelConfig.headers, [
+    {
+      source: "/release.json",
+      headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }],
+    },
+  ]);
 });

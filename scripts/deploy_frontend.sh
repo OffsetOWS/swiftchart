@@ -33,4 +33,18 @@ cd "$REPOSITORY_ROOT"
 npx vercel --prod --yes --scope offsetows-projects \
   --build-env "SWIFTCHART_RELEASE_SHA=$RELEASE_SHA"
 
+# The custom domain is a deployment alias, so move it explicitly after the
+# canonical project production alias has advanced.
+npx vercel alias set \
+  swiftchart-offsetows-projects.vercel.app \
+  swiftchart.xyz \
+  --scope offsetows-projects
+
+PUBLIC_RELEASE="$(curl -fsS "https://swiftchart.xyz/release.json?release=$RELEASE_SHA")"
+EXPECTED_RELEASE="{\"release\":\"$RELEASE_SHA\"}"
+if [ "$PUBLIC_RELEASE" != "$EXPECTED_RELEASE" ]; then
+  echo "Frontend deployment verification failed: expected $EXPECTED_RELEASE, received $PUBLIC_RELEASE." >&2
+  exit 1
+fi
+
 echo "Frontend release deployed from $RELEASE_SHA"
