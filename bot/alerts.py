@@ -12,7 +12,7 @@ from app.services.alert_dedupe import should_skip_alert
 from bot.formatter import format_trade_alert
 from bot.scanner import scan_top_ideas
 from bot.storage import get_subscribers
-from app.forex.telegram import dispatch_pending_forex
+from app.forex.telegram import dispatch_pending_forex, dispatch_pending_forex_limits
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
     rejection_reasons: Counter[str] = Counter()
     subscribers = get_subscribers()
     forex_dispatch = await dispatch_pending_forex(bot)
+    forex_limit_dispatch = await dispatch_pending_forex_limits(bot)
     if not subscribers:
         rejection_reasons["missing subscribers"] += 1
         logger.info(
@@ -76,6 +77,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             "sent": 0,
             "alerts_sent": 0,
             "forex_dispatch": forex_dispatch,
+            "forex_limit_dispatch": forex_limit_dispatch,
             "rejection_reasons": dict(rejection_reasons),
         }
 
@@ -208,7 +210,8 @@ async def forex_alert_loop(bot: Bot) -> None:
     while True:
         try:
             result = await dispatch_pending_forex(bot)
-            logger.info("Forex Telegram dispatch complete: %s", result)
+            limit_result = await dispatch_pending_forex_limits(bot)
+            logger.info("Forex Telegram dispatch complete: signals=%s limits=%s", result, limit_result)
         except Exception:
             logger.exception("Forex Telegram dispatch failed")
         await asyncio.sleep(max(30, interval))

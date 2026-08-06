@@ -30,7 +30,7 @@ test("keeps only live and pending Forex opportunities in the app feed", () => {
 
   assert.deepEqual(
     activeForexSignals(signals).map((signal) => signal.id),
-    ["pending", "open", "partial"],
+    ["pending", "open"],
   );
 });
 

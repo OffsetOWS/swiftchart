@@ -11,9 +11,10 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 
 from app.config import get_settings
 from app.forex.models import (
-    ACTIVE_FOREX_STATUSES,
+    DISPLAY_ACTIVE_FOREX_STATUSES,
     TERMINAL_FOREX_STATUSES,
     ForexOverview,
+    ForexLimitOpportunityList,
     ForexScannerDiagnostics,
     ForexSignalList,
     ForexSignalPlan,
@@ -32,6 +33,8 @@ from app.forex.storage import (
     list_signals,
     save_trade_preparation,
 )
+from app.forex.limit_service import scan_limit_opportunities
+from app.forex.limit_storage import get_limit_opportunity, limit_strategy_stats, list_limit_opportunities
 
 router = APIRouter()
 MANUAL_SCAN_COOLDOWN_SECONDS = 30
@@ -100,7 +103,7 @@ async def forex_overview():
     settings = get_settings()
     session = forex_session_state()
     news_risk, news_reason = forex_news_risk()
-    active = _enabled_signals(list_signals(ACTIVE_FOREX_STATUSES, limit=100))[:5]
+    active = _enabled_signals(list_signals(DISPLAY_ACTIVE_FOREX_STATUSES, limit=100))[:5]
     oanda_configured = bool(
         (settings.oanda_api_key or os.getenv("OANDA_API_TOKEN"))
         and settings.oanda_account_id
@@ -132,7 +135,7 @@ async def forex_signals(
     statuses = (
         tuple(item.strip().upper() for item in status_filter.split(",") if item.strip())
         if status_filter
-        else ACTIVE_FOREX_STATUSES
+        else DISPLAY_ACTIVE_FOREX_STATUSES
     )
     try:
         normalized_timeframe = normalize_forex_timeframe(timeframe) if timeframe else None
@@ -153,7 +156,7 @@ async def active_signals(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     signals = _enabled_signals(
-        list_signals(ACTIVE_FOREX_STATUSES, limit, normalized_timeframe)
+        list_signals(DISPLAY_ACTIVE_FOREX_STATUSES, limit, normalized_timeframe)
     )
     return ForexSignalList(signals=signals, count=len(signals))
 
@@ -164,6 +167,38 @@ async def forex_signal_detail(signal_id: str):
     if signal is None:
         raise HTTPException(status_code=404, detail="Forex signal not found.")
     return signal
+
+
+@router.get("/forex/limit-opportunities", response_model=ForexLimitOpportunityList)
+async def forex_limit_opportunities(
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    statuses = tuple(item.strip().upper() for item in status_filter.split(",") if item.strip()) if status_filter else None
+    opportunities = list_limit_opportunities(statuses, limit=limit)
+    return ForexLimitOpportunityList(opportunities=opportunities, count=len(opportunities))
+
+
+@router.get("/forex/limit-opportunities/stats")
+async def forex_limit_opportunity_stats():
+    return limit_strategy_stats()
+
+
+@router.get("/forex/limit-opportunities/{opportunity_id}")
+async def forex_limit_opportunity_detail(opportunity_id: str):
+    opportunity = get_limit_opportunity(opportunity_id)
+    if opportunity is None:
+        raise HTTPException(status_code=404, detail="Forex limit opportunity not found.")
+    return opportunity
+
+
+@router.post("/forex/limit-opportunities/scan")
+async def forex_limit_opportunity_scan(
+    timeframe: str = Query(default="1H"),
+    x_internal_api_secret: str | None = Header(default=None),
+):
+    _require_internal_secret(x_internal_api_secret)
+    return await scan_limit_opportunities(timeframe=normalize_forex_timeframe(timeframe))
 
 
 @router.post("/forex/scanner/run", response_model=ForexScanRunResult)

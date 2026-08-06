@@ -67,6 +67,17 @@ SUPPORTED_FOREX_PAIRS: dict[str, ForexPairConfig] = {
     "EURJPY": ForexPairConfig("EURJPY", "EUR/JPY", 0.01, ("Tokyo", "London"), 2.5, 5, 70),
     "GBPJPY": ForexPairConfig("GBPJPY", "GBP/JPY", 0.01, ("Tokyo", "London"), 3.5, 7, 90),
     "XAUUSD": ForexPairConfig("XAUUSD", "XAU/USD", 0.1, ("London", "New York", "London-New York overlap"), 35.0, 10, 350),
+    "CADJPY": ForexPairConfig("CADJPY", "CAD/JPY", 0.01, ("Tokyo", "London", "New York"), 3.0, 5, 75),
+    "EURCAD": ForexPairConfig("EURCAD", "EUR/CAD", 0.0001, ("London", "New York"), 2.5, 4, 65),
+    "GBPCAD": ForexPairConfig("GBPCAD", "GBP/CAD", 0.0001, ("London", "New York"), 3.5, 6, 85),
+    "AUDCAD": ForexPairConfig("AUDCAD", "AUD/CAD", 0.0001, ("Tokyo", "London"), 2.5, 4, 55),
+    "NZDCAD": ForexPairConfig("NZDCAD", "NZD/CAD", 0.0001, ("Tokyo", "London"), 3.0, 4, 55),
+    "CADCHF": ForexPairConfig("CADCHF", "CAD/CHF", 0.0001, ("London", "New York"), 2.5, 4, 55),
+}
+
+CROSS_MARKET_INSTRUMENTS: dict[str, ForexPairConfig] = {
+    "DXY": ForexPairConfig("DXY", "DXY", 0.01, (), 0, 0, 10_000),
+    "WTI": ForexPairConfig("WTI", "WTI/USD", 0.01, (), 0, 0, 10_000),
 }
 
 

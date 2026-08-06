@@ -19,6 +19,7 @@ from app.forex.config import (
 )
 from app.forex.models import ForexPairInfo, ForexScanRunResult, ForexSignalPlan
 from app.forex.market_data import ForexMarketDataService
+from app.forex.context import evaluate_cross_market_context, unavailable_cross_market_context
 from app.forex.news import forex_news_risk
 from app.forex.providers import (
     ForexDataProvider,
@@ -384,6 +385,26 @@ async def scan_forex(
                         signal_id=existing.id,
                     )
                     continue
+                context = (
+                    await evaluate_cross_market_context(
+                        pair.pair,
+                        plan["direction"],
+                        timeframe,
+                        market_data,
+                        now=now,
+                    )
+                    if getattr(market_data.provider, "supports_cross_market_context", False)
+                    else unavailable_cross_market_context(pair.pair, timeframe, now)
+                )
+                technical_score = float(plan["setup_score"])
+                plan["technical_score"] = technical_score
+                plan["context_adjustment"] = context.total_adjustment
+                plan["cross_market_context"] = context
+                plan["setup_score"] = max(
+                    0.0,
+                    min(100.0, round(technical_score + context.total_adjustment, 1)),
+                )
+                plan["setup_reason"] = f"{plan['setup_reason']} {context.explanation}"
                 persisted = insert_signal(plan)
                 created.append(persisted)
                 save_candle_evaluation(

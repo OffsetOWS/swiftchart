@@ -32,6 +32,9 @@ FOREX_COLUMNS: dict[str, str] = {
     "entry_trigger": "TEXT",
     "market_session": "TEXT",
     "setup_score": "REAL",
+    "technical_score": "REAL",
+    "context_adjustment": "REAL NOT NULL DEFAULT 0",
+    "cross_market_context_json": "TEXT",
     "strategy_family": "TEXT",
     "strategy_version": "TEXT",
     "market_regime": "TEXT",
@@ -622,6 +625,13 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         entry_trigger=row["entry_trigger"] or "Legacy trigger unavailable",
         market_session=row["market_session"] or row["session"] or "Unknown",
         setup_score=float(row["setup_score"] or row["score"] or 0),
+        technical_score=float(row["technical_score"]) if row["technical_score"] is not None else None,
+        context_adjustment=float(row["context_adjustment"] or 0),
+        cross_market_context=(
+            json.loads(row["cross_market_context_json"])
+            if row["cross_market_context_json"]
+            else None
+        ),
         strategy_family=row["strategy_family"] or "legacy",
         strategy_version=row["strategy_version"] or "legacy",
         market_regime=row["market_regime"] or "Unknown",
@@ -688,6 +698,11 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
         "id": public_id,
         "created_at": plan["created_at"].isoformat(),
         "expires_at": plan["expires_at"].isoformat(),
+        "cross_market_context_json": json.dumps(
+            plan["cross_market_context"].model_dump(mode="json")
+            if hasattr(plan.get("cross_market_context"), "model_dump")
+            else plan.get("cross_market_context")
+        ) if plan.get("cross_market_context") else None,
     }
     with get_connection() as connection:
         connection.execute(
@@ -700,6 +715,7 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
                 news_risk, spread_status, reason, status, created_at,
                 execution_timeframe, setup_timeframe, bias_timeframe, timeframe_alignment,
                 htf_bias, setup_structure, entry_trigger, market_session, setup_score,
+                technical_score, context_adjustment, cross_market_context_json,
                 strategy_family, strategy_version, market_regime, bias, setup_reason,
                 expires_at, source_scan_id, dedupe_key, is_legacy
             )
@@ -710,7 +726,8 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
                 :risk_reward_1, :risk_reward_2, :timeframe, :news_risk, :spread_status, :setup_reason,
                 :status, :created_at, :execution_timeframe, :setup_timeframe, :bias_timeframe,
                 :timeframe_alignment, :htf_bias, :setup_structure, :entry_trigger,
-                :market_session, :setup_score, :strategy_family, :strategy_version,
+                :market_session, :setup_score, :technical_score, :context_adjustment,
+                :cross_market_context_json, :strategy_family, :strategy_version,
                 :market_regime, :bias, :setup_reason, :expires_at, :source_scan_id,
                 :dedupe_key, 0
             )

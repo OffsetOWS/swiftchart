@@ -8,6 +8,7 @@ from app.forex.config import enabled_forex_timeframes
 from app.forex.lifecycle import update_forex_lifecycle
 from app.forex.market_data import seconds_until_next_candle_close
 from app.forex.scanner import scan_forex
+from app.forex.limit_service import scan_limit_opportunities, update_limit_lifecycle
 
 logger = logging.getLogger(__name__)
 _tasks: list[asyncio.Task] = []
@@ -29,6 +30,15 @@ async def _timeframe_worker(
                 len(result.reused),
                 len(result.errors),
             )
+            if timeframe in {"1H", "4H", "1D"}:
+                limit_result = await scan_limit_opportunities(timeframe=timeframe)
+                if limit_result["enabled"]:
+                    logger.info(
+                        "Forex limit shadow scan timeframe=%s created=%s reused=%s",
+                        timeframe,
+                        len(limit_result["created"]),
+                        len(limit_result["reused"]),
+                    )
         except Exception:
             logger.exception("Forex timeframe worker failed timeframe=%s", timeframe)
         await asyncio.sleep(seconds_until_next_candle_close(timeframe))
@@ -39,6 +49,7 @@ async def _lifecycle_worker(interval_seconds: int, startup_delay_seconds: int) -
     while True:
         try:
             await update_forex_lifecycle()
+            await update_limit_lifecycle()
         except Exception:
             logger.exception("Forex lifecycle worker failed")
         await asyncio.sleep(max(30, interval_seconds))

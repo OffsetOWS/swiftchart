@@ -7,13 +7,19 @@ import os
 from pathlib import Path
 
 from app.forex.config import SUPPORTED_FOREX_PAIRS
-from app.forex.models import ForexSignalPlan
+from app.forex.models import ForexLimitOpportunity, ForexSignalPlan
 from app.forex.storage import (
     claim_pending_dispatches,
     get_signal,
     list_signals,
     mark_dispatch_attempt,
     queue_dispatches,
+)
+from app.forex.limit_storage import (
+    claim_limit_dispatches,
+    get_limit_opportunity,
+    mark_limit_dispatch,
+    queue_limit_dispatches,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +73,101 @@ def format_forex_signal(signal: ForexSignalPlan, app_url: str | None = None) -> 
             f'<a href="{html.escape(detail_url)}">Open signal</a>',
         ]
     )
+
+
+def format_forex_limit_opportunity(opportunity: ForexLimitOpportunity, app_url: str | None = None) -> str:
+    context = opportunity.context
+    lines = [
+        "🟡 <b>FOREX LIMIT OPPORTUNITY</b>",
+        "",
+        f"<b>{html.escape(opportunity.pair)} — {opportunity.order_type.replace('_', ' ')}</b>",
+        "Strategy: Liquidity Sweep + FVG",
+        f"Timeframe: {opportunity.timeframe}",
+        "",
+        f"Entry: {_price(opportunity.entry_price, opportunity.pair)}",
+        f"Entry Zone: {_price(opportunity.entry_zone_low, opportunity.pair)} – {_price(opportunity.entry_zone_high, opportunity.pair)}",
+        f"Stop Loss: {_price(opportunity.stop_loss, opportunity.pair)}",
+        f"TP1: {_price(opportunity.take_profit_1, opportunity.pair)}",
+        f"TP2: {_price(opportunity.take_profit_2, opportunity.pair)}",
+        "",
+        f"RR to TP1: {opportunity.risk_reward_1:g}R",
+        f"RR to TP2: {opportunity.risk_reward_2:g}R",
+        f"Expires: After {opportunity.expiry_candle_count} completed {opportunity.timeframe} candles",
+        "",
+        "Setup:",
+        *[html.escape(reason) for reason in opportunity.reasoning],
+    ]
+    if context.usd_context:
+        lines.append(f"DXY: {context.usd_context.state.replace('_', ' ').title()} — {context.usd_context.alignment_status.replace('_', ' ').title()}")
+    if context.oil_context:
+        lines.append(f"Oil: {context.oil_context.state.replace('_', ' ').title()} — {context.oil_context.alignment_status.replace('_', ' ').title()}")
+    lines.extend(
+        [
+            f"Context Adjustment: {context.total_adjustment:+g}",
+            f"Final Score: {opportunity.final_score:g}",
+            "",
+            f"Status: WAITING FOR {opportunity.order_type.replace('_', ' ')}",
+            "This is not an active trade until entry is filled.",
+            "",
+            f'<a href="{html.escape(_application_url(app_url))}/app/forex/limits/{opportunity.id}">View Limit Opportunity</a>',
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_limit_lifecycle_event(opportunity: ForexLimitOpportunity) -> str:
+    if opportunity.opportunity_status == "ACTIVE_TRADE":
+        return "\n".join([
+            "🟢 <b>LIMIT ORDER FILLED</b>", "",
+            f"{opportunity.pair} — {opportunity.direction} ACTIVE",
+            f"Entry: {_price(opportunity.entry_price, opportunity.pair)}",
+            f"Stop: {_price(opportunity.stop_loss, opportunity.pair)}",
+            f"TP1: {_price(opportunity.take_profit_1, opportunity.pair)}",
+            f"TP2: {_price(opportunity.take_profit_2, opportunity.pair)}",
+        ])
+    if opportunity.opportunity_status == "EXPIRED":
+        return "\n".join([
+            "⚪ <b>LIMIT OPPORTUNITY EXPIRED</b>", "",
+            f"{opportunity.pair} {opportunity.order_type.replace('_', ' ')} was not filled before expiry.",
+            "No trade was opened.",
+        ])
+    return f"{opportunity.pair} limit opportunity: {opportunity.opportunity_status.replace('_', ' ').title()}"
+
+
+def enqueue_forex_limit_event(opportunity: ForexLimitOpportunity, event_type: str) -> int:
+    try:
+        subscribers = _telegram_subscribers()
+    except Exception:
+        logger.exception("Could not load limit-opportunity Telegram subscribers")
+        return 0
+    return queue_limit_dispatches(opportunity.id, event_type, subscribers)
+
+
+async def dispatch_pending_forex_limits(bot, *, app_url: str | None = None) -> dict[str, int]:
+    attempted = delivered = failed = 0
+    for dispatch in claim_limit_dispatches():
+        opportunity = get_limit_opportunity(dispatch["opportunity_id"])
+        if opportunity is None:
+            mark_limit_dispatch(dispatch["id"], delivered=False, error="Opportunity not found.")
+            failed += 1
+            continue
+        attempted += 1
+        text = (
+            format_forex_limit_opportunity(opportunity, app_url)
+            if dispatch["event_type"] == "OPPORTUNITY"
+            else format_limit_lifecycle_event(opportunity)
+        )
+        try:
+            await bot.send_message(
+                chat_id=dispatch["chat_id"], text=text, parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            mark_limit_dispatch(dispatch["id"], delivered=True)
+            delivered += 1
+        except Exception as exc:
+            mark_limit_dispatch(dispatch["id"], delivered=False, error=f"{type(exc).__name__}: {str(exc)[:240]}")
+            failed += 1
+    return {"attempted": attempted, "delivered": delivered, "failed": failed}
 
 
 def enqueue_forex_signal(signal: ForexSignalPlan) -> int:
