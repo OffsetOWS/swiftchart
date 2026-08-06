@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.forex.config import SUPPORTED_FOREX_PAIRS
@@ -27,6 +29,7 @@ from app.forex.limit_storage import (
 from app.forex.limit_strategy import detect_liquidity_sweep_fvg_limit
 from app.forex.models import ForexCrossMarketContext, MarketContextComponent
 from app.forex.telegram import format_forex_limit_opportunity
+from app.routes.forex import router as forex_router
 from app.utils import database
 
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
@@ -500,3 +503,24 @@ def test_tp1_partial_position_remains_active_and_full_close_is_terminal(limit_db
     )
     assert full_close.opportunity_status == "TP1_HIT"
     assert full_close.closed_at is not None
+
+
+def test_public_limit_routes_hide_shadow_opportunities(limit_db):
+    shadow, _ = opportunity("LONG")
+    insert_limit_opportunity(shadow)
+    public = shadow.model_copy(
+        update={"id": "public-limit", "dedupe_key": "public-limit-key", "shadow_mode": False}
+    )
+    insert_limit_opportunity(public)
+
+    app = FastAPI()
+    app.include_router(forex_router, prefix="/api")
+    client = TestClient(app)
+    listing = client.get("/api/forex/limit-opportunities")
+    assert listing.status_code == 200
+    assert listing.json()["count"] == 1
+    assert listing.json()["opportunities"][0]["id"] == public.id
+    assert client.get(f"/api/forex/limit-opportunities/{shadow.id}").status_code == 404
+    assert client.get(f"/api/forex/limit-opportunities/{public.id}").status_code == 200
+    stats = client.get("/api/forex/limit-opportunities/stats").json()
+    assert stats["total_detected"] == 1

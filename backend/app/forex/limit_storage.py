@@ -187,13 +187,19 @@ def list_limit_opportunities(
     statuses: tuple[str, ...] | None = None,
     *,
     limit: int = 100,
+    include_shadow: bool = True,
 ) -> list[ForexLimitOpportunity]:
     ensure_limit_opportunity_schema()
     query = "SELECT payload_json FROM forex_limit_opportunities"
     values: list[object] = []
+    conditions: list[str] = []
     if statuses:
-        query += f" WHERE opportunity_status IN ({','.join('?' for _ in statuses)})"
+        conditions.append(f"opportunity_status IN ({','.join('?' for _ in statuses)})")
         values.extend(statuses)
+    if not include_shadow:
+        conditions.append("shadow_mode = 0")
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY created_at DESC LIMIT ?"
     values.append(max(1, min(500, limit)))
     with get_connection() as connection:
@@ -210,8 +216,8 @@ def get_limit_opportunity(opportunity_id: str) -> ForexLimitOpportunity | None:
     return ForexLimitOpportunity.model_validate_json(row["payload_json"]) if row else None
 
 
-def limit_strategy_stats() -> dict:
-    opportunities = list_limit_opportunities(limit=500)
+def limit_strategy_stats(*, include_shadow: bool = True) -> dict:
+    opportunities = list_limit_opportunities(limit=500, include_shadow=include_shadow)
     counts: dict[str, int] = {}
     for opportunity in opportunities:
         counts[opportunity.opportunity_status] = counts.get(opportunity.opportunity_status, 0) + 1

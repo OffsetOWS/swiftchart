@@ -175,19 +175,19 @@ async def forex_limit_opportunities(
     limit: int = Query(default=100, ge=1, le=500),
 ):
     statuses = tuple(item.strip().upper() for item in status_filter.split(",") if item.strip()) if status_filter else None
-    opportunities = list_limit_opportunities(statuses, limit=limit)
+    opportunities = list_limit_opportunities(statuses, limit=limit, include_shadow=False)
     return ForexLimitOpportunityList(opportunities=opportunities, count=len(opportunities))
 
 
 @router.get("/forex/limit-opportunities/stats")
 async def forex_limit_opportunity_stats():
-    return limit_strategy_stats()
+    return limit_strategy_stats(include_shadow=False)
 
 
 @router.get("/forex/limit-opportunities/{opportunity_id}")
 async def forex_limit_opportunity_detail(opportunity_id: str):
     opportunity = get_limit_opportunity(opportunity_id)
-    if opportunity is None:
+    if opportunity is None or opportunity.shadow_mode:
         raise HTTPException(status_code=404, detail="Forex limit opportunity not found.")
     return opportunity
 
