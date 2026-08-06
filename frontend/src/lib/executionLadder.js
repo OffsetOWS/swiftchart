@@ -16,6 +16,7 @@ export function executionLadderState(signal) {
   const direction = String(signal?.direction || "").toUpperCase();
   const isShort = direction === "SHORT" || direction === "SELL";
   const status = String(signal?.status || "PENDING_ENTRY").toUpperCase();
+  const tp1Reached = ["TP1_HIT", "TP1_HIT_TP2_RUNNING", "TP2_HIT"].includes(status);
   const entryLow = finiteNumber(signal?.entryLow ?? signal?.entry_low);
   const entryHigh = finiteNumber(signal?.entryHigh ?? signal?.entry_high);
   const plannedEntry = entryLow !== null && entryHigh !== null
@@ -49,8 +50,8 @@ export function executionLadderState(signal) {
 
   let label = "Waiting for entry";
   let tone = "neutral";
-  if (status === "TP1_HIT") {
-    label = "TP1 reached";
+  if (status === "TP1_HIT" || status === "TP1_HIT_TP2_RUNNING") {
+    label = status === "TP1_HIT_TP2_RUNNING" ? "TP1 reached · TP2 running" : "TP1 reached · position closed";
     tone = "profit";
   } else if (status === "TP2_HIT") {
     label = "TP2 reached";
@@ -83,7 +84,7 @@ export function executionLadderState(signal) {
     }
   }
 
-  const activeTarget = status === "TP1_HIT" ? tp2 : tp1;
+  const activeTarget = status === "TP1_HIT_TP2_RUNNING" ? tp2 : tp1;
   const favorableDistance = entry === null || storedPrice === null
     ? 0
     : isShort ? entry - storedPrice : storedPrice - entry;
@@ -103,7 +104,7 @@ export function executionLadderState(signal) {
     tp2Position,
     stopPosition,
     favorableProgress: targetDistance > 0 ? clamp((favorableDistance / targetDistance) * 100, -100, 100) : 0,
-    tp1Complete: ["TP1_HIT", "TP2_HIT"].includes(status),
+    tp1Complete: tp1Reached,
     tp2Complete: status === "TP2_HIT",
     stopComplete: status === "STOPPED",
     disabled: ["EXPIRED", "CANCELLED"].includes(status),

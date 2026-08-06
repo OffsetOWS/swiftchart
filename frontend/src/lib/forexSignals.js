@@ -21,7 +21,7 @@ const TIMEFRAME_ALIASES = new Map([
 ]);
 
 export const FOREX_TIMEFRAMES = ["15M", "1H", "4H", "1D"];
-export const ACTIVE_FOREX_STATUSES = new Set(["PENDING_ENTRY", "OPEN", "TP1_HIT"]);
+export const ACTIVE_FOREX_STATUSES = new Set(["PENDING_ENTRY", "OPEN", "TP1_HIT_TP2_RUNNING"]);
 
 export function canonicalForexTimeframe(value, fallback = "1H") {
   const normalized = String(value || "")

@@ -12,6 +12,7 @@ from app.routes.forex import router as forex_router
 from app.forex.scheduler import start_forex_worker
 from app.forex.oanda import verify_oanda_startup
 from app.forex.storage import ensure_forex_schema
+from app.forex.limit_storage import ensure_limit_opportunity_schema
 from app.services.scanner import start_background_scanner
 from app.utils.database import init_db
 from app.utils.secure_logging import install_secure_logging
@@ -36,6 +37,7 @@ async def startup() -> None:
     install_secure_logging()
     init_db()
     ensure_forex_schema()
+    ensure_limit_opportunity_schema()
     start_background_scanner()
     await verify_oanda_startup()
     start_forex_worker()

@@ -9,6 +9,17 @@
       "maxDuration": 30
     }
   },
+  "headers": [
+    {
+      "source": "/release.json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    }
+  ],
   "redirects": [
     {
       "source": "/",

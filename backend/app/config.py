@@ -77,6 +77,24 @@ class Settings(BaseSettings):
     forex_scan_1d_interval_seconds: int = Field(default=86400, ge=60)
     forex_lifecycle_interval_seconds: int = Field(default=60, ge=30)
     forex_worker_startup_delay_seconds: int = Field(default=20, ge=0)
+    forex_dxy_context_enabled: bool = True
+    forex_oil_context_enabled: bool = True
+    forex_cross_market_max_positive_adjustment: float = Field(default=10.0, ge=0, le=20)
+    forex_cross_market_max_negative_adjustment: float = Field(default=-10.0, ge=-20, le=0)
+    forex_cross_market_stale_multiplier: float = Field(default=2.5, ge=1, le=10)
+    forex_liquidity_fvg_limit_enabled: bool = False
+    forex_liquidity_fvg_limit_shadow_mode: bool = True
+    forex_liquidity_fvg_auto_execution_enabled: bool = False
+    forex_fvg_entry_mode: str = "FVG_MIDPOINT"
+    forex_fvg_min_gap_atr: float = Field(default=0.10, gt=0, le=2)
+    forex_fvg_min_gap_pips: float = Field(default=2.0, gt=0)
+    forex_fvg_displacement_atr: float = Field(default=1.0, gt=0, le=5)
+    forex_fvg_sweep_lookback: int = Field(default=20, ge=8, le=100)
+    forex_fvg_max_candles_after_sweep: int = Field(default=3, ge=1, le=3)
+    forex_fvg_expiry_1h_candles: int = Field(default=8, ge=1, le=100)
+    forex_fvg_expiry_4h_candles: int = Field(default=6, ge=1, le=100)
+    forex_fvg_expiry_1d_candles: int = Field(default=3, ge=1, le=100)
+    forex_close_entire_position_at_tp1: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

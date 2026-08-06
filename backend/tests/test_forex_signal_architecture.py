@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -14,18 +15,27 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.forex.config import SUPPORTED_FOREX_PAIRS, enabled_forex_timeframes
 from app.forex.lifecycle import next_signal_status
+from app.forex import storage as forex_storage
 from app.forex.models import TakeTradeRequest
 from app.forex.providers import (
     ForexDataProvider,
     ForexProviderQuotaExceeded,
     TwelveDataForexProvider,
 )
-from app.forex.scanner import scan_forex
+from app.forex.scanner import (
+    _entry_confirmation,
+    _entry_quality,
+    _pending_retest_confirmed,
+    _retest_confirmed,
+    analyze_forex_timeframe,
+    scan_forex,
+)
 from app.forex.storage import (
     get_scanner_diagnostics,
     get_signal,
     list_signals,
     queue_dispatches,
+    promote_retest_signal,
     update_signal_market_state,
 )
 from app.forex.telegram import dispatch_pending_forex, enqueue_forex_signal, format_forex_signal
@@ -54,6 +64,10 @@ class FakeProvider(ForexDataProvider):
                     "volume": 1_000,
                 }
             )
+        # End with a completed pullback and confirmation instead of a fresh
+        # range-high breakout, so this fixture represents an approved entry.
+        rows[-2].update(open=1.0820, high=1.0824, low=1.0783, close=1.0788)
+        rows[-1].update(open=1.0788, high=1.0808, low=1.0786, close=1.0805)
         return pd.DataFrame(rows)
 
 
@@ -169,18 +183,23 @@ def test_signal_list_does_not_call_scanner(monkeypatch, forex_database):
 
 
 @pytest.mark.parametrize(
-    ("timeframe", "provider_timeframe"),
-    [("1H", "1h"), ("4H", "4h"), ("1D", "1d")],
+    ("timeframe", "expected_timeframes", "bias_timeframe"),
+    [
+        ("1H", {"1h", "4h"}, "4h"),
+        ("4H", {"4h", "1d"}, "1d"),
+        ("1D", {"1d"}, "1d"),
+    ],
 )
-def test_each_timeframe_scans_only_itself_and_persists_immutable_signal(
+def test_each_timeframe_uses_real_higher_timeframe_and_persists_immutable_signal(
     forex_database,
     timeframe,
-    provider_timeframe,
+    expected_timeframes,
+    bias_timeframe,
 ):
     provider = FakeProvider()
     first = asyncio.run(scan_forex(provider, timeframe=timeframe))
     assert first.created
-    assert set(provider.timeframes) == {provider_timeframe}
+    assert set(provider.timeframes) == expected_timeframes
 
     signal = first.created[0]
     original_levels = (
@@ -192,9 +211,9 @@ def test_each_timeframe_scans_only_itself_and_persists_immutable_signal(
     )
     assert signal.id
     assert signal.timeframe == timeframe
-    assert signal.bias_timeframe == provider_timeframe
-    assert signal.setup_timeframe == provider_timeframe
-    assert signal.execution_timeframe == provider_timeframe
+    assert signal.bias_timeframe == bias_timeframe
+    assert signal.setup_timeframe == timeframe.lower()
+    assert signal.execution_timeframe == timeframe.lower()
     assert timeframe in signal.timeframe_alignment
 
     second = asyncio.run(scan_forex(provider, timeframe=timeframe))
@@ -448,7 +467,16 @@ def test_signal_lifecycle_transitions_and_expiry(forex_database):
         price=tp1_price,
         checked_at=signal.created_at + timedelta(hours=1),
     )
-    assert tp1 == "TP1_HIT"
+    assert tp1 == "TP1_HIT_TP2_RUNNING"
+
+    full_close_signal = open_signal.model_copy(update={"tp1_closes_position": True})
+    full_close, _, full_close_at = next_signal_status(
+        full_close_signal,
+        price=tp1_price,
+        checked_at=signal.created_at + timedelta(hours=1),
+    )
+    assert full_close == "TP1_HIT"
+    assert full_close_at == signal.created_at + timedelta(hours=1)
 
     expired, _, expired_at = next_signal_status(
         signal,
@@ -487,10 +515,11 @@ def test_lifecycle_persists_live_price_activation_and_hit_timestamps_without_mut
     tp1_at = opened_at + timedelta(hours=1)
     tp1 = update_signal_market_state(
         signal.id,
-        status="TP1_HIT",
+        status="TP1_HIT_TP2_RUNNING",
         price=signal.take_profit_1,
         checked_at=tp1_at,
     )
+    assert tp1.status == "TP1_HIT_TP2_RUNNING"
     assert tp1.tp1_hit_at == tp1_at
     assert tp1.tp2_hit_at is None
 
@@ -513,6 +542,17 @@ def test_lifecycle_persists_live_price_activation_and_hit_timestamps_without_mut
         completed.take_profit_2,
         completed.created_at,
     ) == original_plan
+
+
+def test_schema_migrates_legacy_running_tp1_state(forex_database):
+    signal = asyncio.run(scan_forex(FakeProvider(), timeframe="1H")).created[0]
+    update_signal_market_state(
+        signal.id, status="TP1_HIT", price=signal.take_profit_1,
+        checked_at=signal.created_at + timedelta(hours=1),
+    )
+    forex_storage._FOREX_SCHEMA_READY_FOR = None
+    forex_storage.ensure_forex_schema()
+    assert get_signal(signal.id).status == "TP1_HIT_TP2_RUNNING"
 
 
 def test_lifecycle_persists_stopped_timestamp_and_closing_price(forex_database):
@@ -597,3 +637,237 @@ def test_production_like_scanner_to_web_take_trade_and_telegram(forex_database):
         f"{created.entry_low:.{precision}f} - {created.entry_high:.{precision}f}"
         in bot.messages[0]["text"]
     )
+
+
+def _regression_trend_frame(direction: str, *, step: float = 0.00008) -> pd.DataFrame:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = []
+    for index in range(90):
+        close = 1.4 + (step * index if direction == "LONG" else -step * index)
+        open_ = close - 0.00022 if direction == "LONG" else close + 0.00022
+        rows.append({
+            "timestamp": start + timedelta(hours=index),
+            "open": open_,
+            "high": max(open_, close) + 0.00012,
+            "low": min(open_, close) - 0.00012,
+            "close": close,
+            "volume": 1_000,
+        })
+    return pd.DataFrame(rows)
+
+
+def test_usdcad_short_4h_waits_when_support_blocks_tp1(monkeypatch):
+    frame = _regression_trend_frame("SHORT")
+    price = float(frame.iloc[-1]["close"])
+    atr = float((frame["high"] - frame["low"]).tail(14).mean())
+    monkeypatch.setattr(
+        "app.forex.scanner._entry_confirmation",
+        lambda *_args, **_kwargs: (True, "Confirmed bearish retest.", "retest", price),
+    )
+    monkeypatch.setattr(
+        "app.forex.scanner._swing_levels",
+        lambda *_args, **_kwargs: [price - atr * 0.45],
+    )
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["USDCAD"],
+        frame,
+        htf_candles=frame,
+        timeframe="4H",
+        scan_id="usdcad-regression",
+        session_label="New York",
+        news_risk="LOW",
+        now=datetime(2026, 8, 6, tzinfo=UTC),
+    )
+    assert audit["decision"] == "WAIT_FOR_RETEST"
+    assert plan is not None and plan["status"] == "WAIT_FOR_RETEST"
+    assert "opposing structure" in plan["setup_reason"]
+
+
+def test_cadchf_long_1d_waits_at_end_of_recent_range():
+    quality = _entry_quality(
+        _regression_trend_frame("LONG"),
+        "LONG",
+        entry_ok=True,
+        trigger_type="sweep",
+        retest_level=1.4,
+    )
+    assert quality["hard_gate"] is True
+    assert any("end of its recent range" in reason for reason in quality["reasons"])
+
+
+def test_nzdcad_short_1h_waits_after_extended_impulse():
+    quality = _entry_quality(
+        _regression_trend_frame("SHORT", step=0.00018),
+        "SHORT",
+        entry_ok=True,
+        trigger_type="continuation",
+        retest_level=1.39,
+    )
+    assert quality["hard_gate"] is True
+    assert any("overextended" in reason for reason in quality["reasons"])
+    assert any("strong directional candles" in reason for reason in quality["reasons"])
+
+
+def test_retest_requires_a_later_completed_hold():
+    frame = _regression_trend_frame("LONG")
+    setup_time = frame.iloc[-1]["timestamp"].to_pydatetime()
+    level = float(frame.iloc[-1]["close"])
+    assert not _retest_confirmed(frame, "LONG", level, setup_time)
+
+    later = frame.iloc[-1].copy()
+    later["timestamp"] = pd.Timestamp(setup_time + timedelta(hours=1))
+    later["open"] = level - 0.0001
+    later["low"] = level - 0.00015
+    later["high"] = level + 0.00035
+    later["close"] = level + 0.00025
+    confirmed = pd.concat([frame, pd.DataFrame([later])], ignore_index=True)
+    assert _retest_confirmed(confirmed, "LONG", level, setup_time)
+
+
+def test_breakout_requires_displacement_then_a_later_follow_through():
+    frame = _regression_trend_frame("LONG")
+    breakout_level = float(frame.iloc[-12:-2]["high"].max())
+    first_breakout = frame.iloc[-1].copy()
+    first_breakout["open"] = breakout_level - 0.0001
+    first_breakout["low"] = breakout_level - 0.00015
+    first_breakout["close"] = breakout_level + 0.0007
+    first_breakout["high"] = breakout_level + 0.0008
+    frame.iloc[-1] = first_breakout
+
+    confirmed, reason, trigger_type, level = _entry_confirmation(frame, "LONG", "1H")
+    assert confirmed is False
+    assert trigger_type == "breakout"
+    assert "later retest or follow-through" in reason
+    assert level == pytest.approx(breakout_level)
+
+    follow_through = first_breakout.copy()
+    follow_through["timestamp"] = pd.Timestamp(first_breakout["timestamp"]) + timedelta(hours=1)
+    follow_through["open"] = float(first_breakout["close"]) - 0.00005
+    follow_through["low"] = float(follow_through["open"]) - 0.00005
+    follow_through["close"] = float(first_breakout["close"]) + 0.00025
+    follow_through["high"] = float(follow_through["close"]) + 0.00005
+    followed = pd.concat([frame, pd.DataFrame([follow_through])], ignore_index=True)
+
+    confirmed, reason, trigger_type, level = _entry_confirmation(followed, "LONG", "1H")
+    assert confirmed is True
+    assert trigger_type == "breakout"
+    assert "displacement and follow-through" in reason
+    assert level == pytest.approx(float(followed.tail(12).iloc[:-2]["high"].max()))
+
+
+def test_weak_breakout_cannot_promote_on_retest_alone():
+    frame = _regression_trend_frame("LONG")
+    breakout_level = float(frame.iloc[-12:-2]["high"].max())
+    setup = frame.iloc[-1].copy()
+    setup["open"] = breakout_level - 0.00002
+    setup["low"] = breakout_level - 0.00005
+    setup["close"] = breakout_level + 0.00003
+    setup["high"] = breakout_level + 0.00006
+    frame.iloc[-1] = setup
+    confirmed, reason, _, level = _entry_confirmation(frame, "LONG", "1H")
+    assert confirmed is False
+    assert "lacks meaningful displacement" in reason
+
+    retest = setup.copy()
+    retest["timestamp"] = pd.Timestamp(setup["timestamp"]) + timedelta(hours=1)
+    retest["open"] = breakout_level - 0.00002
+    retest["low"] = breakout_level - 0.00008
+    retest["close"] = breakout_level + 0.00008
+    retest["high"] = breakout_level + 0.00012
+    followed = pd.concat([frame, pd.DataFrame([retest])], ignore_index=True)
+    pending = SimpleNamespace(
+        retest_level=level,
+        setup_candle_time=pd.Timestamp(setup["timestamp"]).to_pydatetime(),
+        entry_trigger=reason,
+    )
+    assert not _pending_retest_confirmed(followed, "LONG", pending)
+
+
+def test_waiting_signal_is_not_telegram_eligible_until_promoted(forex_database):
+    import app.routes.forex as routes
+    from fastapi import HTTPException
+    from bot.storage import add_subscriber
+
+    signal = asyncio.run(scan_forex(FakeProvider(), timeframe="1H")).created[0]
+    waiting = update_signal_market_state(
+        signal.id,
+        status="WAIT_FOR_RETEST",
+        price=signal.entry_price,
+        checked_at=signal.created_at,
+    )
+    add_subscriber(7001)
+    assert enqueue_forex_signal(waiting) == 0
+    queue_dispatches(waiting.id, ["7001"])
+    bot = FakeBot()
+    suppressed = asyncio.run(dispatch_pending_forex(bot))
+    assert all(
+        not message["text"].startswith(f"<b>{waiting.symbol} {waiting.direction}</b>")
+        for message in bot.messages
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            routes.take_forex_trade(
+                waiting.id,
+                TakeTradeRequest(
+                    account_balance=10_000,
+                    risk_percentage=1,
+                    execution_method="Copy setup",
+                ),
+                authorization="Bearer valid-test-session-token",
+            )
+        )
+    assert exc.value.status_code == 409
+
+    confirmed_at = signal.created_at + timedelta(hours=1)
+    promoted = promote_retest_signal(
+        waiting.id,
+        entry_price=waiting.entry_price,
+        entry_low=waiting.entry_low,
+        entry_high=waiting.entry_high,
+        stop_loss=waiting.stop_loss,
+        take_profit_1=waiting.take_profit_1,
+        take_profit_2=waiting.take_profit_2,
+        risk_reward_1=waiting.risk_reward_1,
+        risk_reward_2=waiting.risk_reward_2,
+        entry_trigger="Later completed retest held.",
+        entry_quality_score=90,
+        setup_score=88,
+        grade="A",
+        technical_score=88,
+        context_adjustment=0,
+        cross_market_context=waiting.cross_market_context,
+        setup_reason="Approved only after a later completed retest.",
+        confirmed_at=confirmed_at,
+    )
+    assert promoted.status == "PENDING_ENTRY"
+    assert promoted.retest_confirmed_at == confirmed_at
+    assert enqueue_forex_signal(promoted) == 1
+
+
+def test_rsi_is_context_only_and_does_not_change_setup_score(monkeypatch):
+    frame = _regression_trend_frame("LONG")
+    price = float(frame.iloc[-1]["close"])
+    monkeypatch.setattr(
+        "app.forex.scanner._entry_confirmation",
+        lambda *_args, **_kwargs: (True, "Confirmed bullish retest.", "retest", price),
+    )
+    monkeypatch.setattr("app.forex.scanner._swing_levels", lambda *_args, **_kwargs: [])
+    kwargs = {
+        "pair": SUPPORTED_FOREX_PAIRS["CADCHF"],
+        "candles": frame,
+        "htf_candles": None,
+        "timeframe": "1D",
+        "scan_id": "rsi-context-regression",
+        "session_label": "London",
+        "news_risk": "LOW",
+        "now": datetime(2026, 8, 6, tzinfo=UTC),
+    }
+
+    monkeypatch.setattr("app.forex.scanner._rsi", lambda *_args: 99.0)
+    overbought, _ = analyze_forex_timeframe(**kwargs)
+    monkeypatch.setattr("app.forex.scanner._rsi", lambda *_args: 1.0)
+    oversold, _ = analyze_forex_timeframe(**kwargs)
+
+    assert overbought is not None and oversold is not None
+    assert overbought["setup_score"] == oversold["setup_score"]
+    assert overbought["direction"] == oversold["direction"] == "LONG"

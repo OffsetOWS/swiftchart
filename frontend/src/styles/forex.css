@@ -222,3 +222,14 @@
     padding-bottom: 86px;
   }
 }
+.forex-limit-opportunities { margin-top: 22px; }
+.forex-limit-opportunities .graphite-section-head em { color: #e7b84b; font-style: normal; font-size: 12px; }
+.forex-limit-grid { display: grid; gap: 12px; margin-top: 12px; }
+.forex-limit-grid article { border: 1px solid rgba(231,184,75,.28); border-radius: 16px; padding: 16px; background: rgba(231,184,75,.05); }
+.forex-limit-grid header { display: flex; justify-content: space-between; gap: 12px; }
+.forex-limit-grid header span { color: #e7b84b; font-weight: 700; }
+.forex-limit-grid dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 16px; }
+.forex-limit-grid dl div { display: flex; justify-content: space-between; gap: 8px; }
+.forex-limit-grid dt { color: var(--muted); }
+.forex-limit-grid dd { margin: 0; text-align: right; }
+.forex-limit-context { color: #9db9ff; }

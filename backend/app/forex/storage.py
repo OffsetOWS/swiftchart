@@ -20,6 +20,7 @@ FOREX_COLUMNS: dict[str, str] = {
     "entry_high": "REAL",
     "take_profit_1": "REAL",
     "take_profit_2": "REAL",
+    "tp1_closes_position": "INTEGER NOT NULL DEFAULT 0",
     "risk_reward_1": "REAL",
     "risk_reward_2": "REAL",
     "timeframe": "TEXT",
@@ -32,6 +33,11 @@ FOREX_COLUMNS: dict[str, str] = {
     "entry_trigger": "TEXT",
     "market_session": "TEXT",
     "setup_score": "REAL",
+    "trend_score": "REAL NOT NULL DEFAULT 0",
+    "entry_quality_score": "REAL NOT NULL DEFAULT 0",
+    "technical_score": "REAL",
+    "context_adjustment": "REAL NOT NULL DEFAULT 0",
+    "cross_market_context_json": "TEXT",
     "strategy_family": "TEXT",
     "strategy_version": "TEXT",
     "market_regime": "TEXT",
@@ -43,6 +49,9 @@ FOREX_COLUMNS: dict[str, str] = {
     "telegram_dispatched_at": "TEXT",
     "source_scan_id": "TEXT",
     "dedupe_key": "TEXT",
+    "retest_level": "REAL",
+    "setup_candle_time": "TEXT",
+    "retest_confirmed_at": "TEXT",
     "latest_price": "REAL",
     "latest_price_at": "TEXT",
     "activated_entry_price": "REAL",
@@ -93,6 +102,17 @@ def ensure_forex_schema() -> None:
         for column, definition in FOREX_COLUMNS.items():
             if column not in existing:
                 connection.execute(f"ALTER TABLE forex_signals ADD COLUMN {column} {definition}")
+        # Before this explicit state existed, TP1_HIT was still lifecycle-tracked
+        # toward TP2. Preserve that open remainder instead of treating it as closed.
+        connection.execute(
+            """
+            UPDATE forex_signals
+            SET status = 'TP1_HIT_TP2_RUNNING'
+            WHERE status = 'TP1_HIT'
+              AND closed_at IS NULL
+              AND COALESCE(tp1_closes_position, 0) = 0
+            """
+        )
         needs_backfill = connection.execute(
             """
             SELECT 1 FROM forex_signals
@@ -263,12 +283,13 @@ def ensure_forex_schema() -> None:
             "ON forex_signals(timeframe, status, created_at)"
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_signal_dedupe ON forex_signals(dedupe_key, status)")
+        connection.execute("DROP INDEX IF EXISTS idx_forex_signal_active_dedupe")
         connection.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_forex_signal_active_dedupe
+            CREATE UNIQUE INDEX idx_forex_signal_active_dedupe
             ON forex_signals(dedupe_key)
             WHERE dedupe_key IS NOT NULL
-              AND status IN ('PENDING_ENTRY', 'OPEN', 'TP1_HIT')
+              AND status IN ('WAIT_FOR_RETEST', 'PENDING_ENTRY', 'OPEN', 'TP1_HIT_TP2_RUNNING')
             """
         )
         connection.execute(
@@ -291,13 +312,16 @@ def ensure_forex_schema() -> None:
             END
             """
         )
+        connection.execute("DROP TRIGGER IF EXISTS preserve_forex_signal_plan")
         connection.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS preserve_forex_signal_plan
+            CREATE TRIGGER preserve_forex_signal_plan
             BEFORE UPDATE OF timeframe, direction, entry_price, entry_low, entry_high,
-                stop_loss, take_profit_1, take_profit_2, risk_reward_1, risk_reward_2,
+                stop_loss, take_profit_1, take_profit_2, tp1_closes_position,
+                risk_reward_1, risk_reward_2,
                 strategy_family, strategy_version, setup_score, market_regime
             ON forex_signals
+            WHEN NOT (OLD.status = 'WAIT_FOR_RETEST' AND NEW.status = 'PENDING_ENTRY')
             BEGIN
                 SELECT RAISE(ABORT, 'persisted forex signal plans are immutable');
             END
@@ -610,6 +634,7 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         stop_loss=float(row["stop_loss"] or 0),
         take_profit_1=float(row["take_profit_1"] or 0),
         take_profit_2=float(row["take_profit_2"] or 0),
+        tp1_closes_position=bool(row["tp1_closes_position"]),
         risk_reward_1=float(row["risk_reward_1"] or 0),
         risk_reward_2=float(row["risk_reward_2"] or 0),
         timeframe=(row["timeframe"] or row["execution_timeframe"] or "15M").upper(),
@@ -622,6 +647,15 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         entry_trigger=row["entry_trigger"] or "Legacy trigger unavailable",
         market_session=row["market_session"] or row["session"] or "Unknown",
         setup_score=float(row["setup_score"] or row["score"] or 0),
+        trend_score=float(row["trend_score"] or 0),
+        entry_quality_score=float(row["entry_quality_score"] or 0),
+        technical_score=float(row["technical_score"]) if row["technical_score"] is not None else None,
+        context_adjustment=float(row["context_adjustment"] or 0),
+        cross_market_context=(
+            json.loads(row["cross_market_context_json"])
+            if row["cross_market_context_json"]
+            else None
+        ),
         strategy_family=row["strategy_family"] or "legacy",
         strategy_version=row["strategy_version"] or "legacy",
         market_regime=row["market_regime"] or "Unknown",
@@ -635,6 +669,9 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         telegram_dispatched_at=_parse_datetime(row["telegram_dispatched_at"]),
         source_scan_id=row["source_scan_id"] or f"legacy-{row['id']}",
         dedupe_key=row["dedupe_key"] or f"legacy-{row['id']}",
+        retest_level=float(row["retest_level"]) if row["retest_level"] is not None else None,
+        setup_candle_time=_parse_datetime(row["setup_candle_time"]),
+        retest_confirmed_at=_parse_datetime(row["retest_confirmed_at"]),
         latest_price=float(row["latest_price"]) if row["latest_price"] is not None else None,
         latest_price_at=_parse_datetime(row["latest_price_at"]),
         activated_entry_price=(
@@ -688,6 +725,21 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
         "id": public_id,
         "created_at": plan["created_at"].isoformat(),
         "expires_at": plan["expires_at"].isoformat(),
+        "setup_candle_time": (
+            plan["setup_candle_time"].isoformat()
+            if hasattr(plan.get("setup_candle_time"), "isoformat")
+            else plan.get("setup_candle_time")
+        ),
+        "retest_confirmed_at": (
+            plan["retest_confirmed_at"].isoformat()
+            if hasattr(plan.get("retest_confirmed_at"), "isoformat")
+            else plan.get("retest_confirmed_at")
+        ),
+        "cross_market_context_json": json.dumps(
+            plan["cross_market_context"].model_dump(mode="json")
+            if hasattr(plan.get("cross_market_context"), "model_dump")
+            else plan.get("cross_market_context")
+        ) if plan.get("cross_market_context") else None,
     }
     with get_connection() as connection:
         connection.execute(
@@ -695,30 +747,120 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
             INSERT INTO forex_signals (
                 public_id, market_type, pair, symbol, direction, score, grade, session,
                 entry, entry_type, entry_price, entry_low, entry_high, stop_loss, tp1, tp2,
-                take_profit_1, take_profit_2, rr, risk_reward_1, risk_reward_2,
+                take_profit_1, take_profit_2, tp1_closes_position, rr, risk_reward_1, risk_reward_2,
                 timeframe,
                 news_risk, spread_status, reason, status, created_at,
                 execution_timeframe, setup_timeframe, bias_timeframe, timeframe_alignment,
                 htf_bias, setup_structure, entry_trigger, market_session, setup_score,
+                trend_score, entry_quality_score,
+                technical_score, context_adjustment, cross_market_context_json,
                 strategy_family, strategy_version, market_regime, bias, setup_reason,
-                expires_at, source_scan_id, dedupe_key, is_legacy
+                expires_at, source_scan_id, dedupe_key, retest_level,
+                setup_candle_time, retest_confirmed_at, is_legacy
             )
             VALUES (
                 :id, 'forex', :symbol, :symbol, :direction, :setup_score, :grade, :market_session,
                 :entry_price, :entry_type, :entry_price, :entry_low, :entry_high, :stop_loss,
-                :take_profit_1, :take_profit_2, :take_profit_1, :take_profit_2, :risk_reward_2,
+                :take_profit_1, :take_profit_2, :take_profit_1, :take_profit_2, :tp1_closes_position, :risk_reward_2,
                 :risk_reward_1, :risk_reward_2, :timeframe, :news_risk, :spread_status, :setup_reason,
                 :status, :created_at, :execution_timeframe, :setup_timeframe, :bias_timeframe,
                 :timeframe_alignment, :htf_bias, :setup_structure, :entry_trigger,
-                :market_session, :setup_score, :strategy_family, :strategy_version,
+                :market_session, :setup_score, :trend_score, :entry_quality_score,
+                :technical_score, :context_adjustment,
+                :cross_market_context_json, :strategy_family, :strategy_version,
                 :market_regime, :bias, :setup_reason, :expires_at, :source_scan_id,
-                :dedupe_key, 0
+                :dedupe_key, :retest_level, :setup_candle_time, :retest_confirmed_at, 0
             )
             """,
             values,
         )
         row = connection.execute("SELECT * FROM forex_signals WHERE public_id = ?", (public_id,)).fetchone()
     return _row_to_signal(row)
+
+
+def find_waiting_retest(symbol: str, timeframe: str) -> ForexSignalPlan | None:
+    ensure_forex_schema()
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT * FROM forex_signals
+            WHERE symbol = ? AND timeframe = ? AND status = 'WAIT_FOR_RETEST'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (symbol, timeframe.upper()),
+        ).fetchone()
+    return _row_to_signal(row) if row else None
+
+
+def promote_retest_signal(
+    signal_id: str,
+    *,
+    entry_price: float,
+    entry_low: float,
+    entry_high: float,
+    stop_loss: float,
+    take_profit_1: float,
+    take_profit_2: float,
+    risk_reward_1: float,
+    risk_reward_2: float,
+    entry_trigger: str,
+    entry_quality_score: float,
+    setup_score: float,
+    grade: str,
+    technical_score: float,
+    context_adjustment: float,
+    cross_market_context: Any,
+    setup_reason: str,
+    confirmed_at: datetime,
+) -> ForexSignalPlan:
+    """Promote an immutable waiting plan after a later completed candle confirms its retest."""
+    context_json = json.dumps(
+        cross_market_context.model_dump(mode="json")
+        if hasattr(cross_market_context, "model_dump")
+        else cross_market_context
+    ) if cross_market_context else None
+    with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE forex_signals
+            SET status = 'PENDING_ENTRY', entry = ?, entry_price = ?, entry_low = ?, entry_high = ?,
+                stop_loss = ?, tp1 = ?, tp2 = ?, take_profit_1 = ?, take_profit_2 = ?,
+                rr = ?, risk_reward_1 = ?, risk_reward_2 = ?,
+                entry_trigger = ?, entry_quality_score = ?, grade = ?,
+                setup_score = ?, score = ?, technical_score = ?, context_adjustment = ?,
+                cross_market_context_json = ?, setup_reason = ?, retest_confirmed_at = ?
+            WHERE public_id = ? AND status = 'WAIT_FOR_RETEST'
+            """,
+            (
+                entry_price,
+                entry_price,
+                entry_low,
+                entry_high,
+                stop_loss,
+                take_profit_1,
+                take_profit_2,
+                take_profit_1,
+                take_profit_2,
+                risk_reward_2,
+                risk_reward_1,
+                risk_reward_2,
+                entry_trigger,
+                entry_quality_score,
+                grade,
+                setup_score,
+                setup_score,
+                technical_score,
+                context_adjustment,
+                context_json,
+                setup_reason,
+                confirmed_at.isoformat(),
+                signal_id,
+            ),
+        )
+    signal = get_signal(signal_id)
+    if signal is None:
+        raise LookupError(signal_id)
+    return signal
 
 
 def list_signals(
@@ -778,7 +920,7 @@ def update_signal_market_state(
                 ),
                 tp1_hit_at = COALESCE(
                     tp1_hit_at,
-                    CASE WHEN ? IN ('TP1_HIT', 'TP2_HIT') THEN ? ELSE NULL END
+                    CASE WHEN ? IN ('TP1_HIT', 'TP1_HIT_TP2_RUNNING', 'TP2_HIT') THEN ? ELSE NULL END
                 ),
                 tp2_hit_at = COALESCE(
                     tp2_hit_at,
@@ -845,6 +987,15 @@ def claim_pending_dispatches(limit: int = 50) -> list[dict[str, Any]]:
             (limit,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def discard_dispatch(dispatch_id: int) -> None:
+    """Remove an ineligible outbox row so a later approved state can enqueue it."""
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM forex_telegram_dispatches WHERE id = ?",
+            (dispatch_id,),
+        )
 
 
 def mark_dispatch_attempt(dispatch_id: int, *, delivered: bool, error_message: str | None = None) -> None:
