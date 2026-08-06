@@ -35,7 +35,9 @@ test("the canonical mobile UI remains visible on desktop-width viewports", () =>
 });
 
 test("frontend deployments advance and verify the public custom domain", () => {
-  assert.match(deployScript, /vercel alias set[\s\S]*swiftchart\.xyz/);
+  assert.match(deployScript, /--prod --yes --json/);
+  assert.match(deployScript, /DEPLOYMENT_URL=[\s\S]*?result\.deployment\.url/);
+  assert.match(deployScript, /vercel alias set[\s\\\n]*"\$DEPLOYMENT_URL"[\s\\\n]*swiftchart\.xyz/);
   assert.match(deployScript, /PUBLIC_RELEASE=.*swiftchart\.xyz\/release\.json/);
   assert.deepEqual(vercelConfig.headers, [
     {

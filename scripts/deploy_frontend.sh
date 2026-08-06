@@ -30,13 +30,21 @@ npm test
 SWIFTCHART_RELEASE_SHA="$RELEASE_SHA" npm run build
 cd "$REPOSITORY_ROOT"
 
-npx vercel --prod --yes --scope offsetows-projects \
-  --build-env "SWIFTCHART_RELEASE_SHA=$RELEASE_SHA"
+DEPLOYMENT_JSON="$(npx vercel --prod --yes --json --scope offsetows-projects \
+  --build-env "SWIFTCHART_RELEASE_SHA=$RELEASE_SHA")"
+echo "$DEPLOYMENT_JSON"
+DEPLOYMENT_URL="$(node -e '
+  const result = JSON.parse(process.argv[1]);
+  if (result.status !== "ok" || result.deployment?.readyState !== "READY" || !result.deployment?.url) {
+    throw new Error("Vercel did not return a ready production deployment URL.");
+  }
+  console.log(result.deployment.url);
+' "$DEPLOYMENT_JSON")"
 
 # The custom domain is a deployment alias, so move it explicitly after the
 # canonical project production alias has advanced.
 npx vercel alias set \
-  swiftchart-offsetows-projects.vercel.app \
+  "$DEPLOYMENT_URL" \
   swiftchart.xyz \
   --scope offsetows-projects
 
