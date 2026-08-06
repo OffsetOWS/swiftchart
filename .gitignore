@@ -24,3 +24,4 @@ unlock-radar/
 propr_scalper.py
 config.json
 .vercel
+.env*
