@@ -217,6 +217,7 @@ class ForexScanRunResult(BaseModel):
     trigger_source: Literal["scheduled", "manual"] = "scheduled"
     result_status: Literal[
         "TRADE_FOUND",
+        "ACTIVE_SIGNAL_REUSED",
         "WAIT_FOR_RETEST",
         "NO_TRADE",
         "MARKET_CLOSED",
@@ -230,7 +231,7 @@ class ForexScanRunResult(BaseModel):
     rejection_reasons: list[str] = Field(default_factory=list)
     created: list[ForexSignalPlan]
     reused: list[ForexSignalPlan]
-    rejected: list[dict[str, str | float]]
+    rejected: list[dict[str, Any]]
     errors: list[str]
 
 

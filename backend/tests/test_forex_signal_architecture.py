@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.forex.config import SUPPORTED_FOREX_PAIRS, enabled_forex_timeframes
 from app.forex.lifecycle import next_signal_status
 from app.forex import storage as forex_storage
-from app.forex.models import TakeTradeRequest
+from app.forex.models import ForexSignalPlan, TakeTradeRequest
 from app.forex.providers import (
     ForexDataProvider,
     ForexProviderQuotaExceeded,
@@ -27,6 +27,7 @@ from app.forex.scanner import (
     _entry_quality,
     _pending_retest_confirmed,
     _retest_confirmed,
+    _stored_breakout_displacement_valid,
     analyze_forex_timeframe,
     scan_forex,
 )
@@ -780,7 +781,8 @@ def test_weak_breakout_cannot_promote_on_retest_alone():
         setup_candle_time=pd.Timestamp(setup["timestamp"]).to_pydatetime(),
         entry_trigger=reason,
     )
-    assert not _pending_retest_confirmed(followed, "LONG", pending)
+    assert _pending_retest_confirmed(followed, "LONG", pending)
+    assert not _stored_breakout_displacement_valid(followed, "LONG", pending)
 
 
 def test_waiting_signal_is_not_telegram_eligible_until_promoted(forex_database):
@@ -821,14 +823,6 @@ def test_waiting_signal_is_not_telegram_eligible_until_promoted(forex_database):
     confirmed_at = signal.created_at + timedelta(hours=1)
     promoted = promote_retest_signal(
         waiting.id,
-        entry_price=waiting.entry_price,
-        entry_low=waiting.entry_low,
-        entry_high=waiting.entry_high,
-        stop_loss=waiting.stop_loss,
-        take_profit_1=waiting.take_profit_1,
-        take_profit_2=waiting.take_profit_2,
-        risk_reward_1=waiting.risk_reward_1,
-        risk_reward_2=waiting.risk_reward_2,
         entry_trigger="Later completed retest held.",
         entry_quality_score=90,
         setup_score=88,
@@ -871,3 +865,224 @@ def test_rsi_is_context_only_and_does_not_change_setup_score(monkeypatch):
     assert overbought is not None and oversold is not None
     assert overbought["setup_score"] == oversold["setup_score"]
     assert overbought["direction"] == oversold["direction"] == "LONG"
+
+
+def _controlled_quality(*_args, entry_ok: bool, retest_level: float | None, **_kwargs):
+    return {
+        "score": 100.0 if entry_ok else 70.0,
+        "hard_gate": not entry_ok,
+        "reasons": [] if entry_ok else ["entry trigger is not confirmed"],
+        "gates": [] if entry_ok else ["ENTRY_TRIGGER_NOT_CONFIRMED"],
+        "atr": 0.0005,
+        "ema20": retest_level or 1.4,
+        "swing_extension": 0.0,
+        "opposing_level": None,
+        "retest_level": retest_level or 1.4,
+    }
+
+
+def _waiting_retest_plan(monkeypatch) -> tuple[ForexSignalPlan, pd.DataFrame]:
+    frame = _regression_trend_frame("LONG")
+    level = float(frame.iloc[-1]["close"])
+    monkeypatch.setattr(
+        "app.forex.scanner._entry_confirmation",
+        lambda *_args, **_kwargs: (False, "1D bullish continuation needs a completed pullback/retest.", "continuation", level),
+    )
+    monkeypatch.setattr("app.forex.scanner._entry_quality", _controlled_quality)
+    plan, _ = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"],
+        frame,
+        timeframe="1D",
+        scan_id="waiting-plan",
+        session_label="London",
+        news_risk="LOW",
+        now=datetime(2026, 8, 6, tzinfo=UTC),
+    )
+    assert plan is not None and plan["status"] == "WAIT_FOR_RETEST"
+    return ForexSignalPlan(**plan), frame
+
+
+def _append_retest_candle(
+    frame: pd.DataFrame,
+    level: float,
+    *,
+    touched: bool = True,
+    held: bool = True,
+) -> pd.DataFrame:
+    candle = frame.iloc[-1].copy()
+    candle["timestamp"] = pd.Timestamp(candle["timestamp"]) + timedelta(days=1)
+    if not touched:
+        candle[["open", "low", "high", "close"]] = [
+            level + 0.0010, level + 0.0008, level + 0.0014, level + 0.0012,
+        ]
+    elif held:
+        candle[["open", "low", "high", "close"]] = [
+            level - 0.0001, level - 0.0002, level + 0.0005, level + 0.0003,
+        ]
+    else:
+        candle[["open", "low", "high", "close"]] = [
+            level + 0.0002, level - 0.0002, level + 0.0003, level - 0.0001,
+        ]
+    return pd.concat([frame, pd.DataFrame([candle])], ignore_index=True)
+
+
+def test_retest_not_touched_remains_wait_with_exact_reason(monkeypatch):
+    pending, frame = _waiting_retest_plan(monkeypatch)
+    candles = _append_retest_candle(frame, pending.retest_level, touched=False)
+
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"], candles, pending_retest=pending,
+        timeframe="1D", scan_id="not-touched", session_label="London",
+        news_risk="LOW", now=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert plan is None
+    assert audit["decision"] == "WAIT_FOR_RETEST"
+    assert audit["retest_confirmed"] is False
+    assert audit["failing_gate"] == "RETEST_NOT_CONFIRMED"
+
+
+def test_retest_touched_but_failed_hold_remains_wait(monkeypatch):
+    pending, frame = _waiting_retest_plan(monkeypatch)
+    candles = _append_retest_candle(frame, pending.retest_level, held=False)
+
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"], candles, pending_retest=pending,
+        timeframe="1D", scan_id="failed-hold", session_label="London",
+        news_risk="LOW", now=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert plan is None
+    assert audit["retest_confirmed"] is False
+    assert audit["failing_gate"] == "RETEST_NOT_CONFIRMED"
+
+
+def test_confirmed_retest_with_quality_passes_preserves_original_plan(monkeypatch):
+    pending, frame = _waiting_retest_plan(monkeypatch)
+    candles = _append_retest_candle(frame, pending.retest_level)
+
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"], candles, pending_retest=pending,
+        timeframe="1D", scan_id="confirmed", session_label="London",
+        news_risk="LOW", now=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert plan is not None and plan["status"] == "PENDING_ENTRY"
+    assert audit["retest_confirmed"] is True
+    assert audit["entry_quality_passed"] is True
+    assert plan["id"] == pending.id
+    assert (plan["entry_price"], plan["stop_loss"], plan["take_profit_1"], plan["take_profit_2"]) == (
+        pending.entry_price, pending.stop_loss, pending.take_profit_1, pending.take_profit_2,
+    )
+
+
+def test_confirmed_retest_target_space_failure_is_explicit(monkeypatch):
+    pending, frame = _waiting_retest_plan(monkeypatch)
+    candles = _append_retest_candle(frame, pending.retest_level)
+
+    def blocked_quality(*args, **kwargs):
+        quality = _controlled_quality(*args, **kwargs)
+        quality["opposing_level"] = pending.entry_price + abs(pending.entry_price - pending.stop_loss) * 0.5
+        return quality
+
+    monkeypatch.setattr("app.forex.scanner._entry_quality", blocked_quality)
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"], candles, pending_retest=pending,
+        timeframe="1D", scan_id="target-blocked", session_label="London",
+        news_risk="LOW", now=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert plan is not None and plan["status"] == "WAIT_FOR_RETEST"
+    assert audit["retest_confirmed"] is True
+    assert audit["failing_gate"] == "RETEST_CONFIRMED_TARGET_SPACE_FAILED"
+    assert "retest is not confirmed" not in str(audit["reason"]).lower()
+
+
+def test_confirmed_retest_stop_too_wide_is_explicit(monkeypatch):
+    pending, frame = _waiting_retest_plan(monkeypatch)
+    pending = pending.model_copy(update={"stop_loss": pending.entry_price - 0.2})
+    candles = _append_retest_candle(frame, pending.retest_level)
+
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"], candles, pending_retest=pending,
+        timeframe="1D", scan_id="stop-wide", session_label="London",
+        news_risk="LOW", now=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert plan is None
+    assert audit["retest_confirmed"] is True
+    assert audit["failing_gate"] == "RETEST_CONFIRMED_STOP_TOO_WIDE"
+
+
+def test_existing_active_reuse_has_distinct_scan_status(monkeypatch, forex_database):
+    import app.forex.scanner as scanner
+
+    pair = SUPPORTED_FOREX_PAIRS["EURUSD"]
+    monkeypatch.setattr(scanner, "SUPPORTED_FOREX_PAIRS", {"EURUSD": pair})
+    first = asyncio.run(scan_forex(FakeProvider(), timeframe="1D"))
+    assert first.result_status == "TRADE_FOUND"
+
+    second = asyncio.run(scan_forex(FakeProvider(), timeframe="1D"))
+    assert second.result_status == "ACTIVE_SIGNAL_REUSED"
+    assert not second.created
+    assert second.reused
+    assert second.telegram_queued == 0
+
+
+def test_promoted_retest_reports_trade_and_queues_once(monkeypatch, forex_database):
+    import app.forex.scanner as scanner
+    from app.utils.database import get_connection
+
+    pair = SUPPORTED_FOREX_PAIRS["EURUSD"]
+    base = _regression_trend_frame("LONG")
+    level = float(base.iloc[-1]["close"])
+    confirmed = _append_retest_candle(base, level)
+
+    class AdvancingProvider(ForexDataProvider):
+        name = "advancing"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def candles(self, pair, timeframe: str, limit: int = 240) -> pd.DataFrame:
+            frame = base if self.calls == 0 else confirmed
+            self.calls += 1
+            return frame.copy()
+
+    queued: list[str] = []
+    monkeypatch.setattr(scanner, "SUPPORTED_FOREX_PAIRS", {"EURUSD": pair})
+    monkeypatch.setattr(scanner, "_entry_confirmation", lambda *_a, **_k: (
+        False, "1D bullish continuation needs a completed pullback/retest.", "continuation", level,
+    ))
+    monkeypatch.setattr(scanner, "_entry_quality", _controlled_quality)
+    monkeypatch.setattr(scanner, "enqueue_forex_signal", lambda signal: queued.append(signal.id) or 1)
+    provider = AdvancingProvider()
+
+    waiting_run = asyncio.run(scan_forex(provider, timeframe="1D"))
+    assert waiting_run.result_status == "WAIT_FOR_RETEST"
+    waiting = waiting_run.created[0]
+    original_plan = (waiting.entry_price, waiting.stop_loss, waiting.take_profit_1, waiting.take_profit_2)
+
+    promoted_run = asyncio.run(scan_forex(provider, timeframe="1D"))
+    assert promoted_run.result_status == "TRADE_FOUND"
+    assert promoted_run.telegram_queued == 1
+    assert queued == [waiting.id]
+    promoted = get_signal(waiting.id)
+    assert promoted.status == "PENDING_ENTRY"
+    assert (promoted.entry_price, promoted.stop_loss, promoted.take_profit_1, promoted.take_profit_2) == original_plan
+
+    repeated_run = asyncio.run(scan_forex(provider, timeframe="1D"))
+    assert repeated_run.result_status == "ACTIVE_SIGNAL_REUSED"
+    assert repeated_run.telegram_queued == 0
+    assert queued == [waiting.id]
+    assert len(list_signals(("PENDING_ENTRY",), timeframe="1D")) == 1
+
+    with get_connection() as connection:
+        diagnostic = connection.execute(
+            "SELECT * FROM forex_candle_evaluations WHERE retest_signal_id = ? ORDER BY evaluated_at DESC LIMIT 1",
+            (waiting.id,),
+        ).fetchone()
+    assert diagnostic["retest_confirmed"] == 1
+    assert diagnostic["entry_quality_passed"] == 1
+    assert diagnostic["promotion_occurred"] == 1
+    assert diagnostic["confirmation_candle_ohlc_json"]

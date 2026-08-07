@@ -276,6 +276,24 @@ def ensure_forex_schema() -> None:
             )
             """
         )
+        evaluation_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(forex_candle_evaluations)")
+        }
+        evaluation_additions = {
+            "retest_signal_id": "TEXT",
+            "retest_confirmed": "INTEGER",
+            "retest_level": "REAL",
+            "confirmation_candle_ohlc_json": "TEXT",
+            "entry_quality_passed": "INTEGER",
+            "failing_gate": "TEXT",
+            "promotion_occurred": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, definition in evaluation_additions.items():
+            if column not in evaluation_columns:
+                connection.execute(
+                    f"ALTER TABLE forex_candle_evaluations ADD COLUMN {column} {definition}"
+                )
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_forex_signal_public_id ON forex_signals(public_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_forex_signal_status ON forex_signals(status, created_at)")
         connection.execute(
@@ -319,9 +337,8 @@ def ensure_forex_schema() -> None:
             BEFORE UPDATE OF timeframe, direction, entry_price, entry_low, entry_high,
                 stop_loss, take_profit_1, take_profit_2, tp1_closes_position,
                 risk_reward_1, risk_reward_2,
-                strategy_family, strategy_version, setup_score, market_regime
+                strategy_family, strategy_version, market_regime
             ON forex_signals
-            WHEN NOT (OLD.status = 'WAIT_FOR_RETEST' AND NEW.status = 'PENDING_ENTRY')
             BEGIN
                 SELECT RAISE(ABORT, 'persisted forex signal plans are immutable');
             END
@@ -465,6 +482,13 @@ def save_candle_evaluation(
     decision: str,
     reason: str,
     signal_id: str | None = None,
+    retest_signal_id: str | None = None,
+    retest_confirmed: bool | None = None,
+    retest_level: float | None = None,
+    confirmation_candle_ohlc: dict[str, Any] | None = None,
+    entry_quality_passed: bool | None = None,
+    failing_gate: str | None = None,
+    promotion_occurred: bool = False,
 ) -> None:
     ensure_forex_schema()
     with get_connection() as connection:
@@ -473,14 +497,21 @@ def save_candle_evaluation(
             INSERT OR IGNORE INTO forex_candle_evaluations (
                 evaluation_key, symbol, timeframe, candle_open_at,
                 strategy_family, strategy_version, decision, reason,
-                signal_id, evaluated_at
+                signal_id, evaluated_at, retest_signal_id, retest_confirmed,
+                retest_level, confirmation_candle_ohlc_json,
+                entry_quality_passed, failing_gate, promotion_occurred
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 evaluation_key, symbol, timeframe, candle_open_at,
                 strategy_family, strategy_version, decision, reason,
-                signal_id, datetime.now(UTC).isoformat(),
+                signal_id, datetime.now(UTC).isoformat(), retest_signal_id,
+                None if retest_confirmed is None else int(retest_confirmed),
+                retest_level,
+                json.dumps(confirmation_candle_ohlc) if confirmation_candle_ohlc else None,
+                None if entry_quality_passed is None else int(entry_quality_passed),
+                failing_gate, int(promotion_occurred),
             ),
         )
 
@@ -795,14 +826,6 @@ def find_waiting_retest(symbol: str, timeframe: str) -> ForexSignalPlan | None:
 def promote_retest_signal(
     signal_id: str,
     *,
-    entry_price: float,
-    entry_low: float,
-    entry_high: float,
-    stop_loss: float,
-    take_profit_1: float,
-    take_profit_2: float,
-    risk_reward_1: float,
-    risk_reward_2: float,
     entry_trigger: str,
     entry_quality_score: float,
     setup_score: float,
@@ -820,30 +843,15 @@ def promote_retest_signal(
         else cross_market_context
     ) if cross_market_context else None
     with get_connection() as connection:
-        connection.execute(
+        cursor = connection.execute(
             """
             UPDATE forex_signals
-            SET status = 'PENDING_ENTRY', entry = ?, entry_price = ?, entry_low = ?, entry_high = ?,
-                stop_loss = ?, tp1 = ?, tp2 = ?, take_profit_1 = ?, take_profit_2 = ?,
-                rr = ?, risk_reward_1 = ?, risk_reward_2 = ?,
-                entry_trigger = ?, entry_quality_score = ?, grade = ?,
+            SET status = 'PENDING_ENTRY', entry_trigger = ?, entry_quality_score = ?, grade = ?,
                 setup_score = ?, score = ?, technical_score = ?, context_adjustment = ?,
                 cross_market_context_json = ?, setup_reason = ?, retest_confirmed_at = ?
             WHERE public_id = ? AND status = 'WAIT_FOR_RETEST'
             """,
             (
-                entry_price,
-                entry_price,
-                entry_low,
-                entry_high,
-                stop_loss,
-                take_profit_1,
-                take_profit_2,
-                take_profit_1,
-                take_profit_2,
-                risk_reward_2,
-                risk_reward_1,
-                risk_reward_2,
                 entry_trigger,
                 entry_quality_score,
                 grade,
@@ -857,6 +865,8 @@ def promote_retest_signal(
                 signal_id,
             ),
         )
+        if cursor.rowcount != 1:
+            raise RuntimeError(f"Retest signal {signal_id} is no longer waiting for promotion")
     signal = get_signal(signal_id)
     if signal is None:
         raise LookupError(signal_id)
