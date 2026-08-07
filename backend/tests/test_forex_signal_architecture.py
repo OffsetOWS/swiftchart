@@ -233,6 +233,72 @@ def test_each_timeframe_uses_real_higher_timeframe_and_persists_immutable_signal
     assert list_signals(("PENDING_ENTRY",), timeframe=timeframe)
 
 
+def test_neutral_higher_timeframe_continues_through_entry_quality(monkeypatch):
+    frame = _regression_trend_frame("LONG")
+    neutral_htf = NoTradeProvider()
+    neutral_frame = asyncio.run(neutral_htf.candles(SUPPORTED_FOREX_PAIRS["EURUSD"], "4h"))
+    price = float(frame.iloc[-1]["close"])
+    quality_checked = False
+
+    def approved_quality(*args, **kwargs):
+        nonlocal quality_checked
+        quality_checked = True
+        return _controlled_quality(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "app.forex.scanner._entry_confirmation",
+        lambda *_args, **_kwargs: (True, "Confirmed bullish retest.", "retest", price),
+    )
+    monkeypatch.setattr("app.forex.scanner._entry_quality", approved_quality)
+
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"],
+        frame,
+        htf_candles=neutral_frame,
+        timeframe="1H",
+        scan_id="neutral-htf-regression",
+        session_label="London",
+        news_risk="LOW",
+        now=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert quality_checked is True
+    assert plan is not None and plan["status"] == "PENDING_ENTRY"
+    assert plan["htf_bias"] == "NEUTRAL"
+    assert plan["trend_score"] == 75.0
+    assert plan["timeframe_alignment"] == "1H setup allowed under neutral 4H bias"
+    assert audit["decision"] == "TRADE"
+
+
+def test_opposing_higher_timeframe_remains_hard_rejection(monkeypatch):
+    frame = _regression_trend_frame("LONG")
+    opposing_htf = _regression_trend_frame("SHORT")
+    entry_quality_called = False
+
+    def unexpected_quality(*args, **kwargs):
+        nonlocal entry_quality_called
+        entry_quality_called = True
+        return _controlled_quality(*args, **kwargs)
+
+    monkeypatch.setattr("app.forex.scanner._entry_quality", unexpected_quality)
+
+    plan, audit = analyze_forex_timeframe(
+        SUPPORTED_FOREX_PAIRS["EURUSD"],
+        frame,
+        htf_candles=opposing_htf,
+        timeframe="1H",
+        scan_id="opposing-htf-regression",
+        session_label="London",
+        news_risk="LOW",
+        now=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert plan is None
+    assert entry_quality_called is False
+    assert audit["decision"] == "NO_TRADE"
+    assert "conflicts with 4H bias=bearish" in str(audit["reason"])
+
+
 def test_timeframes_coexist_and_dedupe_only_within_same_timeframe(forex_database):
     provider = FakeProvider()
     created = {}

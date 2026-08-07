@@ -477,7 +477,10 @@ def analyze_forex_timeframe(
     direction = pending_retest.direction if pending_retest else ("LONG" if regime == "bullish" else "SHORT")
     required_htf = HIGHER_TIMEFRAME[timeframe]
     htf_bias = _trend(htf_candles) if required_htf and htf_candles is not None else "not-applicable"
-    if required_htf and htf_bias != regime:
+    # A neutral higher timeframe is non-confirming, but it is not opposing.
+    # It receives no HTF trend-score credit and must still clear every
+    # downstream entry-quality gate and the unchanged minimum setup score.
+    if required_htf and htf_bias not in {regime, "neutral"}:
         reason = f"{timeframe} {regime} setup conflicts with {required_htf} bias={htf_bias}."
         if pending_retest:
             reason = f"RETEST_CONFIRMED_HTF_ALIGNMENT_FAILED: {reason}"
@@ -658,7 +661,10 @@ def analyze_forex_timeframe(
         "bias_timeframe": required_htf.lower() if required_htf else timeframe.lower(),
         "timeframe_alignment": (
             f"{timeframe} setup aligned with {required_htf} bias"
-            if required_htf else f"{timeframe} primary structural bias"
+            if required_htf and htf_bias == regime
+            else f"{timeframe} setup allowed under neutral {required_htf} bias"
+            if required_htf and htf_bias == "neutral"
+            else f"{timeframe} primary structural bias"
         ),
         "htf_bias": htf_bias.upper(),
         "setup_structure": f"{structure.upper()}:{structure_id}",
