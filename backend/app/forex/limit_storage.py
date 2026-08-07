@@ -51,10 +51,6 @@ def ensure_limit_opportunity_schema() -> None:
                 closed_at TEXT,
                 cancellation_reason TEXT,
                 invalidation_reason TEXT,
-                dxy_context_json TEXT,
-                oil_context_json TEXT,
-                cross_market_context_json TEXT NOT NULL,
-                total_context_adjustment REAL NOT NULL,
                 technical_score REAL NOT NULL,
                 final_score REAL NOT NULL,
                 suggested_position_size REAL,
@@ -114,7 +110,6 @@ def _dump(opportunity: ForexLimitOpportunity) -> str:
 
 def insert_limit_opportunity(opportunity: ForexLimitOpportunity) -> tuple[ForexLimitOpportunity, bool]:
     ensure_limit_opportunity_schema()
-    context = opportunity.context
     with get_connection() as connection:
         existing = connection.execute(
             "SELECT payload_json FROM forex_limit_opportunities WHERE dedupe_key = ?",
@@ -122,41 +117,60 @@ def insert_limit_opportunity(opportunity: ForexLimitOpportunity) -> tuple[ForexL
         ).fetchone()
         if existing:
             return ForexLimitOpportunity.model_validate_json(existing["payload_json"]), False
+        columns = [
+            "id", "pair", "timeframe", "strategy_family", "strategy_version",
+            "order_type", "opportunity_status", "direction", "market_session",
+            "entry_price", "entry_zone_low", "entry_zone_high", "entry_mode",
+            "sweep_level", "sweep_extreme", "sweep_candle_time",
+            "displacement_candle_time", "fvg_lower", "fvg_upper", "fvg_midpoint",
+            "fvg_creation_candle_time", "stop_loss", "take_profit_1", "take_profit_2",
+            "risk_reward_1", "risk_reward_2", "expiry_time", "expiry_candle_count",
+            "fill_time", "closed_at", "cancellation_reason", "invalidation_reason",
+            "technical_score", "final_score", "suggested_position_size", "mae_pips",
+            "mfe_pips", "pnl_r", "dedupe_key", "shadow_mode", "auto_execution_enabled",
+            "payload_json", "created_at", "updated_at",
+        ]
+        values = [
+            opportunity.id, opportunity.pair, opportunity.timeframe,
+            opportunity.strategy_family, opportunity.strategy_version,
+            opportunity.order_type, opportunity.opportunity_status,
+            opportunity.direction, opportunity.market_session, opportunity.entry_price,
+            opportunity.entry_zone_low, opportunity.entry_zone_high, opportunity.entry_mode,
+            opportunity.sweep_level, opportunity.sweep_extreme,
+            opportunity.sweep_candle_time.isoformat(),
+            opportunity.displacement_candle_time.isoformat(), opportunity.fvg.lower,
+            opportunity.fvg.upper, opportunity.fvg.midpoint,
+            opportunity.fvg.creation_candle_time.isoformat(), opportunity.stop_loss,
+            opportunity.take_profit_1, opportunity.take_profit_2,
+            opportunity.risk_reward_1, opportunity.risk_reward_2,
+            opportunity.expiry_time.isoformat(), opportunity.expiry_candle_count,
+            None, None, None, None, opportunity.technical_score, opportunity.final_score,
+            opportunity.suggested_position_size, opportunity.mae_pips,
+            opportunity.mfe_pips, opportunity.pnl_r, opportunity.dedupe_key,
+            int(opportunity.shadow_mode), 0, _dump(opportunity),
+            opportunity.created_at.isoformat(), opportunity.updated_at.isoformat(),
+        ]
+        # Older databases may retain removed context columns. Supply inert values
+        # only to satisfy their historical NOT NULL constraints; these values are
+        # not loaded into models or exposed by APIs.
+        existing_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(forex_limit_opportunities)")
+        }
+        legacy_values = {
+            "dxy_context_json": None,
+            "oil_context_json": None,
+            "cross_market_context_json": "{}",
+            "total_context_adjustment": 0,
+        }
+        for column, value in legacy_values.items():
+            if column in existing_columns:
+                columns.append(column)
+                values.append(value)
+        placeholders = ",".join("?" for _ in columns)
         connection.execute(
-            """
-            INSERT INTO forex_limit_opportunities (
-                id,pair,timeframe,strategy_family,strategy_version,order_type,opportunity_status,direction,market_session,
-                entry_price,entry_zone_low,entry_zone_high,entry_mode,sweep_level,sweep_extreme,
-                sweep_candle_time,displacement_candle_time,fvg_lower,fvg_upper,fvg_midpoint,
-                fvg_creation_candle_time,stop_loss,take_profit_1,take_profit_2,risk_reward_1,
-                risk_reward_2,expiry_time,expiry_candle_count,fill_time,closed_at,cancellation_reason,
-                invalidation_reason,dxy_context_json,oil_context_json,cross_market_context_json,
-                total_context_adjustment,technical_score,final_score,suggested_position_size,
-                mae_pips,mfe_pips,pnl_r,dedupe_key,shadow_mode,
-                auto_execution_enabled,payload_json,created_at,updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                opportunity.id, opportunity.pair, opportunity.timeframe, opportunity.strategy_family,
-                opportunity.strategy_version, opportunity.order_type, opportunity.opportunity_status,
-                opportunity.direction, opportunity.market_session, opportunity.entry_price, opportunity.entry_zone_low,
-                opportunity.entry_zone_high, opportunity.entry_mode, opportunity.sweep_level,
-                opportunity.sweep_extreme, opportunity.sweep_candle_time.isoformat(),
-                opportunity.displacement_candle_time.isoformat(), opportunity.fvg.lower,
-                opportunity.fvg.upper, opportunity.fvg.midpoint,
-                opportunity.fvg.creation_candle_time.isoformat(), opportunity.stop_loss,
-                opportunity.take_profit_1, opportunity.take_profit_2, opportunity.risk_reward_1,
-                opportunity.risk_reward_2, opportunity.expiry_time.isoformat(),
-                opportunity.expiry_candle_count, None, None, None, None,
-                json.dumps(context.usd_context.model_dump(mode="json")) if context.usd_context else None,
-                json.dumps(context.oil_context.model_dump(mode="json")) if context.oil_context else None,
-                json.dumps(context.model_dump(mode="json")), context.total_adjustment,
-                opportunity.technical_score, opportunity.final_score,
-                opportunity.suggested_position_size, opportunity.mae_pips, opportunity.mfe_pips,
-                opportunity.pnl_r, opportunity.dedupe_key,
-                int(opportunity.shadow_mode), 0, _dump(opportunity),
-                opportunity.created_at.isoformat(), opportunity.updated_at.isoformat(),
-            ),
+            f"INSERT INTO forex_limit_opportunities ({','.join(columns)}) VALUES ({placeholders})",
+            values,
         )
     return opportunity, True
 
@@ -262,26 +276,6 @@ def limit_strategy_stats(*, include_shadow: bool = True) -> dict:
     resolved_pnl = [item.pnl_r for item in resolved_fills if item.pnl_r is not None]
     all_pnl = [item.pnl_r or 0.0 for item in opportunities]
 
-    def context_split(component_name: str) -> dict[str, dict[str, float | int]]:
-        result = {"alignment": {"count": 0, "average_pnl_r": 0.0}, "conflict": {"count": 0, "average_pnl_r": 0.0}}
-        pnl: dict[str, list[float]] = {"alignment": [], "conflict": []}
-        for item in opportunities:
-            component = getattr(item.context, component_name)
-            if component is None:
-                continue
-            group = (
-                "alignment" if component.alignment_status in {"ALIGNED", "STRONG_ALIGNMENT"}
-                else "conflict" if component.alignment_status in {"CONFLICT", "STRONG_CONFLICT"}
-                else None
-            )
-            if group:
-                result[group]["count"] += 1
-                if item.pnl_r is not None:
-                    pnl[group].append(item.pnl_r)
-        for group in result:
-            result[group]["average_pnl_r"] = average(pnl[group])
-        return result
-
     return {
         "strategy_id": "liquidity_sweep_fvg_limit_v1",
         "total_detected": total,
@@ -308,8 +302,6 @@ def limit_strategy_stats(*, include_shadow: bool = True) -> dict:
         "by_timeframe": breakdown("timeframe"),
         "by_session": breakdown("market_session"),
         "by_entry_mode": breakdown("entry_mode"),
-        "dxy_context": context_split("usd_context"),
-        "oil_context": context_split("oil_context"),
     }
 
 

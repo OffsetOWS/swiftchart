@@ -36,8 +36,6 @@ FOREX_COLUMNS: dict[str, str] = {
     "trend_score": "REAL NOT NULL DEFAULT 0",
     "entry_quality_score": "REAL NOT NULL DEFAULT 0",
     "technical_score": "REAL",
-    "context_adjustment": "REAL NOT NULL DEFAULT 0",
-    "cross_market_context_json": "TEXT",
     "strategy_family": "TEXT",
     "strategy_version": "TEXT",
     "market_regime": "TEXT",
@@ -681,12 +679,6 @@ def _row_to_signal(row: sqlite3.Row) -> ForexSignalPlan:
         trend_score=float(row["trend_score"] or 0),
         entry_quality_score=float(row["entry_quality_score"] or 0),
         technical_score=float(row["technical_score"]) if row["technical_score"] is not None else None,
-        context_adjustment=float(row["context_adjustment"] or 0),
-        cross_market_context=(
-            json.loads(row["cross_market_context_json"])
-            if row["cross_market_context_json"]
-            else None
-        ),
         strategy_family=row["strategy_family"] or "legacy",
         strategy_version=row["strategy_version"] or "legacy",
         market_regime=row["market_regime"] or "Unknown",
@@ -766,11 +758,6 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
             if hasattr(plan.get("retest_confirmed_at"), "isoformat")
             else plan.get("retest_confirmed_at")
         ),
-        "cross_market_context_json": json.dumps(
-            plan["cross_market_context"].model_dump(mode="json")
-            if hasattr(plan.get("cross_market_context"), "model_dump")
-            else plan.get("cross_market_context")
-        ) if plan.get("cross_market_context") else None,
     }
     with get_connection() as connection:
         connection.execute(
@@ -784,7 +771,7 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
                 execution_timeframe, setup_timeframe, bias_timeframe, timeframe_alignment,
                 htf_bias, setup_structure, entry_trigger, market_session, setup_score,
                 trend_score, entry_quality_score,
-                technical_score, context_adjustment, cross_market_context_json,
+                technical_score,
                 strategy_family, strategy_version, market_regime, bias, setup_reason,
                 expires_at, source_scan_id, dedupe_key, retest_level,
                 setup_candle_time, retest_confirmed_at, is_legacy
@@ -797,8 +784,7 @@ def insert_signal(plan: dict[str, Any]) -> ForexSignalPlan:
                 :status, :created_at, :execution_timeframe, :setup_timeframe, :bias_timeframe,
                 :timeframe_alignment, :htf_bias, :setup_structure, :entry_trigger,
                 :market_session, :setup_score, :trend_score, :entry_quality_score,
-                :technical_score, :context_adjustment,
-                :cross_market_context_json, :strategy_family, :strategy_version,
+                :technical_score, :strategy_family, :strategy_version,
                 :market_regime, :bias, :setup_reason, :expires_at, :source_scan_id,
                 :dedupe_key, :retest_level, :setup_candle_time, :retest_confirmed_at, 0
             )
@@ -831,24 +817,17 @@ def promote_retest_signal(
     setup_score: float,
     grade: str,
     technical_score: float,
-    context_adjustment: float,
-    cross_market_context: Any,
     setup_reason: str,
     confirmed_at: datetime,
 ) -> ForexSignalPlan:
     """Promote an immutable waiting plan after a later completed candle confirms its retest."""
-    context_json = json.dumps(
-        cross_market_context.model_dump(mode="json")
-        if hasattr(cross_market_context, "model_dump")
-        else cross_market_context
-    ) if cross_market_context else None
     with get_connection() as connection:
         cursor = connection.execute(
             """
             UPDATE forex_signals
             SET status = 'PENDING_ENTRY', entry_trigger = ?, entry_quality_score = ?, grade = ?,
-                setup_score = ?, score = ?, technical_score = ?, context_adjustment = ?,
-                cross_market_context_json = ?, setup_reason = ?, retest_confirmed_at = ?
+                setup_score = ?, score = ?, technical_score = ?,
+                setup_reason = ?, retest_confirmed_at = ?
             WHERE public_id = ? AND status = 'WAIT_FOR_RETEST'
             """,
             (
@@ -858,8 +837,6 @@ def promote_retest_signal(
                 setup_score,
                 setup_score,
                 technical_score,
-                context_adjustment,
-                context_json,
                 setup_reason,
                 confirmed_at.isoformat(),
                 signal_id,

@@ -9,7 +9,7 @@ import pandas as pd
 from app.config import get_settings
 from app.forex.config import ForexPairConfig
 from app.forex.market_data import TIMEFRAME_SECONDS
-from app.forex.models import FairValueGap, ForexCrossMarketContext, ForexLimitOpportunity
+from app.forex.models import FairValueGap, ForexLimitOpportunity
 
 STRATEGY_ID = "liquidity_sweep_fvg_limit_v1"
 STRATEGY_FAMILY = "liquidity_sweep_fvg_limit"
@@ -49,23 +49,12 @@ def _expiry_count(timeframe: str) -> int:
     }[timeframe]
 
 
-def _empty_context(pair: str, timeframe: str, now: datetime) -> ForexCrossMarketContext:
-    return ForexCrossMarketContext(
-        pair=pair,
-        timeframe=timeframe,
-        total_adjustment=0,
-        evaluated_at=now,
-        explanation="Cross-market context was unavailable; technical validation was unchanged.",
-    )
-
-
 def detect_liquidity_sweep_fvg_limit(
     pair: ForexPairConfig,
     candles: pd.DataFrame,
     *,
     timeframe: str,
     htf_bias: str,
-    context: ForexCrossMarketContext | None = None,
     news_risk: str = "LOW",
     spread_ok: bool = True,
     session_label: str = "Unknown",
@@ -185,9 +174,8 @@ def detect_liquidity_sweep_fvg_limit(
     if (direction == "LONG" and current >= tp1) or (direction == "SHORT" and current <= tp1):
         return None, "Target was reached before the limit opportunity could be created."
 
-    context = context or _empty_context(pair.pair, timeframe, evaluated_at)
     technical_score = min(95.0, 76 + min(8, gap_size / atr * 20) + min(6, body / atr * 3))
-    final_score = max(0.0, min(100.0, technical_score + context.total_adjustment))
+    final_score = technical_score
     risk_amount = settings.default_account_size * settings.forex_risk_percentage_per_trade / 100
     suggested_position_size = max(
         settings.forex_min_position_size,
@@ -228,7 +216,7 @@ def detect_liquidity_sweep_fvg_limit(
         suggested_position_size=round(suggested_position_size, 2),
         expiry_time=fvg_time + timedelta(seconds=TIMEFRAME_SECONDS[timeframe] * expiry_count),
         expiry_candle_count=expiry_count, technical_score=round(technical_score, 1),
-        final_score=round(final_score, 1), context=context,
+        final_score=round(final_score, 1),
         reasoning=[
             f"{'Sell-side' if direction == 'LONG' else 'Buy-side'} liquidity sweep detected.",
             "Reclaim confirmed before displacement.",

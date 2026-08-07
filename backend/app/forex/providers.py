@@ -27,7 +27,6 @@ class ForexProviderQuotaExceeded(ForexProviderError):
 
 class ForexDataProvider(ABC):
     name: str
-    supports_cross_market_context: bool = False
 
     @abstractmethod
     async def candles(self, pair: ForexPairConfig, timeframe: str, limit: int = 240) -> pd.DataFrame:
@@ -36,7 +35,6 @@ class ForexDataProvider(ABC):
 
 class TwelveDataForexProvider(ForexDataProvider):
     name = "twelvedata"
-    supports_cross_market_context = True
     interval_map = {"15m": "15min", "1h": "1h", "4h": "4h", "1d": "1day"}
     _unavailable_until: datetime | None = None
     _unavailable_reason: str | None = None
@@ -115,7 +113,6 @@ class TwelveDataForexProvider(ForexDataProvider):
 
 class FallbackForexProvider(ForexDataProvider):
     name = "oanda"
-    supports_cross_market_context = True
 
     def __init__(
         self,

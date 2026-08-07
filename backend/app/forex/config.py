@@ -75,12 +75,6 @@ SUPPORTED_FOREX_PAIRS: dict[str, ForexPairConfig] = {
     "CADCHF": ForexPairConfig("CADCHF", "CAD/CHF", 0.0001, ("London", "New York"), 2.5, 4, 55),
 }
 
-CROSS_MARKET_INSTRUMENTS: dict[str, ForexPairConfig] = {
-    "DXY": ForexPairConfig("DXY", "DXY", 0.01, (), 0, 0, 10_000),
-    "WTI": ForexPairConfig("WTI", "WTI/USD", 0.01, (), 0, 0, 10_000),
-}
-
-
 NEWS_KEYWORDS = (
     "CPI",
     "NFP",

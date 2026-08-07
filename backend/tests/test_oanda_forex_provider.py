@@ -121,6 +121,12 @@ def test_oanda_symbol_mapping(symbol, instrument):
     assert oanda_instrument(symbol) == instrument
 
 
+@pytest.mark.parametrize("instrument", ["DXY", "WTI", "BRENT"])
+def test_oanda_rejects_removed_external_context_instruments(instrument):
+    with pytest.raises(ForexProviderError, match="Unsupported OANDA Forex instrument"):
+        oanda_instrument(instrument)
+
+
 def test_oanda_candles_are_normalized_and_incomplete_candle_is_ignored(monkeypatch):
     import app.forex.oanda as oanda
 

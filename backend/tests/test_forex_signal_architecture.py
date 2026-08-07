@@ -203,6 +203,8 @@ def test_each_timeframe_uses_real_higher_timeframe_and_persists_immutable_signal
     assert set(provider.timeframes) == expected_timeframes
 
     signal = first.created[0]
+    assert "context_adjustment" not in signal.model_dump()
+    assert "cross_market_context" not in signal.model_dump()
     original_levels = (
         signal.entry_low,
         signal.entry_high,
@@ -894,8 +896,6 @@ def test_waiting_signal_is_not_telegram_eligible_until_promoted(forex_database):
         setup_score=88,
         grade="A",
         technical_score=88,
-        context_adjustment=0,
-        cross_market_context=waiting.cross_market_context,
         setup_reason="Approved only after a later completed retest.",
         confirmed_at=confirmed_at,
     )

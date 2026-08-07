@@ -50,8 +50,6 @@ OANDA_INSTRUMENTS = {
     "AUDCAD": "AUD_CAD",
     "NZDCAD": "NZD_CAD",
     "CADCHF": "CAD_CHF",
-    "DXY": "USDOLLAR_USD",
-    "WTI": "WTICO_USD",
 }
 
 
@@ -65,7 +63,6 @@ def oanda_instrument(symbol: str) -> str:
 
 class OandaForexProvider(ForexDataProvider):
     name = "oanda"
-    supports_cross_market_context = True
     _unavailable_until: datetime | None = None
     _last_successful_request: datetime | None = None
     _last_error: str | None = None

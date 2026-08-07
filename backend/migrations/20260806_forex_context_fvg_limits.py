@@ -1,4 +1,4 @@
-"""Add immutable cross-market snapshots and shadow limit-opportunity persistence."""
+"""Ensure Forex signal and shadow limit-opportunity persistence."""
 
 from app.forex.limit_storage import ensure_limit_opportunity_schema
 from app.forex.storage import ensure_forex_schema

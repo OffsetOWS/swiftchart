@@ -7,7 +7,6 @@ import pandas as pd
 
 from app.config import get_settings
 from app.forex.config import SUPPORTED_FOREX_PAIRS
-from app.forex.context import evaluate_cross_market_context
 from app.forex.limit_lifecycle import advance_limit_opportunity
 from app.forex.limit_storage import (
     insert_limit_opportunity,
@@ -84,15 +83,6 @@ async def scan_limit_opportunities(
             if opportunity is None:
                 rejected.append({"pair": pair.pair, "reason": reason})
                 continue
-            context = await evaluate_cross_market_context(
-                pair.pair, opportunity.direction, timeframe, market_data, now=evaluated_at
-            )
-            opportunity = opportunity.model_copy(
-                update={
-                    "context": context,
-                    "final_score": max(0, min(100, round(opportunity.technical_score + context.total_adjustment, 1))),
-                }
-            )
             persisted, was_created = insert_limit_opportunity(opportunity)
             (created if was_created else reused).append(persisted)
             if was_created and not persisted.shadow_mode:

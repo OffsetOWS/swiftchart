@@ -77,11 +77,6 @@ class Settings(BaseSettings):
     forex_scan_1d_interval_seconds: int = Field(default=86400, ge=60)
     forex_lifecycle_interval_seconds: int = Field(default=60, ge=30)
     forex_worker_startup_delay_seconds: int = Field(default=20, ge=0)
-    forex_dxy_context_enabled: bool = True
-    forex_oil_context_enabled: bool = True
-    forex_cross_market_max_positive_adjustment: float = Field(default=10.0, ge=0, le=20)
-    forex_cross_market_max_negative_adjustment: float = Field(default=-10.0, ge=-20, le=0)
-    forex_cross_market_stale_multiplier: float = Field(default=2.5, ge=1, le=10)
     forex_liquidity_fvg_limit_enabled: bool = False
     forex_liquidity_fvg_limit_shadow_mode: bool = True
     forex_liquidity_fvg_auto_execution_enabled: bool = False

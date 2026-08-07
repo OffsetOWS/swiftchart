@@ -77,7 +77,6 @@ def format_forex_signal(signal: ForexSignalPlan, app_url: str | None = None) -> 
 
 
 def format_forex_limit_opportunity(opportunity: ForexLimitOpportunity, app_url: str | None = None) -> str:
-    context = opportunity.context
     lines = [
         "🟡 <b>FOREX LIMIT OPPORTUNITY</b>",
         "",
@@ -97,22 +96,13 @@ def format_forex_limit_opportunity(opportunity: ForexLimitOpportunity, app_url: 
         "",
         "Setup:",
         *[html.escape(reason) for reason in opportunity.reasoning],
+        f"Final Score: {opportunity.final_score:g}",
+        "",
+        f"Status: WAITING FOR {opportunity.order_type.replace('_', ' ')}",
+        "This is not an active trade until entry is filled.",
+        "",
+        f'<a href="{html.escape(_application_url(app_url))}/app/forex/limits/{opportunity.id}">View Limit Opportunity</a>',
     ]
-    if context.usd_context:
-        lines.append(f"DXY: {context.usd_context.state.replace('_', ' ').title()} — {context.usd_context.alignment_status.replace('_', ' ').title()}")
-    if context.oil_context:
-        lines.append(f"Oil: {context.oil_context.state.replace('_', ' ').title()} — {context.oil_context.alignment_status.replace('_', ' ').title()}")
-    lines.extend(
-        [
-            f"Context Adjustment: {context.total_adjustment:+g}",
-            f"Final Score: {opportunity.final_score:g}",
-            "",
-            f"Status: WAITING FOR {opportunity.order_type.replace('_', ' ')}",
-            "This is not an active trade until entry is filled.",
-            "",
-            f'<a href="{html.escape(_application_url(app_url))}/app/forex/limits/{opportunity.id}">View Limit Opportunity</a>',
-        ]
-    )
     return "\n".join(lines)
 
 
