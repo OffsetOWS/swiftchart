@@ -25,6 +25,11 @@ test("mobile Take Trade and History flows remain present", () => {
   assert.match(mobileApp, /async function takeTrade/);
 });
 
+test("the mobile Forex home has no experimental limit-opportunity section", () => {
+  assert.doesNotMatch(mobileApp, /LimitOpportunitiesSection|Limit Opportunities|Experimental · Shadow/);
+  assert.doesNotMatch(mobileApp, /getForexLimitOpportunities|forexLimitOpportunities/);
+});
+
 test("the canonical mobile UI remains visible on desktop-width viewports", () => {
   const styles = readFileSync(new URL("../styles/global.css", import.meta.url), "utf8");
 

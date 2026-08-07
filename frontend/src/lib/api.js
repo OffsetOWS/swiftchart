@@ -169,11 +169,6 @@ export function getForexSignal(signalId) {
   return request(`/api/forex/signals/${encodeURIComponent(signalId)}`);
 }
 
-export function getForexLimitOpportunities(status = "") {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return request(`/api/forex/limit-opportunities${query}`);
-}
-
 export function runForexScan(timeframe, accessToken) {
   return request(`/api/forex/scan?timeframe=${encodeURIComponent(timeframe)}`, {
     method: "POST",
