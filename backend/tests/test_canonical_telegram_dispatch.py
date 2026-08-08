@@ -43,20 +43,22 @@ def configure_db(monkeypatch, tmp_path, subscribers: str = "101") -> None:
 def idea(
     regime: str = "RANGE_BOUND",
     *,
+    direction: str = "Long",
     candle_time: datetime = START,
     entry_status: str = "READY",
     entry_zone: tuple[float, float] = (100.0, 102.0),
 ) -> TradeIdea:
+    short = direction == "Short"
     candidate = TradeIdea(
         symbol="BTCUSDT",
         timeframe="4h",
         exchange="hyperliquid",
-        direction="Long",
+        direction=direction,
         market_regime=regime,
         entry_zone=entry_zone,
-        stop_loss=95.0,
-        take_profit_1=110.0,
-        take_profit_2=118.0,
+        stop_loss=107.0 if short else 95.0,
+        take_profit_1=92.0 if short else 110.0,
+        take_profit_2=84.0 if short else 118.0,
         risk_reward_ratio=2.5,
         reason="Canonical Telegram dispatch test.",
         confidence_score=88,
@@ -124,6 +126,47 @@ def test_shadow_no_trade_and_wait_are_never_dispatched(monkeypatch, tmp_path):
     assert result["eligible"] == 0
     assert bot.messages == []
     assert all(telegram_dispatch_record(trade_id) is None for trade_id in trade_ids)
+
+
+def test_trend_short_dispatches_while_trend_long_stays_shadow(monkeypatch, tmp_path):
+    from bot.alerts import run_alert_scan
+
+    configure_db(monkeypatch, tmp_path)
+    trend_short = idea("TRENDING_DOWN", direction="Short")
+    trend_long = idea("TRENDING_UP", direction="Long")
+    assert trend_short.strategy_decision == "TRADE"
+    assert trend_short.edge_status == "VALIDATED"
+    assert trend_short.setup_family == trend_long.setup_family == "trend_continuation"
+    assert trend_short.strategy_version == trend_long.strategy_version == "v1"
+    assert trend_long.strategy_decision == "SHADOW"
+    assert trend_long.executable_at is None
+
+    short_id = save(trend_short)
+    long_id = save(trend_long)
+    bot = FakeBot()
+    result = asyncio.run(run_alert_scan(bot))
+
+    assert result["eligible"] == 1
+    assert result["sent"] == 1
+    assert len(bot.messages) == 1
+    assert "SHORT" in bot.messages[0][1].upper()
+    assert telegram_dispatch_record(short_id)["status"] == "SUCCEEDED"
+    assert telegram_dispatch_record(long_id) is None
+
+
+def test_duplicate_trend_short_opportunity_dispatches_once(monkeypatch, tmp_path):
+    from bot.alerts import run_alert_scan
+
+    configure_db(monkeypatch, tmp_path)
+    first = idea("TRENDING_DOWN", direction="Short")
+    duplicate = idea("TRENDING_DOWN", direction="Short")
+    first_id = save(first)
+    assert save_trade_ideas([duplicate]) == [first_id]
+
+    bot = FakeBot()
+    assert asyncio.run(run_alert_scan(bot))["sent"] == 1
+    assert asyncio.run(run_alert_scan(bot))["sent"] == 0
+    assert len(bot.messages) == 1
 
 
 def test_waiting_range_dispatches_only_after_valid_promotion(monkeypatch, tmp_path):

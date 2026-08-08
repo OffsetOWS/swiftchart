@@ -10,7 +10,7 @@ from app.services import execution_signals
 from app.services.strategy_v2_analytics import strategy_edge_registry_report, strategy_v2_performance_report
 from app.services.strategy_experiments import strict_trend_short_shadow_report
 from app.services.trade_history import save_trade_ideas
-from app.strategy.decision_engine import evaluate_strategy_decision
+from app.strategy.decision_engine import evaluate_strategy_decision, is_actionable_v2
 from app.utils import database
 from bot.alerts import is_limit_order_alertable
 
@@ -75,13 +75,15 @@ def stored_rows():
 
 def test_initial_registry_statuses_are_explicit_and_not_auto_activated():
     report = strategy_edge_registry_report()
-    statuses = {entry["strategy_family"]: entry["status"] for entry in report["entries"]}
-    assert statuses == {
-        "range_mean_reversion": "VALIDATED",
-        "trend_continuation": "EXPERIMENTAL",
-        "breakout": "DISABLED",
-        "regime_transition": "UNVALIDATED",
+    statuses = {
+        (entry["strategy_family"], entry["direction"]): entry["status"]
+        for entry in report["entries"]
     }
+    assert statuses[("range_mean_reversion", None)] == "VALIDATED"
+    assert statuses[("trend_continuation", None)] == "EXPERIMENTAL"
+    assert statuses[("trend_continuation", "SHORT")] == "VALIDATED"
+    assert statuses[("breakout", None)] == "DISABLED"
+    assert statuses[("regime_transition", None)] == "UNVALIDATED"
     assert "never auto-activates" in report["activation_policy"]
 
 
@@ -114,19 +116,55 @@ def test_unsupported_regime_returns_no_trade():
     assert unsupported.opportunity_key is None
 
 
-def test_strict_trend_short_remains_shadow_only_and_non_actionable(monkeypatch, tmp_path):
+def test_trend_short_is_production_without_changing_strict_metadata(monkeypatch, tmp_path):
     configure_db(monkeypatch, tmp_path)
     trend_short = idea("TRENDING_DOWN", "Short", strict=True)
-    assert evaluate_strategy_decision(trend_short) == "SHADOW"
+    assert evaluate_strategy_decision(trend_short) == "TRADE"
+    assert trend_short.setup_family == "trend_continuation"
+    assert trend_short.strategy_version == "v1"
+    assert trend_short.edge_status == "VALIDATED"
     assert trend_short.strict_trend_short_eligible is True
     assert trend_short.production_rule_accepted is True
-    assert trend_short.outcome_tracking_mode == "SHADOW"
+    assert trend_short.outcome_tracking_mode == "PRODUCTION"
+    # Telegram becomes eligible only after persistence assigns executable_at.
     assert is_limit_order_alertable(trend_short) is False
     save_trade_ideas([trend_short])
     row = stored_rows()[0]
+    assert row["lifecycle_status"] == "active"
+    assert row["executable_at"] is not None
+    assert row["setup_family"] == "trend_continuation"
+    assert row["strategy_version"] == "v1"
+    assert row["strict_trend_short_eligible"] == 1
+
+
+def test_trend_long_remains_shadow_only_and_non_actionable(monkeypatch, tmp_path):
+    configure_db(monkeypatch, tmp_path)
+    trend_long = idea("TRENDING_UP", "Long")
+
+    assert evaluate_strategy_decision(trend_long) == "SHADOW"
+    assert trend_long.setup_family == "trend_continuation"
+    assert trend_long.strategy_version == "v1"
+    assert trend_long.edge_status == "EXPERIMENTAL"
+    assert trend_long.outcome_tracking_mode == "SHADOW"
+    assert is_limit_order_alertable(trend_long) is False
+
+    save_trade_ideas([trend_long])
+    row = stored_rows()[0]
     assert row["lifecycle_status"] == "shadow"
     assert row["executable_at"] is None
-    assert row["strict_trend_short_eligible"] == 1
+    assert row["strategy_version"] == "v1"
+
+
+def test_production_api_selection_includes_trend_short_and_excludes_trend_long():
+    trend_short = idea("TRENDING_DOWN", "Short")
+    trend_long = idea("TRENDING_UP", "Long")
+
+    assert evaluate_strategy_decision(trend_short) == "TRADE"
+    assert evaluate_strategy_decision(trend_long) == "SHADOW"
+
+    api_ideas = [candidate for candidate in (trend_short, trend_long) if is_actionable_v2(candidate)]
+    assert api_ideas == [trend_short]
+    assert trend_short.strategy_version == trend_long.strategy_version == "v1"
 
 
 def test_strict_trend_short_report_keeps_v2_reference_cohort(monkeypatch, tmp_path):
@@ -136,7 +174,7 @@ def test_strict_trend_short_report_keeps_v2_reference_cohort(monkeypatch, tmp_pa
         idea("TRENDING_DOWN", "Short", candle_time=START + timedelta(hours=4), strict=False),
     ]
     for candidate in reference:
-        assert evaluate_strategy_decision(candidate) == "SHADOW"
+        assert evaluate_strategy_decision(candidate) == "TRADE"
     save_trade_ideas(reference)
     with database.get_connection() as connection:
         rows = connection.execute("SELECT id, strict_trend_short_eligible FROM trade_ideas ORDER BY id").fetchall()
@@ -231,7 +269,7 @@ def test_validated_wait_for_retest_promotes_without_duplicate(monkeypatch, tmp_p
     assert rows[0]["executable_at"] is not None
 
 
-def test_experimental_trend_retest_promotes_to_shadow_not_execution(monkeypatch, tmp_path):
+def test_trend_short_retest_promotes_to_production(monkeypatch, tmp_path):
     configure_db(monkeypatch, tmp_path)
     pending = idea("TRENDING_DOWN", "Short", entry_status="WAIT_FOR_RETEST", strict=False)
     assert evaluate_strategy_decision(pending) == "WAIT_FOR_RETEST"
@@ -244,15 +282,15 @@ def test_experimental_trend_retest_promotes_to_shadow_not_execution(monkeypatch,
         confirmations=["rejection at resistance"],
         strict=True,
     ).model_copy(update={"signal_candle_close": 100.5})
-    assert evaluate_strategy_decision(confirmed) == "SHADOW"
+    assert evaluate_strategy_decision(confirmed) == "TRADE"
     save_trade_ideas([confirmed])
 
     rows = stored_rows()
     assert len(rows) == 1
     assert rows[0]["entry_status"] == "READY"
-    assert rows[0]["strategy_decision"] == "SHADOW"
-    assert rows[0]["outcome_tracking_mode"] == "SHADOW"
-    assert rows[0]["executable_at"] is None
+    assert rows[0]["strategy_decision"] == "TRADE"
+    assert rows[0]["outcome_tracking_mode"] == "PRODUCTION"
+    assert rows[0]["executable_at"] is not None
     assert rows[0]["retest_confirmed_at"] is not None
 
 

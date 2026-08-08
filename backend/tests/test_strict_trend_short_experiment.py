@@ -174,16 +174,19 @@ def configure_db(monkeypatch, tmp_path):
     database._INITIALIZED = False
 
 
-def test_shadow_metadata_does_not_change_v2_shadow_or_telegram_eligibility():
+def test_shadow_metadata_does_not_change_short_production_eligibility():
     from bot.alerts import is_limit_order_alertable
-    from app.strategy.decision_engine import evaluate_strategy_decision
+    from app.strategy.decision_engine import evaluate_strategy_decision, is_actionable_v2
 
     strict_false = sample_idea(candle_time=START, strict=False)
     strict_true = sample_idea(candle_time=START, strict=True)
 
     assert strict_false.entry_status == strict_true.entry_status == "READY"
-    assert evaluate_strategy_decision(strict_false) == "SHADOW"
-    assert evaluate_strategy_decision(strict_true) == "SHADOW"
+    assert evaluate_strategy_decision(strict_false) == "TRADE"
+    assert evaluate_strategy_decision(strict_true) == "TRADE"
+    assert is_actionable_v2(strict_false) is True
+    assert is_actionable_v2(strict_true) is True
+    # Canonical Telegram requires persistence to assign executable_at.
     assert is_limit_order_alertable(strict_false) is False
     assert is_limit_order_alertable(strict_true) is False
 
@@ -246,8 +249,8 @@ def test_existing_production_path_still_accepts_position_plus_htf_momentum(monke
     assert ideas[0].strict_trigger_type is None
     assert ideas[0].strict_confirmation_type == "htf_bearish_alignment"
     assert ideas[0].strategy_version == "v1"
-    assert ideas[0].edge_status == "EXPERIMENTAL"
-    assert ideas[0].strategy_decision == "SHADOW"
+    assert ideas[0].edge_status == "VALIDATED"
+    assert ideas[0].strategy_decision == "TRADE"
 
 
 def test_shadow_metadata_does_not_change_auto_execution(monkeypatch, tmp_path):
