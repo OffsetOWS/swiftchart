@@ -171,7 +171,9 @@ def test_strict_trend_short_report_keeps_v2_reference_cohort(monkeypatch, tmp_pa
     configure_db(monkeypatch, tmp_path)
     reference = [
         idea("TRENDING_DOWN", "Short", strict=True),
-        idea("TRENDING_DOWN", "Short", candle_time=START + timedelta(hours=4), strict=False),
+        idea("TRENDING_DOWN", "Short", candle_time=START + timedelta(hours=4), strict=False).model_copy(
+            update={"symbol": "ETHUSDT"}
+        ),
     ]
     for candidate in reference:
         assert evaluate_strategy_decision(candidate) == "TRADE"

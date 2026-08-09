@@ -190,7 +190,7 @@ def test_pending_setup_is_not_dispatched_to_executor(monkeypatch):
     monkeypatch.setattr(scanner, "_prefilter_market", fake_prefilter_market)
     monkeypatch.setattr(scanner, "analyze_dataframe", fake_analyze_dataframe)
     monkeypatch.setattr(scanner, "save_signal_reviews", lambda reviews: None)
-    monkeypatch.setattr(scanner, "save_trade_ideas", lambda ideas: [])
+    monkeypatch.setattr(scanner, "save_trade_ideas", lambda ideas, **kwargs: [])
     monkeypatch.setattr(scanner, "dispatch_trade_ideas_to_execution", fake_dispatch)
 
     result = asyncio.run(scanner.run_scan(exchange="hyperliquid", timeframe="4h", force=True))

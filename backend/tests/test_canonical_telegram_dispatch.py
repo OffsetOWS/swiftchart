@@ -204,13 +204,18 @@ def test_same_opportunity_and_price_updates_do_not_resend(monkeypatch, tmp_path)
     assert len(bot.messages) == 1
 
 
-def test_new_signal_candle_creates_new_alert_even_inside_legacy_cooldown(monkeypatch, tmp_path):
+def test_new_signal_candle_after_tp1_creates_new_alert_inside_legacy_cooldown(monkeypatch, tmp_path):
     from bot.alerts import run_alert_scan
 
     configure_db(monkeypatch, tmp_path)
     first_id = save(idea())
     bot = FakeBot()
     assert asyncio.run(run_alert_scan(bot))["sent"] == 1
+    with database.get_connection() as connection:
+        connection.execute(
+            "UPDATE trade_ideas SET status='TP1_HIT', tp1_hit_at=?, result='OPEN' WHERE id=?",
+            (datetime.now(UTC).isoformat(), first_id),
+        )
 
     second = idea(candle_time=START + timedelta(hours=4))
     second_id = save(second)

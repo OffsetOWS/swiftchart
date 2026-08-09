@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import hashlib
 import json
 import logging
 from typing import Iterable
@@ -27,6 +28,75 @@ TIMEFRAME_MINUTES = {
 }
 
 logger = logging.getLogger(__name__)
+
+CRYPTO_QUOTE_SUFFIXES = ("USDT", "USDC", "SUSD", "USD", "PERP")
+
+
+def canonical_crypto_symbol(symbol: str) -> str:
+    normalized = "".join(character for character in str(symbol or "").upper() if character.isalnum())
+    for suffix in CRYPTO_QUOTE_SUFFIXES:
+        if normalized.endswith(suffix) and len(normalized) > len(suffix):
+            normalized = normalized[: -len(suffix)]
+            break
+    return f"{normalized}USDT" if normalized else ""
+
+
+def _active_trade_signal_id(row: dict) -> str:
+    opportunity_key = str(row.get("opportunity_key") or "").strip()
+    if opportunity_key:
+        digest = hashlib.sha256(opportunity_key.encode("utf-8")).hexdigest()[:20]
+        return f"swiftchart-{digest}"
+    return f"trade-idea-{row['id']}"
+
+
+def _find_active_crypto_trade(connection, symbol: str, *, exclude_trade_id: int | None = None) -> dict | None:
+    canonical_symbol = canonical_crypto_symbol(symbol)
+    if not canonical_symbol:
+        return None
+    rows = connection.execute(
+        """
+        SELECT * FROM trade_ideas
+        WHERE strategy_decision = 'TRADE'
+          AND entry_status = 'READY'
+          AND lifecycle_status = 'active'
+          AND executable_at IS NOT NULL
+          AND tp1_hit_at IS NULL
+          AND sl_hit_at IS NULL
+          AND closed_at IS NULL
+          AND COALESCE(status, 'PENDING') NOT IN (
+              'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'EXPIRED', 'AMBIGUOUS',
+              'BREAK_EVEN', 'CLOSED_AFTER_TP1', 'PARTIAL_WIN', 'PARTIAL_LOSS'
+          )
+        ORDER BY executable_at ASC, id ASC
+        """
+    ).fetchall()
+    for row in rows:
+        active = dict(row)
+        if exclude_trade_id is not None and int(active["id"]) == int(exclude_trade_id):
+            continue
+        if canonical_crypto_symbol(active["symbol"]) == canonical_symbol:
+            return active
+    return None
+
+
+def active_crypto_trade_for_symbol(symbol: str) -> dict | None:
+    with get_connection() as connection:
+        return _find_active_crypto_trade(connection, symbol)
+
+
+def active_trade_skip_diagnostic(symbol: str, existing: dict, *, opportunity_key: str | None = None) -> dict:
+    canonical_symbol = canonical_crypto_symbol(symbol)
+    signal_id = _active_trade_signal_id(existing)
+    return {
+        "decision": "SKIPPED_ACTIVE_TRADE",
+        "symbol": canonical_symbol,
+        "existing_trade_id": int(existing["id"]),
+        "existing_signal_id": signal_id,
+        "skipped_opportunity_key": opportunity_key,
+        "reason": (
+            f"Skipped {canonical_symbol}: active TRADE {signal_id} has reached neither TP1 nor SL."
+        ),
+    }
 
 
 def _now_iso() -> str:
@@ -354,47 +424,78 @@ def _adopt_existing_identity(idea: TradeIdea, existing: dict) -> None:
         idea.signal_candle_time = _parse_dt(existing["signal_candle_time"])
 
 
-def save_trade_ideas(ideas: Iterable[TradeIdea]) -> list[int]:
+def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | None = None) -> list[int]:
     ids: list[int] = []
     with get_connection() as connection:
+        # Serialize the active-symbol recheck with activation. This closes the
+        # gap between scanner preflight and persistence across service workers.
+        connection.execute("BEGIN IMMEDIATE")
         for idea in ideas:
             try:
                 family, opportunity_key = _prepare_opportunity_identity(idea)
+                existing = None
                 if opportunity_key:
                     row = connection.execute("SELECT * FROM trade_ideas WHERE opportunity_key = ?", (opportunity_key,)).fetchone()
                     if row is not None:
                         existing = dict(row)
-                        if _is_protected_history(existing):
-                            logger.info(
-                                "opportunity_skipped reason=protected_history opportunity_key=%s id=%s status=%s result=%s",
-                                opportunity_key,
-                                existing["id"],
-                                existing.get("status"),
-                                existing.get("result"),
-                            )
-                            continue
-                        if existing.get("entry_status") == "WAIT_FOR_RETEST" and idea.entry_status == "READY":
-                            idea.entry_status = "WAIT_FOR_RETEST"
-                            if idea.strategy_version is not None:
-                                idea.strategy_decision = "WAIT_FOR_RETEST"
-                                idea.outcome_tracking_mode = "NONE"
-                            _adopt_existing_identity(idea, existing)
-                            logger.info(
-                                "opportunity_skipped reason=same_candle_is_not_retest opportunity_key=%s id=%s",
-                                opportunity_key,
-                                existing["id"],
-                            )
-                            continue
-                        trade_id = _update_opportunity(connection, existing, idea, entry_status=idea.entry_status)
-                        if trade_id not in ids:
-                            ids.append(trade_id)
+
+                activates_trade = idea.entry_status == "READY" and idea.strategy_decision == "TRADE"
+                if activates_trade:
+                    active_trade = _find_active_crypto_trade(
+                        connection,
+                        idea.symbol,
+                        exclude_trade_id=int(existing["id"]) if existing is not None else None,
+                    )
+                    if active_trade is not None:
+                        diagnostic = active_trade_skip_diagnostic(
+                            idea.symbol,
+                            active_trade,
+                            opportunity_key=opportunity_key,
+                        )
+                        if diagnostics is not None:
+                            diagnostics.append(diagnostic)
                         logger.info(
-                            "opportunity_updated opportunity_key=%s id=%s entry_status=%s",
-                            opportunity_key,
-                            trade_id,
-                            idea.entry_status,
+                            "crypto_scan_decision=%s symbol=%s existing_trade_id=%s existing_signal_id=%s reason=%s",
+                            diagnostic["decision"],
+                            diagnostic["symbol"],
+                            diagnostic["existing_trade_id"],
+                            diagnostic["existing_signal_id"],
+                            diagnostic["reason"],
                         )
                         continue
+
+                if existing is not None:
+                    if _is_protected_history(existing):
+                        logger.info(
+                            "opportunity_skipped reason=protected_history opportunity_key=%s id=%s status=%s result=%s",
+                            opportunity_key,
+                            existing["id"],
+                            existing.get("status"),
+                            existing.get("result"),
+                        )
+                        continue
+                    if existing.get("entry_status") == "WAIT_FOR_RETEST" and idea.entry_status == "READY":
+                        idea.entry_status = "WAIT_FOR_RETEST"
+                        if idea.strategy_version is not None:
+                            idea.strategy_decision = "WAIT_FOR_RETEST"
+                            idea.outcome_tracking_mode = "NONE"
+                        _adopt_existing_identity(idea, existing)
+                        logger.info(
+                            "opportunity_skipped reason=same_candle_is_not_retest opportunity_key=%s id=%s",
+                            opportunity_key,
+                            existing["id"],
+                        )
+                        continue
+                    trade_id = _update_opportunity(connection, existing, idea, entry_status=idea.entry_status)
+                    if trade_id not in ids:
+                        ids.append(trade_id)
+                    logger.info(
+                        "opportunity_updated opportunity_key=%s id=%s entry_status=%s",
+                        opportunity_key,
+                        trade_id,
+                        idea.entry_status,
+                    )
+                    continue
 
                 can_promote = idea.strategy_version is None or idea.strategy_decision in {"TRADE", "SHADOW"}
                 if family and idea.entry_status == "READY" and can_promote:
