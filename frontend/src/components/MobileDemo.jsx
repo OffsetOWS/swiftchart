@@ -136,6 +136,33 @@ function normalizePendingSetup(setup, index) {
   };
 }
 
+function normalizeActiveCryptoTrade(trade, index) {
+  return {
+    ...normalizeIdea({
+      symbol: trade.symbol,
+      direction: /short|sell/i.test(trade.direction) ? "Short" : "Long",
+      timeframe: trade.timeframe,
+      exchange: trade.exchange,
+      entry_zone: [trade.entry_zone_low, trade.entry_zone_high],
+      stop_loss: trade.stop_loss,
+      take_profit_1: trade.take_profit_1,
+      take_profit_2: trade.take_profit_2,
+      risk_reward_ratio: trade.risk_reward,
+      setup_score: trade.setup_score,
+      confidence_score: trade.confidence,
+      market_regime: trade.market_regime,
+      regime_label: trade.regime_label,
+      reason: trade.reason,
+      invalid_condition: trade.invalidation,
+      signal_candle_time: trade.signal_candle_time,
+      created_at: trade.created_at,
+    }, index),
+    id: `active-crypto-${trade.id}`,
+    isActiveTrade: true,
+    lifecycleStatus: trade.status || "OPEN",
+  };
+}
+
 function numbersFromDisplay(value) {
   return (String(value || "").replace(/,/g, "").match(/\d*\.?\d+/g) || [])
     .map(Number)
@@ -323,6 +350,7 @@ function Direction({ direction }) {
 
 function statusForSignal(signal) {
   if (signal.market === MARKET_TYPES.forex) return signal.score >= 80 ? signal.grade || "A" : signal.status || "Open";
+  if (signal.isActiveTrade) return "Active";
   if (signal.isPending) return "Wait";
   if (signal.score >= 90) return "High Conviction";
   if (signal.score > 75) return signal.tier || scoreTier(signal.score);
@@ -446,34 +474,23 @@ function AlertTriangleIcon() {
   return <Target size={18} />;
 }
 
-function HomeScreen({ signals, onSelect, onViewAll, market, forexSignals, forexOverview, forexLimitOpportunities }) {
+function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forexSignals, forexOverview, forexLimitOpportunities }) {
   if (market === MARKET_TYPES.forex) {
     return <ForexHomeScreen signals={forexSignals} overview={forexOverview} onSelect={onSelect} limitOpportunities={forexLimitOpportunities} />;
   }
-  if (!signals.length) {
-    return (
-      <div className="graphite-screen">
-        <EmptyState
-          title="No confirmed setup right now"
-          message="SwiftChart is tracking the live market. New opportunities will appear when they pass confirmation."
-          action="Scan again"
-          onAction={onViewAll}
-        />
-      </div>
-    );
-  }
-  const best = signals[0];
-  const bullish = !/short|sell/i.test(best.direction);
+  const best = signals[0] || null;
+  const bullish = best ? !/short|sell/i.test(best.direction) : null;
+  const opportunitySignals = signals.filter((signal) => !signal.isActiveTrade);
   return (
     <div className="graphite-screen">
       <section className="graphite-hero-card">
         <div className="graphite-hero-copy">
           <span>Market Summary</span>
-          <h1>{best.score}</h1>
-          <p>{best.symbol} is the strongest ranked setup right now.</p>
-          <span className={`graphite-bias-pill ${bullish ? "bullish" : "bearish"}`}>
-            {bullish ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
-            {bullish ? "Bullish momentum" : "Bearish momentum"}
+          <h1>{best ? best.score : "--"}</h1>
+          <p>{best ? `${best.symbol} is the strongest ranked setup right now.` : "SwiftChart is tracking the live crypto market."}</p>
+          <span className={`graphite-bias-pill ${bullish === null ? "" : bullish ? "bullish" : "bearish"}`}>
+            {bullish === null ? <Target size={15} /> : bullish ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
+            {bullish === null ? "Waiting for confirmation" : bullish ? "Bullish momentum" : "Bearish momentum"}
           </span>
         </div>
         <SparkChart />
@@ -482,11 +499,23 @@ function HomeScreen({ signals, onSelect, onViewAll, market, forexSignals, forexO
       <section className="graphite-regime-card">
         <div>
           <span>Market Regime</span>
-          <strong>{bullish ? "Bullish, selective" : "Bearish, selective"}</strong>
-          <p>{bullish ? "Momentum favors longs." : "Momentum favors shorts."} Weak mid-range setups are filtered out.</p>
+          <strong>{bullish === null ? "Neutral, selective" : bullish ? "Bullish, selective" : "Bearish, selective"}</strong>
+          <p>{bullish === null ? "Waiting for a confirmed directional edge." : bullish ? "Momentum favors longs." : "Momentum favors shorts."} Weak mid-range setups are filtered out.</p>
         </div>
         <LineChart size={24} />
       </section>
+
+      {activeSignals.length ? (
+        <section className="graphite-section">
+          <div className="graphite-section-head">
+            <span>Active trades</span>
+            <small>{activeSignals.length}</small>
+          </div>
+          <div className="graphite-stack graphite-signal-list">
+            {activeSignals.slice(0, 6).map((signal) => <SignalRow key={signal.id} signal={signal} onSelect={onSelect} />)}
+          </div>
+        </section>
+      ) : null}
 
       <section className="graphite-section">
         <div className="graphite-section-head">
@@ -494,7 +523,15 @@ function HomeScreen({ signals, onSelect, onViewAll, market, forexSignals, forexO
           <button type="button" onClick={onViewAll}>View All <ChevronRight size={15} /></button>
         </div>
         <div className="graphite-stack graphite-signal-list">
-          {signals.slice(0, 4).map((signal) => <SignalRow key={`${signal.symbol}-home`} signal={signal} onSelect={onSelect} />)}
+          {opportunitySignals.slice(0, 4).map((signal) => <SignalRow key={`${signal.symbol}-${signal.timeframe}-home`} signal={signal} onSelect={onSelect} />)}
+          {!opportunitySignals.length ? (
+            <EmptyState
+              title="No new confirmed setup right now"
+              message="Active Telegram trades stay listed above while SwiftChart scans for the next opportunity."
+              action="Scan again"
+              onAction={onViewAll}
+            />
+          ) : null}
         </div>
       </section>
 
@@ -1157,6 +1194,7 @@ const validTabs = new Set(navItems.map(([key]) => key));
 export default function MobileDemo({
   topIdeas = [],
   pendingSetups = [],
+  activeCryptoTrades = [],
   initialConfigLoading = false,
   initialTab = "",
   onRefreshCrypto,
@@ -1205,13 +1243,19 @@ export default function MobileDemo({
   const [paperTrades, setPaperTrades] = useState([]);
   const [tradeSaveState, setTradeSaveState] = useState({ signalId: "", status: "idle" });
   const signals = useMemo(() => {
+    const active = activeCryptoTrades.map(normalizeActiveCryptoTrade);
     const confirmed = topIdeas.map(normalizeIdea);
     const pending = pendingSetups.map(normalizePendingSetup);
-    return [...confirmed, ...pending]
+    const unique = new Map();
+    [...active, ...confirmed, ...pending].forEach((signal) => {
+      const key = `${signal.symbol}|${signal.timeframe}|${String(signal.direction).toLowerCase()}`;
+      if (!unique.has(key)) unique.set(key, signal);
+    });
+    return [...unique.values()]
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10)
+      .slice(0, 50)
       .map((signal, index) => ({ ...signal, rank: index + 1 }));
-  }, [pendingSetups, topIdeas]);
+  }, [activeCryptoTrades, pendingSetups, topIdeas]);
   const preferredSignals = useMemo(() => {
     const settings = preferences.trading;
     return [...signals].sort((a, b) => {
@@ -1222,6 +1266,10 @@ export default function MobileDemo({
       return b.score - a.score;
     });
   }, [preferences.trading, signals]);
+  const activeSignals = useMemo(
+    () => preferredSignals.filter((signal) => signal.isActiveTrade),
+    [preferredSignals],
+  );
   const appInitializationReady = !auth.loading && !auth.profileLoading && marketPreferenceReady && !initialConfigLoading;
 
   const completeAppSplash = useCallback(() => {
@@ -1680,7 +1728,7 @@ export default function MobileDemo({
             </div>
           ) : null}
           <main className="graphite-content">
-            {tab === "home" ? <HomeScreen signals={preferredSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} forexLimitOpportunities={forexLimitOpportunities} /> : null}
+            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} forexLimitOpportunities={forexLimitOpportunities} /> : null}
             {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} onSelect={openHistoryTrade} /> : null}
             {tab === "account" && accountView === "main" ? (

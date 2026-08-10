@@ -211,7 +211,7 @@ def save_signal_reviews(reviews: Iterable[SignalReview]) -> int:
 
 def row_to_dict(row) -> dict:
     data = dict(row)
-    for key in ("created_at", "outcome_checked_at", "entry_triggered_at", "tp1_hit_at", "tp2_hit_at", "sl_hit_at", "expired_at", "closed_at"):
+    for key in ("created_at", "expires_at", "outcome_checked_at", "entry_triggered_at", "tp1_hit_at", "tp2_hit_at", "sl_hit_at", "expired_at", "closed_at"):
         if data.get(key) and isinstance(data[key], str):
             data[key] = _parse_dt(data[key])
     return data
@@ -566,6 +566,51 @@ def update_outcome(trade_id: int, outcome: dict) -> None:
 
 
 ACTIVE_TRADE_STATUSES = ("PENDING", "OPEN", "ENTRY_TRIGGERED", "TP1_HIT")
+
+
+def list_active_crypto_trades(exchange: str | None = None, limit: int = 50) -> list[dict]:
+    """Return the canonical unresolved crypto ideas shared by Telegram and the website."""
+    selected_exchange = str(exchange or "all").lower()
+    clauses = [
+        "result = 'OPEN'",
+        "lifecycle_status = 'active'",
+        f"status IN ({','.join('?' for _ in ACTIVE_TRADE_STATUSES)})",
+        "(expires_at IS NULL OR expires_at > ?)",
+        "exchange != 'forex'",
+    ]
+    values: list = [*ACTIVE_TRADE_STATUSES, _now_iso()]
+    if selected_exchange != "all":
+        clauses.append("exchange = ?")
+        values.append(selected_exchange)
+    row_limit = min(100, max(1, int(limit or 50)))
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT * FROM trade_ideas
+            WHERE {' AND '.join(clauses)}
+            ORDER BY setup_score DESC, created_at DESC, id DESC
+            LIMIT ?
+            """,
+            [*values, row_limit],
+        ).fetchall()
+
+    output: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        record = row_to_dict(row)
+        identity = str(record.get("signal_fingerprint") or "|".join(
+            [
+                str(record.get("symbol") or ""),
+                str(record.get("timeframe") or ""),
+                str(record.get("direction") or ""),
+            ]
+        ))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        record["source"] = "telegram-canonical"
+        output.append(record)
+    return output
 
 
 async def _evaluate_rows(rows) -> dict:

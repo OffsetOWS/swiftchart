@@ -48,9 +48,11 @@ def idea(symbol: str = "BTCUSDT", *, score: float = 80, entry_status: str = "REA
     )
 
 
-def configure_independent_scan(monkeypatch, tmp_path, ideas_by_symbol: dict[str, list[TradeIdea]]) -> None:
+def configure_independent_scan(monkeypatch, tmp_path, ideas_by_symbol: dict[str, list[TradeIdea]]) -> list[TradeIdea]:
+    import bot.alerts as telegram_alerts
     import bot.scanner as telegram_scanner
 
+    persisted: list[TradeIdea] = []
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "bot_state.json"))
     monkeypatch.setenv("ALERT_DEDUPE_STATE_PATH", str(tmp_path / "alert_dedupe.json"))
     monkeypatch.setenv("TELEGRAM_ALERT_CHAT_IDS", "123")
@@ -74,6 +76,12 @@ def configure_independent_scan(monkeypatch, tmp_path, ideas_by_symbol: dict[str,
         )
 
     monkeypatch.setattr(telegram_scanner, "analyze_dataframe", fake_analyze_dataframe)
+    monkeypatch.setattr(
+        telegram_alerts,
+        "save_trade_ideas",
+        lambda ideas: [persisted.append(item) or index + 1 for index, item in enumerate(ideas)],
+    )
+    return persisted
 
 
 def test_telegram_alert_loop_works_when_website_ideas_are_empty(monkeypatch, tmp_path):
@@ -84,15 +92,17 @@ def test_telegram_alert_loop_works_when_website_ideas_are_empty(monkeypatch, tmp
         return {"ideas": []}
 
     monkeypatch.setattr(website_scanner, "cached_top_ideas", empty_cached_top_ideas)
-    configure_independent_scan(monkeypatch, tmp_path, {"XRPUSDT": [idea("XRPUSDT")]})
+    persisted = configure_independent_scan(monkeypatch, tmp_path, {"XRPUSDT": [idea("XRPUSDT")]})
 
     bot = FakeBot()
     result = asyncio.run(run_alert_scan(bot))
 
     assert result["ideas"] == 1
     assert result["eligible"] == 1
+    assert result["persisted"] == 1
     assert result["sent"] == 1
     assert len(bot.messages) == 1
+    assert [item.symbol for item in persisted] == ["XRPUSDT"]
 
 
 def test_telegram_does_not_call_cached_top_ideas(monkeypatch, tmp_path):

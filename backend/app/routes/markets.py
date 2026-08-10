@@ -10,7 +10,7 @@ from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.scanner import trigger_top_ideas_refresh
-from app.services.trade_history import save_signal_reviews, save_trade_ideas
+from app.services.trade_history import list_active_crypto_trades, save_signal_reviews, save_trade_ideas
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.trade_ideas import analyze_dataframe
 
@@ -238,6 +238,15 @@ async def top_ideas(
         "ideas": ideas,
         "pending_setups": pending_setups,
     }
+
+
+@router.get("/active-crypto-trades")
+async def active_crypto_trades(
+    exchange: str = Query(default="all"),
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    trades = list_active_crypto_trades(exchange=exchange, limit=limit)
+    return {"trades": trades, "count": len(trades), "source": "telegram-canonical"}
 
 
 @router.post("/top-ideas/refresh")

@@ -7,7 +7,7 @@ import Docs from "./pages/Docs.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
-import { getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
+import { getActiveCryptoTrades, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
 
@@ -26,6 +26,7 @@ export default function App() {
   const [path, setPath] = useState(window.location.pathname);
   const [topIdeas, setTopIdeas] = useState([]);
   const [pendingSetups, setPendingSetups] = useState([]);
+  const [activeCryptoTrades, setActiveCryptoTrades] = useState([]);
   const [loadingTopIdeas, setLoadingTopIdeas] = useState(false);
 
   const isLandingPage = path === "/";
@@ -56,10 +57,18 @@ export default function App() {
     if (!silent && topIdeas.length === 0 && pendingSetups.length === 0) setLoadingTopIdeas(true);
     try {
       if (manual) await refreshTopIdeasCache({ exchange: "all", timeframe: "4h" });
-      const data = await getTopIdeas({ exchange: "all", timeframe: "4h" });
-      setTopIdeas(data.ideas || []);
-      setPendingSetups(data.pending_setups || []);
-      return true;
+      const [ideasResult, activeResult] = await Promise.allSettled([
+        getTopIdeas({ exchange: "all", timeframe: "4h" }),
+        getActiveCryptoTrades("all"),
+      ]);
+      if (ideasResult.status === "fulfilled") {
+        setTopIdeas(ideasResult.value.ideas || []);
+        setPendingSetups(ideasResult.value.pending_setups || []);
+      }
+      if (activeResult.status === "fulfilled") {
+        setActiveCryptoTrades(activeResult.value.trades || []);
+      }
+      return ideasResult.status === "fulfilled" || activeResult.status === "fulfilled";
     } catch {
       return false;
     } finally {
@@ -142,6 +151,7 @@ export default function App() {
         <MobileDemo
           topIdeas={topIdeas}
           pendingSetups={pendingSetups}
+          activeCryptoTrades={activeCryptoTrades}
           initialConfigLoading={loadingTopIdeas}
           initialTab={appTabFromPath(path)}
           onRefreshCrypto={() => refreshTopIdeas({ manual: true })}

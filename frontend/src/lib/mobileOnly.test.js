@@ -25,6 +25,14 @@ test("mobile Take Trade and History flows remain present", () => {
   assert.match(mobileApp, /async function takeTrade/);
 });
 
+test("crypto home uses the canonical Telegram active-trade feed", () => {
+  assert.match(app, /getActiveCryptoTrades/);
+  assert.match(app, /activeCryptoTrades=\{activeCryptoTrades\}/);
+  assert.match(mobileApp, /Active trades/);
+  assert.match(mobileApp, /normalizeActiveCryptoTrade/);
+  assert.doesNotMatch(mobileApp, /if \(!signals\.length\) \{[\s\S]*?No confirmed setup right now/);
+});
+
 test("the canonical mobile UI remains visible on desktop-width viewports", () => {
   const styles = readFileSync(new URL("../styles/global.css", import.meta.url), "utf8");
 

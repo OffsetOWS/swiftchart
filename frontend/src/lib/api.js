@@ -96,6 +96,10 @@ export function getTopIdeas({ exchange, timeframe }) {
   return request(`/api/top-ideas?exchange=${exchange}&timeframe=${timeframe}`);
 }
 
+export function getActiveCryptoTrades(exchange = "all") {
+  return request(`/api/active-crypto-trades?exchange=${encodeURIComponent(exchange)}&limit=50`);
+}
+
 export function getMarketIntelligence(symbols = []) {
   const uniqueSymbols = [...new Set(symbols.filter(Boolean))];
   const query = uniqueSymbols.length ? `?symbols=${encodeURIComponent(uniqueSymbols.join(","))}` : "";

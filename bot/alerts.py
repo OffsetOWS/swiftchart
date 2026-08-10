@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.models.schemas import TradeIdea
 from app.services.alert_dedupe import mark_alert_sent as mark_dedupe_sent
 from app.services.alert_dedupe import should_skip_alert
+from app.services.trade_history import save_trade_ideas
 from bot.formatter import format_trade_alert
 from bot.scanner import scan_top_ideas
 from bot.storage import get_subscribers
@@ -131,6 +132,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             rejection_reasons["entry_status rejected/exhausted"] += 1
             continue
         eligible_ideas.append(idea)
+    persisted_ids = save_trade_ideas(eligible_ideas)
     sent = 0
     skipped_by_dedup = 0
     for idea in eligible_ideas:
@@ -179,6 +181,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         "limit_order_ideas": limit_order_ideas,
         "score_eligible_ideas": score_eligible_ideas,
         "eligible": len(eligible_ideas),
+        "persisted": len(persisted_ids),
         "min_score": min_score,
         "sent": sent,
         "alerts_sent": sent,
