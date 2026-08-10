@@ -4,7 +4,6 @@ import { Analytics } from "@vercel/analytics/react";
 import MobileDemo from "./components/MobileDemo.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
-import Landing from "./pages/Landing.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
@@ -82,7 +81,7 @@ export default function App() {
 
   useEffect(() => {
     if (auth.loading) return;
-    if (isLandingPage && auth.isAuthenticated) {
+    if (isLandingPage) {
       navigate("/app/home", { replace: true });
       return;
     }
@@ -127,8 +126,7 @@ export default function App() {
     path,
   ]);
 
-  if (isLandingPage && (auth.loading || auth.isAuthenticated)) return <AuthLoading />;
-  if (isLandingPage) return <><Landing /><Analytics /></>;
+  if (isLandingPage) return <AuthLoading />;
   if (isLaunchPage) return <><LaunchFlow /><Analytics /></>;
   if (isDocsPage) return <><Docs /><Analytics /></>;
   if (isAuthPage && auth.loading) return <><AuthLoading /><Analytics /></>;

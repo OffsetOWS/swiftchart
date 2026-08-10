@@ -64,10 +64,24 @@ function scoreTier(score) {
   return "Watchlist";
 }
 
+function formatTradePrice(value) {
+  const numeric = Number(String(value ?? "").replace(/,/g, ""));
+  if (!Number.isFinite(numeric)) return String(value ?? "-");
+
+  const magnitude = Math.abs(numeric);
+  const maximumFractionDigits = magnitude >= 1 ? 2 : 5;
+  const minimumFractionDigits = magnitude >= 1 && !Number.isInteger(numeric) ? 2 : 0;
+
+  return numeric.toLocaleString(undefined, {
+    minimumFractionDigits,
+    maximumFractionDigits,
+  });
+}
+
 function displayRange(values) {
   if (!Array.isArray(values) || values.length === 0) return "-";
-  const formatted = values.slice(0, 2).map((value) => fmt(value, 8));
-  return formatted.length === 1 ? formatted[0] : formatted.join(" - ");
+  const formatted = values.slice(0, 2).map(formatTradePrice);
+  return formatted.length === 1 ? formatted[0] : formatted.join(" – ");
 }
 
 function normalizeIdea(idea, index) {
@@ -83,9 +97,9 @@ function normalizeIdea(idea, index) {
     score,
     tier: scoreTier(score),
     entry: displayRange(entryZone),
-    sl: idea?.stop_loss !== undefined ? fmt(idea.stop_loss, 8) : "-",
-    tp: idea?.take_profit_1 !== undefined ? fmt(idea.take_profit_1, 8) : "-",
-    tp2: idea?.take_profit_2 !== undefined ? fmt(idea.take_profit_2, 8) : "-",
+    sl: idea?.stop_loss !== undefined ? formatTradePrice(idea.stop_loss) : "-",
+    tp: idea?.take_profit_1 !== undefined ? formatTradePrice(idea.take_profit_1) : "-",
+    tp2: idea?.take_profit_2 !== undefined ? formatTradePrice(idea.take_profit_2) : "-",
     rr: idea?.risk_reward_ratio !== undefined ? `${Number(idea.risk_reward_ratio).toFixed(1)}R` : "-",
     confidence: idea?.confidence_score !== undefined ? `${Math.round(Number(idea.confidence_score))}%` : `${score}%`,
     regime: idea?.regime_label || idea?.market_regime || "Awaiting market classification",
@@ -110,7 +124,7 @@ function normalizePendingSetup(setup, index) {
     score,
     tier: "Watchlist",
     entry: displayRange(setup?.entry_zone),
-    sl: setup?.invalidation_level !== undefined ? fmt(setup.invalidation_level, 8) : "-",
+    sl: setup?.invalidation_level !== undefined ? formatTradePrice(setup.invalidation_level) : "-",
     tp: displayRange(targetZone),
     tp2: "-",
     rr: setup?.estimated_rr !== undefined ? `${Number(setup.estimated_rr).toFixed(1)}R` : "-",

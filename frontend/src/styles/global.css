@@ -8779,9 +8779,14 @@ button:disabled {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    max-width: 100%;
+    overflow: hidden;
     color: var(--graphite-ink);
     font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
     line-height: 1.15;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
