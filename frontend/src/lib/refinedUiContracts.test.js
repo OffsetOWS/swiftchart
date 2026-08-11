@@ -52,13 +52,15 @@ test("Signal Detail uses the approved single-surface hierarchy and concise reaso
   assert.match(refinedStyles, /\.graphite-detail-screen \.graphite-detail[\s\S]*?background:\s*transparent/);
 });
 
-test("Forex Home uses compact pair rows without the experimental limit feed", () => {
-  assert.match(mobileApp, /function ForexPairRow/);
+test("Home, Scan, and History share compact market rows without the experimental limit feed", () => {
+  assert.match(mobileApp, /function MarketSignalRow/);
   assert.match(mobileApp, /Latest opportunities/);
   assert.match(mobileApp, /Active signals/);
+  assert.match(mobileApp, /className="market-pair-list compact"/);
+  assert.match(mobileApp, /graphite-timeline market-history-list/);
   assert.doesNotMatch(mobileApp, /function LimitOpportunitiesSection/);
   assert.doesNotMatch(mobileApp, /Experimental · Shadow/);
   assert.doesNotMatch(mobileApp, />Limit Opportunities</);
-  assert.match(refinedStyles, /Forex home: compact pair rows/);
-  assert.match(refinedStyles, /\.forex-pair-row/);
+  assert.match(refinedStyles, /Market lists: compact pair rows shared by Home, Scan, and History/);
+  assert.match(refinedStyles, /\.market-pair-row/);
 });

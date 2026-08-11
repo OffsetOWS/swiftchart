@@ -12020,37 +12020,46 @@ button.settings-row:active {
   }
 }
 
-/* Forex home: compact pair rows, without the experimental limit feed. */
+/* Market lists: compact pair rows shared by Home, Scan, and History. */
 .graphite-app .forex-home-lists {
   display: grid;
   gap: 22px;
 }
 
-.graphite-app .forex-home-list {
+.graphite-app .market-pair-section {
   display: grid;
   gap: 8px;
 }
 
-.graphite-app .forex-home-list .graphite-section-head {
+.graphite-app .market-pair-section .graphite-section-head {
   padding-inline: 0;
 }
 
-.graphite-app .forex-home-list .graphite-section-head > span {
+.graphite-app .market-pair-section .graphite-section-head > span {
   font-size: 15px;
   letter-spacing: -0.02em;
   text-transform: none;
 }
 
-.graphite-app .forex-home-list .graphite-section-head > button {
+.graphite-app .market-pair-section .graphite-section-head > button {
   color: var(--graphite-teal);
   font-size: 11px;
 }
 
-.graphite-app .forex-pair-list {
+.graphite-app .market-pair-list {
   border-top: 1px solid var(--graphite-line);
 }
 
-.graphite-app .forex-pair-row {
+.graphite-app .market-pair-list.compact .market-pair-row {
+  min-height: 66px;
+  padding-block: 11px;
+}
+
+.graphite-app .market-pair-list > .graphite-no-results {
+  padding-block: 18px;
+}
+
+.graphite-app .market-pair-row {
   width: 100%;
   min-height: 72px;
   display: grid;
@@ -12067,11 +12076,11 @@ button.settings-row:active {
   transition: transform 120ms var(--ease-out), background-color 160ms ease;
 }
 
-.graphite-app .forex-pair-row:active {
+.graphite-app .market-pair-row:active {
   transform: scale(0.985);
 }
 
-.graphite-app .forex-pair-row > i {
+.graphite-app .market-pair-row > i {
   width: 4px;
   min-height: 46px;
   align-self: center;
@@ -12079,25 +12088,25 @@ button.settings-row:active {
   background: var(--graphite-profit);
 }
 
-.graphite-app .forex-pair-row > i.short {
+.graphite-app .market-pair-row > i.short {
   background: var(--graphite-loss);
 }
 
-.graphite-app .forex-pair-copy {
+.graphite-app .market-pair-copy {
   min-width: 0;
   display: grid;
   align-content: center;
   gap: 7px;
 }
 
-.graphite-app .forex-pair-copy > div {
+.graphite-app .market-pair-copy > div {
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.graphite-app .forex-pair-copy strong {
+.graphite-app .market-pair-copy strong {
   overflow: hidden;
   color: var(--graphite-ink);
   font-size: 16px;
@@ -12107,7 +12116,7 @@ button.settings-row:active {
   white-space: nowrap;
 }
 
-.graphite-app .forex-pair-row .graphite-side {
+.graphite-app .market-pair-row .graphite-side {
   flex: 0 0 auto;
   padding: 5px 7px;
   border-radius: 7px;
@@ -12118,12 +12127,12 @@ button.settings-row:active {
   text-transform: uppercase;
 }
 
-.graphite-app .forex-pair-row .graphite-side.short {
+.graphite-app .market-pair-row .graphite-side.short {
   background: rgba(255, 102, 116, 0.1);
 }
 
-.graphite-app .forex-pair-copy > small,
-.graphite-app .forex-pair-quality > small {
+.graphite-app .market-pair-copy > small,
+.graphite-app .market-pair-quality > small {
   overflow: hidden;
   color: var(--graphite-muted);
   font-size: 11px;
@@ -12133,7 +12142,7 @@ button.settings-row:active {
   white-space: nowrap;
 }
 
-.graphite-app .forex-pair-quality {
+.graphite-app .market-pair-quality {
   min-width: 42px;
   display: grid;
   align-content: center;
@@ -12142,26 +12151,58 @@ button.settings-row:active {
   font-variant-numeric: tabular-nums;
 }
 
-.graphite-app .forex-pair-quality > strong {
+.graphite-app .market-pair-quality > strong {
   color: var(--graphite-ink);
   font-size: 16px;
   line-height: 1;
 }
 
+.graphite-app .market-pair-quality.profit > strong {
+  color: var(--graphite-profit);
+}
+
+.graphite-app .market-pair-quality.loss > strong {
+  color: var(--graphite-loss);
+}
+
+.graphite-app .market-history-list {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.graphite-app .market-history-list > span {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  color: var(--graphite-ink);
+  border-bottom: 1px solid var(--graphite-line);
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.graphite-app .market-history-list .market-pair-row.history {
+  border-top: 0;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .graphite-app .forex-pair-row:hover {
+  .graphite-app .market-pair-row:hover {
     background: rgba(255, 255, 255, 0.025);
   }
 }
 
 @media (max-width: 380px) {
-  .graphite-app .forex-pair-row {
+  .graphite-app .market-pair-row {
     gap: 10px;
     padding-right: 2px;
   }
 
-  .graphite-app .forex-pair-copy strong,
-  .graphite-app .forex-pair-quality > strong {
+  .graphite-app .market-pair-copy strong,
+  .graphite-app .market-pair-quality > strong {
     font-size: 15px;
   }
 }

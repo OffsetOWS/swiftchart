@@ -33,7 +33,7 @@ test("SwiftChart Refined preserves the four-item navigation and market branches"
   assert.doesNotMatch(mobileApp, /\["trades",\s*"Trades"/i);
   assert.match(mobileApp, /market === MARKET_TYPES\.forex/);
   assert.match(mobileApp, /<ForexHomeScreen/);
-  assert.match(mobileApp, /Active trades/);
+  assert.match(mobileApp, /Active signals/);
 });
 
 test("refined state presentation reuses one Forex loading state", () => {
@@ -47,7 +47,7 @@ test("refined state presentation reuses one Forex loading state", () => {
 test("crypto home uses the canonical Telegram active-trade feed", () => {
   assert.match(app, /getActiveCryptoTrades/);
   assert.match(app, /activeCryptoTrades=\{activeCryptoTrades\}/);
-  assert.match(mobileApp, /Active trades/);
+  assert.match(mobileApp, /Active signals/);
   assert.match(mobileApp, /normalizeActiveCryptoTrade/);
   assert.doesNotMatch(mobileApp, /if \(!signals\.length\) \{[\s\S]*?No confirmed setup right now/);
 });

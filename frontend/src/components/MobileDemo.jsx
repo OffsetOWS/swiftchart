@@ -325,10 +325,6 @@ function tokenSymbol(symbol) {
   return normalizeCryptoSymbol(symbol);
 }
 
-function ScoreBadge({ score }) {
-  return <span className={`graphite-score ${score >= 90 ? "elite" : score > 75 ? "pro" : ""}`}>{score}</span>;
-}
-
 function ScoreRing({ score }) {
   const normalizedScore = Math.min(100, Math.max(0, Number(score) || 0));
   const tone = normalizedScore >= 90 ? "elite" : normalizedScore > 75 ? "pro" : "watch";
@@ -346,15 +342,6 @@ function ScoreRing({ score }) {
 function Direction({ direction }) {
   const side = /short|sell/i.test(direction) ? "short" : "long";
   return <span className={`graphite-side ${side}`}>{direction}</span>;
-}
-
-function statusForSignal(signal) {
-  if (signal.market === MARKET_TYPES.forex) return signal.score >= 80 ? signal.grade || "A" : signal.status || "Open";
-  if (signal.isActiveTrade) return "Active";
-  if (signal.isPending) return "Wait";
-  if (signal.score >= 90) return "High Conviction";
-  if (signal.score > 75) return signal.tier || scoreTier(signal.score);
-  return "Open";
 }
 
 function MarketToggle({ activeMarket, onChange }) {
@@ -433,28 +420,6 @@ function SparkChart() {
   );
 }
 
-function SignalRow({ signal, onSelect, compact = false, variant = "default" }) {
-  const activeLifecycle = signal.isActiveTrade
-    ? String(signal.lifecycleStatus || "ACTIVE").replaceAll("_", " ")
-    : "";
-  return (
-    <button
-      type="button"
-      className={`graphite-row ${compact ? "compact" : ""} ${variant === "active" ? "is-active-trade" : ""}`.trim()}
-      onClick={() => onSelect(signal)}
-    >
-      <InstrumentLogo symbol={signal.symbol} marketType={signal.market} />
-      <div>
-        <strong>{signal.symbol}</strong>
-        <span><Direction direction={signal.direction} /> {signal.timeframe.toUpperCase()} · {signal.rr}</span>
-      </div>
-      <ScoreBadge score={signal.score} />
-      <em>{activeLifecycle === "OPEN" ? "Active" : activeLifecycle || statusForSignal(signal)}</em>
-      <ChevronRight className="graphite-row-chevron" size={18} aria-hidden="true" />
-    </button>
-  );
-}
-
 function StatTile({ label, value, tone }) {
   return (
     <article className={`graphite-stat ${tone || ""}`}>
@@ -495,25 +460,13 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forex
         <LineChart size={24} />
       </section>
 
-      {activeSignals.length ? (
-        <section className="graphite-section">
-          <div className="graphite-section-head">
-            <span>Active trades</span>
-            <small>{activeSignals.length}</small>
-          </div>
-          <div className="graphite-stack graphite-signal-list">
-            {activeSignals.slice(0, 6).map((signal) => <SignalRow key={signal.id} signal={signal} onSelect={onSelect} variant="active" />)}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="graphite-section">
+      <section className="market-pair-section">
         <div className="graphite-section-head">
-          <span>Top opportunities</span>
-          <button type="button" onClick={onViewAll}>View All <ChevronRight size={15} /></button>
+          <span>Latest opportunities</span>
+          <button type="button" onClick={onViewAll}>Scan market</button>
         </div>
-        <div className="graphite-stack graphite-signal-list">
-          {opportunitySignals.slice(0, 4).map((signal) => <SignalRow key={`${signal.symbol}-${signal.timeframe}-home`} signal={signal} onSelect={onSelect} />)}
+        <div className="market-pair-list">
+          {opportunitySignals.slice(0, 4).map((signal) => <MarketSignalRow key={`${signal.symbol}-${signal.timeframe}-home`} signal={signal} onSelect={onSelect} />)}
           {!opportunitySignals.length ? (
             <GraphiteStateCard
               tone="empty"
@@ -526,6 +479,18 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forex
           ) : null}
         </div>
       </section>
+
+      {activeSignals.length ? (
+        <section className="market-pair-section">
+          <div className="graphite-section-head">
+            <span>Active signals</span>
+            <button type="button" onClick={onViewAll}>View all</button>
+          </div>
+          <div className="market-pair-list">
+            {activeSignals.slice(0, 6).map((signal) => <MarketSignalRow key={signal.id} signal={signal} onSelect={onSelect} />)}
+          </div>
+        </section>
+      ) : null}
 
     </div>
   );
@@ -546,9 +511,9 @@ function ForexSignalGroups({ signals, onSelect, compact = false }) {
           <span>{label}</span>
           <small>{rows.length}</small>
         </div>
-        <div className={`graphite-stack graphite-signal-list ${compact ? "compact" : ""}`}>
+        <div className={`market-pair-list ${compact ? "compact" : ""}`}>
           {rows.map((signal) => (
-            <SignalRow key={signal.id} signal={signal} onSelect={onSelect} compact={compact} />
+            <MarketSignalRow key={signal.id} signal={signal} onSelect={onSelect} />
           ))}
         </div>
       </section>
@@ -561,26 +526,31 @@ const FOREX_HOME_SECTIONS = [
   ["Active signals", ["OPEN", "TP1_HIT_TP2_RUNNING"]],
 ];
 
-function forexHomeStatus(signal) {
+function marketRowStatus(signal) {
   const status = String(signal.status || "").toUpperCase();
+  const entryStatus = String(signal.rawIdea?.entry_status || "").toUpperCase();
   if (status === "PENDING_ENTRY") return "Entry pending";
   if (status === "TP1_HIT_TP2_RUNNING") return "TP1 hit · TP2 running";
-  return "Active trade";
+  if (signal.market === MARKET_TYPES.forex) return "Active trade";
+  if (signal.isPending || entryStatus === "WAIT_FOR_RETEST") return "Retest pending";
+  if (entryStatus === "READY") return "Entry ready";
+  if (signal.isActiveTrade) return "Active trade";
+  return "Qualified setup";
 }
 
-function ForexPairRow({ signal, onSelect }) {
+function MarketSignalRow({ signal, onSelect }) {
   const isShort = /short|sell/i.test(signal.direction);
   return (
-    <button type="button" className="forex-pair-row" onClick={() => onSelect(signal)}>
+    <button type="button" className="market-pair-row" onClick={() => onSelect(signal)}>
       <i className={isShort ? "short" : "long"} aria-hidden="true" />
-      <div className="forex-pair-copy">
+      <div className="market-pair-copy">
         <div>
           <strong>{signal.symbol}</strong>
           <Direction direction={signal.direction} />
         </div>
-        <small>{signal.timeframe.toUpperCase()} · {forexHomeStatus(signal)}</small>
+        <small>{signal.timeframe.toUpperCase()} · {marketRowStatus(signal)}</small>
       </div>
-      <span className="forex-pair-quality">
+      <span className="market-pair-quality">
         <strong>{signal.score}</strong>
         <small>{signal.rr}</small>
       </span>
@@ -593,13 +563,13 @@ function ForexHomeSignalLists({ signals, onSelect, onViewAll }) {
     const rows = signals.filter((signal) => statuses.includes(String(signal.status).toUpperCase()));
     if (!rows.length) return null;
     return (
-      <section className="forex-home-list" key={label}>
+      <section className="market-pair-section" key={label}>
         <div className="graphite-section-head">
           <span>{label}</span>
           <button type="button" onClick={onViewAll}>{label === "Latest opportunities" ? "Scan market" : "View all"}</button>
         </div>
-        <div className="forex-pair-list">
-          {rows.map((signal) => <ForexPairRow key={signal.id} signal={signal} onSelect={onSelect} />)}
+        <div className="market-pair-list">
+          {rows.map((signal) => <MarketSignalRow key={signal.id} signal={signal} onSelect={onSelect} />)}
         </div>
       </section>
     );
@@ -844,16 +814,11 @@ function ScanScreen({
               </div>
             )}
           >
-            {resultSignals.map((signal) => (
-              <div className="forex-manual-signal" key={signal.id}>
-                <InstrumentLogo symbol={signal.symbol} marketType="forex" size={36} />
-                <div>
-                  <strong>{signal.symbol} {signal.direction.toUpperCase()}</strong>
-                  <span>{signal.timeframe} · {signal.entry} · {signal.rr}</span>
-                </div>
-                <button type="button" onClick={() => onSelect(signal)}>Open Signal</button>
+            {resultSignals.length ? (
+              <div className="market-pair-list compact">
+                {resultSignals.map((signal) => <MarketSignalRow key={signal.id} signal={signal} onSelect={onSelect} />)}
               </div>
-            ))}
+            ) : null}
           </GraphiteStateCard>
         ) : null}
         {failed ? (
@@ -951,8 +916,8 @@ function ScanScreen({
           <span>Scan results</span>
           <strong className="graphite-results-status">{scanState === "scanning" || cryptoLoading ? "Analyzing..." : scanState === "error" ? "Refresh failed" : "Live market"}<i /></strong>
         </div>
-        <div className="graphite-stack graphite-signal-list compact">
-          {visibleSignals.map((signal) => <SignalRow key={`${signal.symbol}-scan`} signal={signal} onSelect={onSelect} compact />)}
+        <div className="market-pair-list compact">
+          {visibleSignals.map((signal) => <MarketSignalRow key={`${signal.symbol}-scan`} signal={signal} onSelect={onSelect} />)}
           {visibleSignals.length === 0 ? <p className="graphite-no-results">No matching setup is currently ranked.</p> : null}
         </div>
       </section>
@@ -1163,6 +1128,8 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
       : `${Number(resultR) >= 0 ? "+" : ""}${Number(resultR).toFixed(1)}R`;
     return {
       symbol: trade.symbol,
+      direction: trade.direction || "Trade",
+      timeframe: trade.timeframe || "-",
       score: Math.round(Number(trade.confidence || trade.setup_score || 0)),
       result: trade.lifecycle_result || trade.result || "Open",
       filterStatus: lifecycleStatus === "STOPPED" ? "sl" : lifecycleStatus.toLowerCase(),
@@ -1196,7 +1163,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
         {["all", "open", "tp1", "tp2", "sl", "expired"].map((option) => <button key={option} type="button" className={statusFilter === option ? "active" : ""} onClick={() => setStatusFilter(option)}>{option}</button>)}
       </div>
 
-      <section className="graphite-timeline">
+      <section className="graphite-timeline market-history-list">
         <span>Trade timeline</span>
         {rows.length === 0 ? (
           <GraphiteStateCard
@@ -1207,17 +1174,19 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
           />
         ) : null}
         {rows.map((item) => (
-          <button type="button" className="graphite-history-row" key={item.id || `${item.symbol}-${item.date}`} onClick={() => onSelect?.(item.trade)}>
-            <div className="history-asset-visual">
-              <InstrumentLogo symbol={item.symbol} marketType={item.market} size={34} />
-              <ScoreBadge score={item.score} />
+          <button type="button" className="market-pair-row history" key={item.id || `${item.symbol}-${item.date}`} onClick={() => onSelect?.(item.trade)}>
+            <i className={item.r.startsWith("-") || /short|sell/i.test(item.direction) ? "short" : "long"} aria-hidden="true" />
+            <div className="market-pair-copy">
+              <div>
+                <strong>{item.symbol}</strong>
+                <Direction direction={item.direction} />
+              </div>
+              <small>{item.timeframe.toUpperCase()} · {item.date} · {item.state}</small>
             </div>
-            <div>
-              <strong>{item.symbol}</strong>
-              <p>{item.market.toUpperCase()} · {item.date} · {item.state}</p>
-            </div>
-            <em className={item.r.startsWith("-") ? "loss" : item.r === "Tracking" ? "" : "profit"}>{item.r}</em>
-            <ChevronRight size={17} aria-hidden="true" />
+            <span className={`market-pair-quality ${item.r.startsWith("-") ? "loss" : item.r === "Tracking" ? "" : "profit"}`}>
+              <strong>{item.r}</strong>
+              <small>{item.score} score</small>
+            </span>
           </button>
         ))}
       </section>
