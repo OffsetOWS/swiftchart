@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwiftChart Refined production smoke test</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #f4f5f6; background: #020303; }
+    main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 18px 0 30px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
+    header span { color: #5dd9cf; font-size: 10px; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 4px 0 0; font-size: 24px; letter-spacing: -.03em; }
+    header p { margin: 0; color: #7f878f; font-size: 11px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; align-items: start; }
+    figure { min-width: 0; margin: 0; }
+    figcaption { min-height: 34px; display: flex; justify-content: space-between; color: #7f878f; font-size: 10px; }
+    figcaption strong { color: #f4f5f6; font-size: 12px; }
+    .frame { display: grid; place-items: start center; overflow: hidden; border: 1px solid rgba(255,255,255,.11); border-radius: 22px; background: #050607; box-shadow: 0 22px 60px rgba(0,0,0,.5); }
+    .current img { display: block; width: auto; max-width: 100%; height: 100%; object-fit: contain; object-position: top center; }
+    iframe { display: block; border: 0; background: #050607; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><div><span>Production integration QA</span><h1 id="title">Crypto Home</h1></div><p id="size"></p></header>
+    <section class="grid">
+      <figure><figcaption><strong>Current production reference</strong><span>Saved baseline</span></figcaption><div class="frame current"><img id="current" alt="Current production reference"></div></figure>
+      <figure><figcaption><strong>SwiftChart Refined</strong><span>Live frontend + backend</span></figcaption><div class="frame"><iframe id="live" title="Live SwiftChart Refined production integration"></iframe></div></figure>
+    </section>
+  </main>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const width = Number(q.get('width')) || 390;
+    const height = Number(q.get('height')) || 844;
+    const frontendBase = q.get('base') || 'http://localhost:4175';
+    const key = q.get('screen') || 'crypto-home';
+    const screens = {
+      'crypto-home': ['Crypto Home','screenshots/current/crypto-home.png','/app/home?market=crypto'],
+      'forex-home': ['Forex Home','screenshots/current/forex-home.png','/app/home?market=forex'],
+      'crypto-scan': ['Crypto Scan','screenshots/current/crypto-scan.png','/app/scan?market=crypto'],
+      'forex-scan': ['Forex Scan','screenshots/current/forex-scan.png','/app/scan?market=forex'],
+      'history': ['History','screenshots/current/crypto-history.png','/app/history?market=crypto'],
+      'active': ['Active Trades in Home','screenshots/current/crypto-home.png','/app/home?market=crypto'],
+    };
+    const screen = screens[key] || screens['crypto-home'];
+    document.querySelector('#title').textContent = screen[0];
+    document.querySelector('#size').textContent = `${width} × ${height}`;
+    document.querySelector('#current').src = screen[1];
+    document.querySelector('#live').src = `${frontendBase}${screen[2]}`;
+    for (const element of document.querySelectorAll('.frame, iframe')) {
+      element.style.width = `${width}px`;
+      element.style.height = `${height}px`;
+    }
+  </script>
+</body>
+</html>

@@ -17,12 +17,31 @@ test("the active application has no legacy desktop view", () => {
 });
 
 test("mobile Take Trade and History flows remain present", () => {
-  assert.match(mobileApp, /Execution ladder/);
+  assert.match(mobileApp, /Trade plan/);
   assert.match(mobileApp, /Saving to History\.\.\./);
   assert.match(mobileApp, /Saved to History/);
   assert.match(mobileApp, /function HistoryScreen/);
   assert.match(mobileApp, /async function saveTradeToHistory/);
   assert.match(mobileApp, /async function takeTrade/);
+});
+
+test("SwiftChart Refined preserves the four-item navigation and market branches", () => {
+  assert.match(mobileApp, /\["home", "Home", House\]/);
+  assert.match(mobileApp, /\["scan", "Scan", ScanLine\]/);
+  assert.match(mobileApp, /\["history", "History", History\]/);
+  assert.match(mobileApp, /\["account", "Account", UserRound\]/);
+  assert.doesNotMatch(mobileApp, /\["trades",\s*"Trades"/i);
+  assert.match(mobileApp, /market === MARKET_TYPES\.forex/);
+  assert.match(mobileApp, /<ForexHomeScreen/);
+  assert.match(mobileApp, /Active trades/);
+});
+
+test("refined state presentation reuses one Forex loading state", () => {
+  assert.match(mobileApp, /import GraphiteStateCard/);
+  assert.equal((mobileApp.match(/title="Loading Forex signals"/g) || []).length, 1);
+  assert.match(mobileApp, /tone="cached"/);
+  assert.match(mobileApp, /noTrade \? "NO_TRADE"/);
+  assert.match(mobileApp, /eyebrow="Authentication required"/);
 });
 
 test("crypto home uses the canonical Telegram active-trade feed", () => {

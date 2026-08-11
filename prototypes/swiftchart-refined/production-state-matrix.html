@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwiftChart Refined state matrix</title>
+  <link rel="stylesheet" href="http://localhost:4175/src/styles/global.css">
+  <style>
+    body { min-height: 100vh; margin: 0; background: #020303; }
+    .state-stage { width: 390px; min-height: 844px; margin: 0 auto; padding: 90px 14px 110px; background: #050607; }
+    .state-stage h1 { margin: 0 0 16px; color: #f4f5f6; font: 900 16px/1 Inter,system-ui,sans-serif; letter-spacing: .16em; }
+    .state-stage .graphite-state-card { margin-bottom: 12px; }
+    .graphite-state-copy { min-width: 0; display: grid; gap: 4px; }
+  </style>
+</head>
+<body>
+  <main class="graphite-app state-stage">
+    <h1>SWIFTCHART</h1>
+    <div id="state"></div>
+  </main>
+  <script>
+    const state = new URLSearchParams(location.search).get('state') || 'loading';
+    const data = {
+      loading:['loading','Scanning market','Checking structure and confirmation','Refreshing ranked opportunities without changing SwiftChart qualification rules.'],
+      wait:['wait','WAIT_FOR_RETEST','Wait for the qualified entry','The directional bias remains valid, but price has not returned to the approved entry zone.'],
+      no:['no-trade','NO_TRADE','No qualified setup found','The scan completed without forcing a trade. Current structure and reward-to-risk did not meet SwiftChart thresholds.'],
+      error:['error','Network error','Could not load market signals','The latest verified market view remains available. Check the connection and retry.'],
+    }[state];
+    document.querySelector('#state').innerHTML = `<section class="graphite-state-card is-${data[0]}"><div class="graphite-state-icon">◎</div><div class="graphite-state-copy"><span>${data[1]}</span><strong>${data[2]}</strong><p>${data[3]}</p></div>${state==='error'?'<div class="graphite-state-actions"><button>Retry</button></div>':''}</section>`;
+  </script>
+</body>
+</html>

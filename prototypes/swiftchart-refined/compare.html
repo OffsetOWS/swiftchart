@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwiftChart — Production vs Refined</title>
+  <link rel="stylesheet" href="compare.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p>Preservation-first redesign</p>
+      <h1 id="title">Home</h1>
+      <span>Same SwiftChart structure and identity, with clearer hierarchy, density, states, and trade comprehension.</span>
+    </header>
+    <section class="comparison" aria-label="Side-by-side comparison">
+      <figure>
+        <figcaption><b>Current production</b><span id="currentNote">Reference capture</span></figcaption>
+        <div class="phone current"><img id="current" alt="Current SwiftChart production screen"></div>
+      </figure>
+      <figure>
+        <figcaption><b>SwiftChart Refined</b><span>390 × 844 prototype</span></figcaption>
+        <div class="phone refined"><img id="refined" alt="SwiftChart Refined screen"></div>
+      </figure>
+    </section>
+  </main>
+  <script>
+    const screens = {
+      home: { title: 'Home', current: 'screenshots/current/crypto-home.png', refined: 'screenshots/refined/home.png' },
+      scan: { title: 'Scan', current: 'screenshots/current/crypto-scan.png', refined: 'screenshots/refined/scan.png' },
+      detail: { title: 'Signal Detail', current: 'screenshots/current/crypto-home.png', refined: 'screenshots/refined/signal-detail.png', note: 'Current entry point; saved detail capture has a render artifact' },
+      active: { title: 'Active Trades', current: 'screenshots/current/crypto-home.png', refined: 'screenshots/refined/active-trades.png', note: 'Current active-signal treatment lives within Home' },
+      history: { title: 'History', current: 'screenshots/current/crypto-history.png', refined: 'screenshots/refined/history.png' }
+    };
+    const key = new URLSearchParams(location.search).get('screen') || 'home';
+    if (new URLSearchParams(location.search).get('capture') === '1') document.body.classList.add('capture');
+    const screen = screens[key] || screens.home;
+    document.title = `SwiftChart — ${screen.title} comparison`;
+    document.querySelector('#title').textContent = screen.title;
+    document.querySelector('#current').src = screen.current;
+    document.querySelector('#refined').src = screen.refined;
+    document.querySelector('#currentNote').textContent = screen.note || 'Production reference capture';
+  </script>
+</body>
+</html>

@@ -34,6 +34,7 @@ import { createPaperTradeFromSignal, getPaperTradeDetail, listPaperTrades, signa
 import { useNotifications } from "../lib/notifications.js";
 import { useAppPreferences } from "../lib/appPreferences.js";
 import AppSplashScreen from "./AppSplashScreen.jsx";
+import GraphiteStateCard from "./GraphiteStateCard.jsx";
 import InstrumentLogo from "./InstrumentLogo.jsx";
 import NotificationCenter from "./NotificationCenter.jsx";
 import SettingsSupport from "./SettingsSupport.jsx";
@@ -433,16 +434,23 @@ function SparkChart() {
   );
 }
 
-function SignalRow({ signal, onSelect, compact = false }) {
+function SignalRow({ signal, onSelect, compact = false, variant = "default" }) {
+  const activeLifecycle = signal.isActiveTrade
+    ? String(signal.lifecycleStatus || "ACTIVE").replaceAll("_", " ")
+    : "";
   return (
-    <button type="button" className={`graphite-row ${compact ? "compact" : ""}`} onClick={() => onSelect(signal)}>
+    <button
+      type="button"
+      className={`graphite-row ${compact ? "compact" : ""} ${variant === "active" ? "is-active-trade" : ""}`.trim()}
+      onClick={() => onSelect(signal)}
+    >
       <InstrumentLogo symbol={signal.symbol} marketType={signal.market} />
       <div>
         <strong>{signal.symbol}</strong>
         <span><Direction direction={signal.direction} /> {signal.timeframe.toUpperCase()} · {signal.rr}</span>
       </div>
       <ScoreBadge score={signal.score} />
-      <em>{statusForSignal(signal)}</em>
+      <em>{activeLifecycle === "OPEN" ? "Active" : activeLifecycle || statusForSignal(signal)}</em>
       <ChevronRight className="graphite-row-chevron" size={18} aria-hidden="true" />
     </button>
   );
@@ -455,23 +463,6 @@ function StatTile({ label, value, tone }) {
       <strong>{value}</strong>
     </article>
   );
-}
-
-function EmptyState({ title, message, action, onAction }) {
-  return (
-    <section className="graphite-empty-state">
-      <AlertTriangleIcon />
-      <div>
-        <strong>{title}</strong>
-        <p>{message}</p>
-      </div>
-      {action ? <button type="button" onClick={onAction}>{action}</button> : null}
-    </section>
-  );
-}
-
-function AlertTriangleIcon() {
-  return <Target size={18} />;
 }
 
 function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forexSignals, forexOverview, forexLimitOpportunities }) {
@@ -512,7 +503,7 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forex
             <small>{activeSignals.length}</small>
           </div>
           <div className="graphite-stack graphite-signal-list">
-            {activeSignals.slice(0, 6).map((signal) => <SignalRow key={signal.id} signal={signal} onSelect={onSelect} />)}
+            {activeSignals.slice(0, 6).map((signal) => <SignalRow key={signal.id} signal={signal} onSelect={onSelect} variant="active" />)}
           </div>
         </section>
       ) : null}
@@ -525,10 +516,12 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forex
         <div className="graphite-stack graphite-signal-list">
           {opportunitySignals.slice(0, 4).map((signal) => <SignalRow key={`${signal.symbol}-${signal.timeframe}-home`} signal={signal} onSelect={onSelect} />)}
           {!opportunitySignals.length ? (
-            <EmptyState
+            <GraphiteStateCard
+              tone="empty"
+              eyebrow="Market scan"
               title="No new confirmed setup right now"
               message="Active Telegram trades stay listed above while SwiftChart scans for the next opportunity."
-              action="Scan again"
+              actionLabel="Scan again"
               onAction={onViewAll}
             />
           ) : null}
@@ -636,7 +629,14 @@ function ForexHomeScreen({ signals, overview, onSelect, limitOpportunities }) {
         </div>
       </section>
 
-      {overview?.message ? <EmptyState title="Forex status" message={overview.message} /> : null}
+      {overview?.message ? (
+        <GraphiteStateCard
+          tone="neutral"
+          eyebrow="Forex status"
+          title="Session update"
+          message={overview.message}
+        />
+      ) : null}
 
       <ForexSignalGroups signals={homeSignals} onSelect={onSelect} />
       {!homeSignals.length ? (
@@ -757,34 +757,49 @@ function ScanScreen({
         </section>
 
         {forexFeedState.status === "loading" && !forexSignals.length ? (
-          <EmptyState title="Loading Forex signals" message="Fetching the latest persisted setups." />
+          <GraphiteStateCard
+            tone="loading"
+            eyebrow="Forex feed"
+            title="Loading Forex signals"
+            message="Fetching the latest persisted setups."
+            busy
+          />
         ) : null}
         {forexFeedState.status === "auth_unavailable" ? (
-          <EmptyState
+          <GraphiteStateCard
+            tone="auth"
+            eyebrow="Authentication required"
             title="Authentication unavailable"
             message="Public Forex signals remain available in read-only mode. Sign-in actions may be temporarily unavailable."
-            action="Retry"
+            actionLabel="Retry"
             onAction={onRetryForex}
           />
         ) : null}
         {forexFeedState.status === "network_unavailable" || forexFeedState.status === "api_unavailable" ? (
-          <EmptyState
+          <GraphiteStateCard
+            tone="error"
+            eyebrow={forexFeedState.status === "network_unavailable" ? "Network error" : "API unavailable"}
             title="Could not load Forex signals"
             message={forexFeedState.message}
-            action="Retry"
+            actionLabel="Retry"
             onAction={onRetryForex}
           />
         ) : null}
         {forexFeedState.cached ? (
-          <p className="graphite-cache-notice">
-            Showing cached signals — last updated {forexFeedState.lastUpdated || "recently"}.
-          </p>
+          <GraphiteStateCard
+            tone="cached"
+            eyebrow="Cached data"
+            title="Showing the last verified signals"
+            message={`Last updated ${forexFeedState.lastUpdated || "recently"}. Live refresh will resume when the feed is available.`}
+          />
         ) : null}
         {forexScanError ? (
-          <EmptyState
+          <GraphiteStateCard
+            tone="error"
+            eyebrow="Scan error"
             title="Forex scan could not complete"
             message={forexScanError}
-            action="Retry"
+            actionLabel="Retry"
             onAction={startForexScan}
           />
         ) : null}
@@ -803,26 +818,28 @@ function ScanScreen({
         </div>
 
         {forexScanResult && !failed ? (
-          <section className={`forex-manual-result ${noTrade ? "no-trade" : "trade-found"}`} aria-live="polite">
-            <span>{noTrade ? "Scan complete" : "Opportunity found"}</span>
-            <h2>
-              {noTrade
-                ? `No qualified forex setup found on the ${forexScanResult.timeframe} timeframe.`
-                : `${resultSignals.length} qualified ${resultSignals.length === 1 ? "setup" : "setups"} found`}
-            </h2>
-            <div className="forex-scan-facts">
-              <p><small>Timeframe</small><strong>{forexScanResult.timeframe}</strong></p>
-              <p><small>Pairs scanned</small><strong>{forexScanResult.pairs_scanned}</strong></p>
-              <p>
-                <small>Completed</small>
-                <strong>{new Date(forexScanResult.completed_at || forexScanResult.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>
-              </p>
-            </div>
-            {noTrade && forexScanResult.rejection_reasons?.length ? (
-              <p className="forex-rejection-summary">
-                Most setups were rejected because: {forexScanResult.rejection_reasons.join("; ")}
-              </p>
-            ) : null}
+          <GraphiteStateCard
+            tone={noTrade ? "no-trade" : "success"}
+            eyebrow={noTrade ? "NO_TRADE" : "Trade found"}
+            title={noTrade
+              ? `No qualified Forex setup on ${forexScanResult.timeframe}`
+              : `${resultSignals.length} qualified ${resultSignals.length === 1 ? "setup" : "setups"} found`}
+            message={noTrade && forexScanResult.rejection_reasons?.length
+              ? `Most setups were rejected because: ${forexScanResult.rejection_reasons.join("; ")}`
+              : noTrade
+                ? "The scan completed without forcing a trade."
+                : "Session, spread, structure and reward-to-risk checks passed."}
+            meta={(
+              <div className="forex-scan-facts">
+                <p><small>Timeframe</small><strong>{forexScanResult.timeframe}</strong></p>
+                <p><small>Pairs scanned</small><strong>{forexScanResult.pairs_scanned}</strong></p>
+                <p>
+                  <small>Completed</small>
+                  <strong>{new Date(forexScanResult.completed_at || forexScanResult.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>
+                </p>
+              </div>
+            )}
+          >
             {resultSignals.map((signal) => (
               <div className="forex-manual-signal" key={signal.id}>
                 <InstrumentLogo symbol={signal.symbol} marketType="forex" size={36} />
@@ -833,10 +850,12 @@ function ScanScreen({
                 <button type="button" onClick={() => onSelect(signal)}>Open Signal</button>
               </div>
             ))}
-          </section>
+          </GraphiteStateCard>
         ) : null}
         {failed ? (
-          <EmptyState
+          <GraphiteStateCard
+            tone="error"
+            eyebrow="Scan failed"
             title="Forex scan could not complete"
             message={forexScanResult.errors?.[0] || "Market data is temporarily unavailable."}
           />
@@ -903,6 +922,26 @@ function ScanScreen({
         </label>
       </div>
 
+      {scanState === "scanning" || cryptoLoading ? (
+        <GraphiteStateCard
+          tone="loading"
+          eyebrow="Scanning market"
+          title="Checking structure and confirmation"
+          message="Refreshing ranked opportunities without changing SwiftChart's qualification rules."
+          busy
+        />
+      ) : null}
+      {scanState === "error" ? (
+        <GraphiteStateCard
+          tone="error"
+          eyebrow="Refresh error"
+          title="Could not refresh ranked setups"
+          message="The last verified market view remains available. Retry when the connection is stable."
+          actionLabel="Retry"
+          onAction={startScan}
+        />
+      ) : null}
+
       <section className="graphite-section">
         <div className="graphite-section-head">
           <span>Scan results</span>
@@ -917,14 +956,45 @@ function ScanScreen({
   );
 }
 
+function ExecutionMarker({ position }) {
+  const markerRef = useRef(null);
+  const previousPosition = useRef(position);
+
+  useEffect(() => {
+    const marker = markerRef.current;
+    const previous = previousPosition.current;
+    previousPosition.current = position;
+    if (!marker || previous === position || typeof marker.animate !== "function") return undefined;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || marker.closest(".reduce-animations")) return undefined;
+    const railWidth = marker.parentElement?.clientWidth || 0;
+    const offset = ((previous - position) / 100) * railWidth;
+    if (!Number.isFinite(offset) || Math.abs(offset) < 1) return undefined;
+    const animation = marker.animate(
+      [
+        { transform: `translateX(${offset}px) translateX(-50%)` },
+        { transform: "translateX(-50%)" },
+      ],
+      { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+    );
+    return () => animation.cancel();
+  }, [position]);
+
+  return (
+    <i ref={markerRef} className="current-price" style={{ left: `${position}%` }}>
+      <b />
+    </i>
+  );
+}
+
 function ExecutionLadder({ signal }) {
   const progress = executionLadderState(signal);
   const priceDigits = /JPY/i.test(signal.symbol) ? 3 : /XAU/i.test(signal.symbol) ? 2 : 5;
   const updatedAt = signal.latestPriceAt || signal.rawIdea?.latest_price_at || signal.rawIdea?.last_price_updated_at;
+  const hasTp2 = signal.tp2 && signal.tp2 !== "-";
   return (
-    <section className={`graphite-execution-ladder is-${progress.tone}${progress.disabled ? " is-disabled" : ""}`} aria-label="Execution ladder">
+    <section className={`graphite-execution-ladder is-${progress.tone}${progress.disabled ? " is-disabled" : ""}`} aria-label="Trade plan">
       <div className="graphite-ladder-heading">
-        <span className="graphite-ladder-title">Execution ladder</span>
+        <span className="graphite-ladder-title">Trade plan</span>
         <strong>{progress.label}</strong>
       </div>
       <div className="graphite-ladder-live">
@@ -936,25 +1006,26 @@ function ExecutionLadder({ signal }) {
         <i className={`target tp1${progress.tp1Complete ? " complete" : ""}`} style={{ left: `${progress.tp1Position}%` }} />
         <i className="entry-zone" style={{ left: `${progress.entryStart}%`, width: `${Math.max(2, progress.entryEnd - progress.entryStart)}%` }} />
         <i className={`stop${progress.stopComplete ? " complete" : ""}`} style={{ left: `${progress.stopPosition}%` }} />
-        {progress.currentPrice !== null ? (
-          <i className="current-price" style={{ left: `${progress.markerPosition}%` }}>
-            <b />
-          </i>
-        ) : null}
+        {progress.currentPrice !== null ? <ExecutionMarker position={progress.markerPosition} /> : null}
       </div>
-      <div className="graphite-ladder-values">
-        <div className="target">
-          <span>TP1</span>
-          <strong>{signal.tp}</strong>
+      <div className={`graphite-ladder-values plan-values${hasTp2 ? " has-tp2" : ""}`}>
+        <div className="stop">
+          <span>Stop loss</span>
+          <strong>{signal.sl}</strong>
         </div>
         <div className="entry">
           <span>Entry zone</span>
           <strong>{signal.entry}</strong>
         </div>
-        <div className="stop">
-          <span>Stop loss</span>
-          <strong>{signal.sl}</strong>
+        <div className="current">
+          <span>Current</span>
+          <strong>{progress.currentPrice === null ? "-" : fmt(progress.currentPrice, priceDigits)}</strong>
         </div>
+        <div className="target">
+          <span>TP1</span>
+          <strong>{signal.tp}</strong>
+        </div>
+        {hasTp2 ? <div className="target tp2-value"><span>TP2</span><strong>{signal.tp2}</strong></div> : null}
       </div>
     </section>
   );
@@ -1109,7 +1180,14 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
 
       <section className="graphite-timeline">
         <span>Trade timeline</span>
-        {rows.length === 0 ? <p>No {marketFilter} historical signals yet.</p> : null}
+        {rows.length === 0 ? (
+          <GraphiteStateCard
+            tone="empty"
+            eyebrow="History filter"
+            title="No matching trades"
+            message={`No ${marketFilter} historical signals match the selected outcome.`}
+          />
+        ) : null}
         {rows.map((item) => (
           <button type="button" className="graphite-history-row" key={item.id || `${item.symbol}-${item.date}`} onClick={() => onSelect?.(item.trade)}>
             <div className="history-asset-visual">

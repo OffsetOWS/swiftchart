@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwiftChart Refined component matrix</title>
+  <link rel="stylesheet" href="http://localhost:4175/src/styles/global.css">
+  <style>
+    html,body { width:390px; min-height:844px; margin:0; overflow:hidden; background:#050607; }
+    .qa-logo { width:42px; height:42px; display:grid; place-items:center; border-radius:50%; background:#f7931a; color:#fff; font:900 16px/1 system-ui; }
+    .qa-content { padding: 0 14px 110px; }
+    .graphite-detail-backdrop,
+    .graphite-detail { animation: none !important; opacity: 1 !important; transform: none !important; }
+    .graphite-detail-backdrop {
+      --graphite-bg:#050607; --graphite-panel:#101214; --graphite-panel-2:#16191c;
+      --graphite-raised:#1c2024; --graphite-ink:#f4f5f6; --graphite-soft:#c6cbd0;
+      --graphite-muted:#7f878f; --graphite-line:rgba(255,255,255,.09);
+      --graphite-line-strong:rgba(255,255,255,.14); --graphite-teal:#5dd9cf;
+      --graphite-profit:#3ddc97; --graphite-loss:#ff646d;
+      --graphite-shadow:0 24px 58px rgba(0,0,0,.34); color:var(--graphite-ink);
+    }
+  </style>
+</head>
+<body>
+  <section class="mobile-demo-shell graphite-app">
+    <header class="graphite-header"><div class="graphite-brand"><div><span>SwiftChart</span></div></div><button class="graphite-alert-button">◦</button></header>
+    <main class="graphite-content"><div id="view" class="graphite-screen"></div></main>
+    <nav class="graphite-nav" style="--active-index:0"><button class="active"><span>⌂</span><span>Home</span></button><button><span>⌗</span><span>Scan</span></button><button><span>↶</span><span>History</span></button><button><span>○</span><span>Account</span></button></nav>
+  </section>
+  <script>
+    const view = new URLSearchParams(location.search).get('view') || 'detail';
+    const root = document.querySelector('#view');
+    const row = (symbol, direction, score, status) => `<button class="graphite-row is-active-trade"><span class="qa-logo">${symbol.slice(0,2)}</span><div><strong>${symbol}</strong><span><b class="graphite-side ${direction==='Short'?'short':''}">${direction}</b> 4H · 3.1R</span></div><span class="graphite-score ${score>=90?'elite':'pro'}">${score}</span><em>${status}</em></button>`;
+    if (view === 'active') root.innerHTML = `<section class="graphite-section"><div class="graphite-section-head"><span>Active trades</span><small>3</small></div><div class="graphite-stack graphite-signal-list">${row('BTCUSDT','Long',97,'Active')}${row('ETHUSDT','Long',85,'TP1 hit')}${row('AUDUSD','Short',86,'Wait')}</div></section>`;
+    if (view === 'history') root.innerHTML = `<section class="graphite-history-hero"><span>Total R</span><strong>+3.3R</strong><p>4 tracked ideas · market filter active</p></section><div class="graphite-filter-row"><button class="active">All</button><button>Crypto</button><button>Forex</button></div><div class="graphite-filter-row"><button class="active">All</button><button>Open</button><button>TP1</button><button>TP2</button><button>SL</button></div><section class="graphite-timeline"><span>Trade timeline</span>${row('EURUSD','Long',84,'+3.2R')}${row('BTCUSDT','Long',91,'+1.1R')}${row('ETHUSDT','Long',82,'-1.0R')}</section>`;
+    if (view === 'detail') document.body.insertAdjacentHTML('beforeend', `<div class="graphite-detail-backdrop"><article class="graphite-detail"><header><span class="qa-logo">₿</span><div><span>Trade Analysis</span><strong>BTCUSDT</strong></div><span class="graphite-score-ring elite" style="--score-angle:349deg"><strong>97</strong></span><button class="graphite-close">×</button></header><div class="graphite-trade-meta"><article class="graphite-stat profit"><span>Direction</span><strong>Long</strong></article><article class="graphite-stat"><span>Timeframe</span><strong>4H</strong></article><article class="graphite-stat reward"><span>R/R</span><strong>3.1R</strong></article></div><section class="graphite-execution-ladder is-profit"><div class="graphite-ladder-heading"><span class="graphite-ladder-title">Trade plan</span><strong>Entry active</strong></div><div class="graphite-ladder-live"><span>Current: <strong>116,510</strong></span><span>Updated: 2m ago</span></div><div class="graphite-ladder-rail"><i class="target tp2" style="left:96%"></i><i class="target tp1" style="left:72%"></i><i class="entry-zone" style="left:30%;width:12%"></i><i class="stop" style="left:4%"></i><i class="current-price" style="left:50%"><b></b></i></div><div class="graphite-ladder-values plan-values has-tp2"><div class="stop"><span>Stop loss</span><strong>114,720</strong></div><div class="entry"><span>Entry zone</span><strong>116,240</strong></div><div class="current"><span>Current</span><strong>116,510</strong></div><div class="target"><span>TP1</span><strong>119,340</strong></div><div class="target"><span>TP2</span><strong>122,180</strong></div></div></section><div class="graphite-context-pills"><span>Context · Bullish</span><span>4H structure</span><span>Confidence · 97%</span></div><section class="graphite-reasoning"><span>Reasoning</span><p>BTCUSDT reclaimed the 4H range after a liquidity sweep. The entry zone remains the decision area and the stop defines invalidation.</p></section><div class="graphite-detail-actions"><button class="ghost">View Chart</button><button>Take Trade</button></div></article></div>`);
+  </script>
+</body>
+</html>
