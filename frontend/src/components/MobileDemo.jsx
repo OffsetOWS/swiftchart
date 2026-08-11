@@ -18,7 +18,6 @@ import {
   TrendingUp,
   User,
   UserRound,
-  X,
 } from "lucide-react";
 import { useAuth } from "../lib/AuthContext.jsx";
 import {
@@ -1033,32 +1032,56 @@ function ExecutionLadder({ signal }) {
 
 function sentenceCase(value) {
   const text = String(value || "").trim().replace(/[.!?]+$/, "");
-  return text ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : "market structure supports the setup";
+  if (!text) return "market structure supports the setup";
+  return /^[A-Z]{2,}/.test(text) ? text : `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+}
+
+function reasoningSentences(signal, { isForex }) {
+  const source = isForex && signal.reasons?.length
+    ? signal.reasons
+    : [signal.thesis];
+  return source
+    .flatMap((value) => String(value || "").split(/(?<=[.!?])\s+/))
+    .map((value) => value
+      .replace(/\s+/g, " ")
+      .replace(/\s+with quality score\s+[\d.]+/i, "")
+      .trim()
+      .replace(/[.!?]+$/, "")
+      .replace(/;\s*session=(.+)$/i, " during the $1"))
+    .filter((value) => value.length > 10)
+    .filter((value) => !/^[A-Z]{6}\s+qualified independently on\s+\w+$/i.test(value))
+    .filter((value) => !/^(market regime|confidence adjustment|backend invalidation|entry is|targets? (?:are|is))/i.test(value));
 }
 
 function tradeReasoning(signal, { isForex }) {
   const direction = String(signal.direction || "trade").toLowerCase();
   const timeframe = String(signal.timeframe || "").toUpperCase();
+  const symbol = signal.pair || signal.symbol;
+  const insights = reasoningSentences(signal, { isForex });
+  const primary = sentenceCase(insights[0]);
+  const supporting = insights[1]
+    ? `${insights[1].charAt(0).toUpperCase()}${insights[1].slice(1)}.`
+    : isForex
+      ? `The ${signal.session || "active"} session passed SwiftChart's execution checks.`
+      : `The stop remains beyond structural invalidation.`;
+  return `${symbol} is ranked as a ${direction} setup on ${timeframe} because ${primary}. ${supporting}`;
+}
+
+function detailRecency(signal) {
   const raw = signal.rawIdea || {};
-
-  if (isForex) {
-    const confirmations = signal.reasons?.length ? signal.reasons.join(", ") : signal.thesis;
-    return `${signal.pair || signal.symbol} was surfaced as a ${direction} setup on ${timeframe} because ${sentenceCase(confirmations)}. The ${signal.session || "active"} session and ${String(signal.spread || "unknown").toLowerCase()} spread were checked, with ${String(signal.newsRisk || "unknown").toLowerCase()} news risk. Entry is ${signal.entry}, targets are ${signal.tp}${signal.tp2 ? ` and ${signal.tp2}` : ""}, and ${signal.sl} invalidates the idea.`;
-  }
-
-  const setup = `${signal.symbol} was surfaced as a ${direction} setup on ${timeframe} because ${sentenceCase(signal.thesis)}`;
-  const confirmations = Array.isArray(raw.reversal_confirmations) && raw.reversal_confirmations.length
-    ? ` Confirmations include ${raw.reversal_confirmations.join(", ")}.`
-    : "";
-  const execution = ` The ${signal.entry} zone is the decision area; confirmation favors a move toward ${signal.tp}, while ${signal.sl} invalidates the setup.`;
-  const quality = signal.score < 75
-    ? ` Its ${signal.score} score and ${signal.rr} profile keep it on the watchlist until ${direction === "short" ? "downside" : "upside"} confirmation improves.`
-    : ` Its ${signal.score} score and ${signal.rr} profile place it in the ${String(signal.tier || "ranked").toLowerCase()} tier.`;
-  const invalidation = raw.invalid_condition
-    ? ` Backend invalidation: ${String(raw.invalid_condition).trim()}`
-    : "";
-
-  return `${setup}.${confirmations}${execution}${quality}${invalidation}`;
+  const value = signal.latestPriceAt
+    || raw.latest_price_at
+    || raw.last_price_updated_at
+    || raw.updated_at
+    || raw.generated_at
+    || raw.created_at;
+  const timestamp = value ? new Date(value).getTime() : Number.NaN;
+  if (!Number.isFinite(timestamp)) return "live market";
+  const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return "updated now";
+  if (minutes < 60) return `updated ${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `updated ${hours}h ago` : "latest verified setup";
 }
 
 function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
@@ -1067,16 +1090,16 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
   const activeTradeSaveState = tradeSaveState?.symbol === signal.symbol ? tradeSaveState : { status: "idle" };
   const terminalForexStatus = ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(String(signal.status).toUpperCase());
   return (
-    <div className="graphite-detail-backdrop" role="dialog" aria-modal="true" aria-label={`${signal.symbol} trade analysis`}>
+    <main className="graphite-detail-screen" aria-label={`${signal.symbol} trade analysis`}>
       <article className="graphite-detail">
         <header>
           <InstrumentLogo symbol={signal.symbol} marketType={signal.market} />
           <div>
             <span>{isForex ? "Forex Trade Analysis" : "Trade Analysis"}</span>
             <strong>{isForex ? signal.pair : signal.symbol}</strong>
+            <p>{isForex ? "Session-qualified setup" : signal.score >= 80 ? "High-conviction setup" : "Qualified setup"} · {detailRecency(signal)}</p>
           </div>
           <ScoreRing score={signal.score} />
-          <button type="button" className="graphite-close" onClick={onClose} aria-label="Close trade analysis"><X size={18} /></button>
         </header>
 
         <div className="graphite-trade-meta">
@@ -1097,24 +1120,14 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
 
         <ExecutionLadder signal={signal} />
 
-        <div className="graphite-context-pills" aria-label="Trade context">
-          {!isForex ? <span>Context · {signal.regime}</span> : null}
-          <span>{signal.timeframe.toUpperCase()} structure</span>
-          <span>Confidence · {signal.confidence || signal.score}</span>
-          {isForex ? <span>Session · {signal.session}</span> : null}
-          {isForex && signal.tp2 ? <span>TP2 · {signal.tp2}</span> : null}
-          {isForex ? <span>Created · {signal.createdAt}</span> : null}
-          {isForex ? <span>Price update · {signal.updatedAt}</span> : null}
-        </div>
-
         <section className="graphite-reasoning">
           <span>Reasoning</span>
           <p>{tradeReasoning(signal, { isForex })}</p>
         </section>
 
         <div className="graphite-detail-actions">
-          <button type="button" className="ghost">View Chart</button>
-          {signal.isHistory ? <button type="button" onClick={onClose}>Close</button> : (
+          <button type="button" className="ghost" onClick={onClose}>Close</button>
+          {!signal.isHistory ? (
             <button
               type="button"
               disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved" || terminalForexStatus}
@@ -1122,11 +1135,11 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
             >
               {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
             </button>
-          )}
+          ) : null}
         </div>
         {activeTradeSaveState.status === "error" ? <p className="graphite-action-error" role="alert">{activeTradeSaveState.message}</p> : null}
       </article>
-    </div>
+    </main>
   );
 }
 
@@ -1727,6 +1740,14 @@ export default function MobileDemo({
     setNotificationsOpen(true);
   }
 
+  function closeTradeAnalysis() {
+    setSelectedSignal(null);
+    const nextUrl = new URL(window.location.href);
+    if (!nextUrl.searchParams.has("detail")) return;
+    nextUrl.searchParams.delete("detail");
+    window.history.replaceState({}, "", `${nextUrl.pathname}${nextUrl.search}`);
+  }
+
   function openNotification(notification) {
     notificationCenter.markRead(notification.id);
     if (!notification.actionUrl) {
@@ -1805,6 +1826,14 @@ export default function MobileDemo({
               </aside>
             </div>
           ) : null}
+          {selectedSignal ? (
+            <TradeAnalysis
+              signal={selectedSignal}
+              onClose={closeTradeAnalysis}
+              onTakeTrade={takeTrade}
+              tradeSaveState={tradeSaveState}
+            />
+          ) : <>
           <main className="graphite-content">
             {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} forexLimitOpportunities={forexLimitOpportunities} /> : null}
             {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} /> : null}
@@ -1843,12 +1872,7 @@ export default function MobileDemo({
               </button>
             ))}
           </nav>
-          <TradeAnalysis
-            signal={selectedSignal}
-            onClose={() => setSelectedSignal(null)}
-            onTakeTrade={takeTrade}
-            tradeSaveState={tradeSaveState}
-          />
+          </>}
       </>
     </section>
   );

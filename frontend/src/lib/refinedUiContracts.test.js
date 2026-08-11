@@ -39,3 +39,15 @@ test("navigation remains four items and Active Trades remains in Home", () => {
   assert.match(mobileApp, /activeSignals\.slice/);
   assert.doesNotMatch(mobileApp, /\/app\/trades/);
 });
+
+test("Signal Detail uses the approved single-surface hierarchy and concise reasoning", () => {
+  assert.match(mobileApp, /className="graphite-detail-screen"/);
+  assert.match(mobileApp, /function reasoningSentences/);
+  assert.match(mobileApp, /\.slice|insights\[1\]/);
+  assert.match(mobileApp, /\^\[A-Z\]\{6\}\\s\+qualified independently/);
+  assert.match(mobileApp, /\^\[A-Z\]\{2,\}/);
+  assert.doesNotMatch(mobileApp, /className="graphite-context-pills"/);
+  assert.doesNotMatch(mobileApp, />View Chart</);
+  assert.match(refinedStyles, /Refined signal detail: match the approved single-surface composition/);
+  assert.match(refinedStyles, /\.graphite-detail-screen \.graphite-detail[\s\S]*?background:\s*transparent/);
+});

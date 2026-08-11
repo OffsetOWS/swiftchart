@@ -11843,3 +11843,179 @@ button.settings-row:active {
 .graphite-app.is-light .graphite-detail-actions button:not(.ghost) {
   color: #fff;
 }
+
+/* Refined signal detail: match the approved single-surface composition. */
+.graphite-app .graphite-detail-screen {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px max(18px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.graphite-app .graphite-detail-screen::-webkit-scrollbar {
+  display: none;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail {
+  width: min(100%, 430px);
+  max-height: none;
+  margin: 0 auto;
+  gap: 13px;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail > header {
+  grid-template-columns: 44px minmax(0, 1fr) 52px;
+  gap: 11px;
+  padding: 3px 0 8px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail > header .graphite-coin,
+.graphite-app .graphite-detail-screen .graphite-detail > header .instrument-logo {
+  --instrument-logo-size: 44px !important;
+  width: 44px;
+  height: 44px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail > header > div {
+  gap: 2px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail > header > div > span {
+  color: var(--graphite-muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail > header > div > strong {
+  color: var(--graphite-ink);
+  font-size: 23px;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail > header > div > p {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--graphite-soft);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphite-app .graphite-detail-screen .graphite-score-ring {
+  width: 52px;
+  height: 52px;
+  flex-basis: 52px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-trade-meta {
+  border-radius: 16px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-trade-meta .graphite-stat {
+  min-height: 64px;
+  padding: 11px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-execution-ladder,
+.graphite-app .graphite-detail-screen .graphite-reasoning {
+  border: 1px solid var(--graphite-line);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    var(--graphite-panel);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.graphite-app .graphite-detail-screen .graphite-execution-ladder {
+  padding: 16px 15px;
+  border-radius: 20px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-reasoning {
+  gap: 9px;
+  padding: 15px;
+  border-radius: 20px;
+}
+
+.graphite-app .graphite-detail-screen .graphite-reasoning p {
+  margin: 0;
+  color: var(--graphite-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail-actions {
+  position: static;
+  grid-template-columns: 1fr 1.3fr;
+  margin: 0;
+  padding: 1px 0 0;
+  background: transparent;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail-actions button {
+  min-height: 48px;
+  border-radius: 15px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.graphite-app .graphite-detail-screen .graphite-detail-actions button:only-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 380px) {
+  .graphite-app .graphite-detail-screen {
+    padding-inline: 10px;
+  }
+
+  .graphite-app .graphite-detail-screen .graphite-detail > header {
+    grid-template-columns: 40px minmax(0, 1fr) 48px;
+    gap: 8px;
+  }
+
+  .graphite-app .graphite-detail-screen .graphite-detail > header .graphite-coin,
+  .graphite-app .graphite-detail-screen .graphite-detail > header .instrument-logo {
+    --instrument-logo-size: 40px !important;
+    width: 40px;
+    height: 40px;
+  }
+
+  .graphite-app .graphite-detail-screen .graphite-detail > header > div > strong {
+    font-size: 21px;
+  }
+
+  .graphite-app .graphite-detail-screen .graphite-score-ring {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
+  }
+
+  .graphite-app .graphite-detail-screen .graphite-trade-meta .graphite-stat {
+    min-height: 60px;
+    padding: 9px;
+  }
+
+  .graphite-app .graphite-detail-screen .graphite-execution-ladder {
+    padding-inline: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graphite-app .graphite-detail-screen,
+  .graphite-app .graphite-detail-screen * {
+    scroll-behavior: auto;
+  }
+}
