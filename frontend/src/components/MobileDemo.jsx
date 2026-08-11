@@ -464,9 +464,9 @@ function StatTile({ label, value, tone }) {
   );
 }
 
-function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forexSignals, forexOverview, forexLimitOpportunities }) {
+function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forexSignals, forexOverview }) {
   if (market === MARKET_TYPES.forex) {
-    return <ForexHomeScreen signals={forexSignals} overview={forexOverview} onSelect={onSelect} limitOpportunities={forexLimitOpportunities} />;
+    return <ForexHomeScreen signals={forexSignals} overview={forexOverview} onSelect={onSelect} onViewAll={onViewAll} />;
   }
   const best = signals[0] || null;
   const bullish = best ? !/short|sell/i.test(best.direction) : null;
@@ -556,51 +556,57 @@ function ForexSignalGroups({ signals, onSelect, compact = false }) {
   });
 }
 
-function LimitOpportunitiesSection({ opportunities = [] }) {
-  const [filter, setFilter] = useState("waiting");
-  const groups = {
-    waiting: ["WAIT_FOR_RETEST", "PENDING_LIMIT"],
-    filled: ["ACTIVE_TRADE", "TP1_HIT_TP2_RUNNING", "TP1_HIT", "TP2_HIT", "SL_HIT"],
-    expired: ["EXPIRED", "MISSED_NO_RETEST", "TARGET_REACHED_BEFORE_ENTRY"],
-    cancelled: ["CANCELLED", "INVALIDATED", "NEWS_CANCELLED"],
-  };
-  const rows = opportunities.filter((item) => groups[filter].includes(item.opportunity_status));
+const FOREX_HOME_SECTIONS = [
+  ["Latest opportunities", ["PENDING_ENTRY"]],
+  ["Active signals", ["OPEN", "TP1_HIT_TP2_RUNNING"]],
+];
+
+function forexHomeStatus(signal) {
+  const status = String(signal.status || "").toUpperCase();
+  if (status === "PENDING_ENTRY") return "Entry pending";
+  if (status === "TP1_HIT_TP2_RUNNING") return "TP1 hit · TP2 running";
+  return "Active trade";
+}
+
+function ForexPairRow({ signal, onSelect }) {
+  const isShort = /short|sell/i.test(signal.direction);
   return (
-    <section className="forex-limit-opportunities">
-      <div className="graphite-section-head">
-        <div><span>Limit Opportunities</span><small>Active only after entry</small></div>
-        <em>Experimental · Shadow</em>
+    <button type="button" className="forex-pair-row" onClick={() => onSelect(signal)}>
+      <i className={isShort ? "short" : "long"} aria-hidden="true" />
+      <div className="forex-pair-copy">
+        <div>
+          <strong>{signal.symbol}</strong>
+          <Direction direction={signal.direction} />
+        </div>
+        <small>{signal.timeframe.toUpperCase()} · {forexHomeStatus(signal)}</small>
       </div>
-      <div className="graphite-filter-row">
-        {Object.keys(groups).map((key) => <button type="button" key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{key}</button>)}
-      </div>
-      <div className="forex-limit-grid">
-        {rows.map((item) => (
-          <article key={item.id}>
-            <header><strong>{item.pair}</strong><span>{item.order_type.replace("_", " ")}</span></header>
-            <p>{item.timeframe} · {item.opportunity_status.replaceAll("_", " ")}</p>
-            <dl>
-              <div><dt>Entry</dt><dd>{fmt(item.entry_price)}</dd></div>
-              <div><dt>Zone</dt><dd>{fmt(item.entry_zone_low)} – {fmt(item.entry_zone_high)}</dd></div>
-              <div><dt>Current</dt><dd>{fmt(item.current_price)}</dd></div>
-              <div><dt>Distance</dt><dd>{item.distance_to_entry_pips} pips</dd></div>
-              <div><dt>Stop</dt><dd>{fmt(item.stop_loss)}</dd></div>
-              <div><dt>TP1 / TP2</dt><dd>{fmt(item.take_profit_1)} / {fmt(item.take_profit_2)}</dd></div>
-              <div><dt>RR</dt><dd>{item.risk_reward_1}R / {item.risk_reward_2}R</dd></div>
-              <div><dt>Expires</dt><dd>{dt(item.expiry_time)}</dd></div>
-            </dl>
-            <p className="forex-limit-context">DXY: {item.context?.usd_context?.state?.replaceAll("_", " ") || "Unavailable"}{item.context?.oil_context ? ` · Oil: ${item.context.oil_context.state.replaceAll("_", " ")}` : ""}</p>
-            <p>{item.reasoning?.join(" ")}</p>
-            <b>Limit not filled · Waiting for retracement</b>
-          </article>
-        ))}
-        {!rows.length ? <p className="graphite-no-results">No {filter} limit opportunities.</p> : null}
-      </div>
-    </section>
+      <span className="forex-pair-quality">
+        <strong>{signal.score}</strong>
+        <small>{signal.rr}</small>
+      </span>
+    </button>
   );
 }
 
-function ForexHomeScreen({ signals, overview, onSelect, limitOpportunities }) {
+function ForexHomeSignalLists({ signals, onSelect, onViewAll }) {
+  return FOREX_HOME_SECTIONS.map(([label, statuses]) => {
+    const rows = signals.filter((signal) => statuses.includes(String(signal.status).toUpperCase()));
+    if (!rows.length) return null;
+    return (
+      <section className="forex-home-list" key={label}>
+        <div className="graphite-section-head">
+          <span>{label}</span>
+          <button type="button" onClick={onViewAll}>{label === "Latest opportunities" ? "Scan market" : "View all"}</button>
+        </div>
+        <div className="forex-pair-list">
+          {rows.map((signal) => <ForexPairRow key={signal.id} signal={signal} onSelect={onSelect} />)}
+        </div>
+      </section>
+    );
+  });
+}
+
+function ForexHomeScreen({ signals, overview, onSelect, onViewAll }) {
   const [sessionClock, setSessionClock] = useState(() => new Date());
   const session = useMemo(() => getForexSessionState(sessionClock), [sessionClock]);
   const homeSignals = useMemo(
@@ -637,15 +643,14 @@ function ForexHomeScreen({ signals, overview, onSelect, limitOpportunities }) {
         />
       ) : null}
 
-      <ForexSignalGroups signals={homeSignals} onSelect={onSelect} />
+      <div className="forex-home-lists">
+        <ForexHomeSignalLists signals={homeSignals} onSelect={onSelect} onViewAll={onViewAll} />
+      </div>
       {!homeSignals.length ? (
         <p className="graphite-no-results">
           No persisted Forex setup currently meets the scanner criteria. SwiftChart will update this list after the next scheduled scan.
         </p>
       ) : null}
-
-      <LimitOpportunitiesSection opportunities={limitOpportunities} />
-
     </div>
   );
 }
@@ -1835,7 +1840,7 @@ export default function MobileDemo({
             />
           ) : <>
           <main className="graphite-content">
-            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} forexLimitOpportunities={forexLimitOpportunities} /> : null}
+            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} /> : null}
             {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} onSelect={openHistoryTrade} /> : null}
             {tab === "account" && accountView === "main" ? (

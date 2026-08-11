@@ -51,3 +51,14 @@ test("Signal Detail uses the approved single-surface hierarchy and concise reaso
   assert.match(refinedStyles, /Refined signal detail: match the approved single-surface composition/);
   assert.match(refinedStyles, /\.graphite-detail-screen \.graphite-detail[\s\S]*?background:\s*transparent/);
 });
+
+test("Forex Home uses compact pair rows without the experimental limit feed", () => {
+  assert.match(mobileApp, /function ForexPairRow/);
+  assert.match(mobileApp, /Latest opportunities/);
+  assert.match(mobileApp, /Active signals/);
+  assert.doesNotMatch(mobileApp, /function LimitOpportunitiesSection/);
+  assert.doesNotMatch(mobileApp, /Experimental · Shadow/);
+  assert.doesNotMatch(mobileApp, />Limit Opportunities</);
+  assert.match(refinedStyles, /Forex home: compact pair rows/);
+  assert.match(refinedStyles, /\.forex-pair-row/);
+});
