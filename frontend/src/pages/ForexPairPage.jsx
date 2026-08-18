@@ -5,6 +5,7 @@ import GraphiteStateCard from "../components/GraphiteStateCard.jsx";
 import { useAuth } from "../lib/AuthContext.jsx";
 import { getForexPairChart } from "../lib/api.js";
 import { loadAppPreferences } from "../lib/appPreferences.js";
+import { forexZoneStatus } from "../lib/forexPairState.js";
 import "../styles/forexPair.css";
 
 const TIMEFRAMES = ["1H", "4H", "1D"];
@@ -17,15 +18,6 @@ function price(value, symbol) {
 
 function words(value) {
   return String(value || "").replaceAll("_", " ");
-}
-
-function zoneStatus(snapshot) {
-  const active = snapshot?.bias === "BEARISH" ? snapshot.sell_zones?.[0] : snapshot.buy_zones?.[0];
-  if (!active) return "No active zone";
-  if (active.state === "CONFIRMED") return `${snapshot.bias === "BEARISH" ? "SHORT" : "LONG"} confirmed`;
-  if (["TOUCHED", "RETESTING", "SWEPT", "RECLAIMED"].includes(active.state)) return "Reaction detected";
-  if (active.state === "INVALIDATED") return "Setup invalidated";
-  return `${snapshot.bias === "BEARISH" ? "Sell" : "Buy"} zone — waiting`;
 }
 
 export default function ForexPairPage({ symbol, onNavigate }) {
@@ -112,7 +104,7 @@ export default function ForexPairPage({ symbol, onNavigate }) {
           </div>
 
           <section className="swift-ta-card">
-            <header><div><span>Swift TA</span><small>Updated {new Date(snapshot.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small></div><strong className={decisionTone}>{zoneStatus(snapshot)}</strong></header>
+            <header><div><span>Swift TA</span><small>Updated {new Date(snapshot.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small></div><strong className={decisionTone}>{forexZoneStatus(snapshot)}</strong></header>
             <h2>{words(snapshot.decision)}</h2>
             <p>{snapshot.summary}</p>
             <dl>
