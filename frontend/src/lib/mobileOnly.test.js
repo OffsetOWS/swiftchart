@@ -34,6 +34,8 @@ test("SwiftChart Refined preserves the four-item navigation and market branches"
   assert.match(mobileApp, /market === MARKET_TYPES\.forex/);
   assert.match(mobileApp, /<ForexHomeScreen/);
   assert.match(mobileApp, /Active signals/);
+  assert.match(mobileApp, /aria-label="Open first matching Forex pair"/);
+  assert.match(mobileApp, /event\.key === "Enter"/);
 });
 
 test("refined state presentation reuses one Forex loading state", () => {

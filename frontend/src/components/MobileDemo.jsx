@@ -600,6 +600,9 @@ function ForexHomeScreen({ signals, overview, pairs, onSelectPair, onSelect, onV
       return `${symbol} ${name} ${aliases}`.includes(query);
     }).slice(0, 6);
   }, [pairQuery, pairs]);
+  const openFirstPairMatch = () => {
+    if (pairMatches[0]) onSelectPair(pairMatches[0].pair);
+  };
 
   return (
     <div className="graphite-screen forex-home">
@@ -611,7 +614,22 @@ function ForexHomeScreen({ signals, overview, pairs, onSelectPair, onSelect, onV
           placeholder="Search EURUSD, XAUUSD, GBPJPY..."
           aria-label="Search Forex pairs"
           autoComplete="off"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && pairMatches[0]) {
+              event.preventDefault();
+              openFirstPairMatch();
+            }
+          }}
         />
+        <button
+          type="button"
+          className="forex-pair-search-submit"
+          onClick={openFirstPairMatch}
+          disabled={!pairMatches.length}
+          aria-label="Open first matching Forex pair"
+        >
+          Search
+        </button>
         {pairMatches.length ? (
           <div className="forex-pair-search-results">
             {pairMatches.map((item) => (
