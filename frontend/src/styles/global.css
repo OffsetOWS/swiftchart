@@ -2662,33 +2662,6 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-.auth-code-field input {
-  font-size: 22px;
-  font-weight: 850;
-  letter-spacing: 0.28em;
-  text-align: center;
-}
-
-.auth-resend {
-  justify-self: center;
-  padding: 0;
-  color: #9ba3aa;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.auth-resend:hover:not(:disabled) {
-  color: #5dd9cf;
-}
-
-.auth-resend:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
 .auth-graphite .auth-confirmation-back {
   color: #c6cbce;
   font-size: 13px;
