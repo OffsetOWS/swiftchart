@@ -7455,6 +7455,66 @@ button:disabled {
     overflow-x: clip;
   }
 
+  .forex-pair-search {
+    position: relative;
+    z-index: 12;
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    color: var(--graphite-muted);
+    border: 1px solid var(--graphite-line);
+    border-radius: 17px;
+    background: rgba(255,255,255,.045);
+  }
+
+  .forex-pair-search input {
+    width: 100%;
+    min-width: 0;
+    height: 50px;
+    padding: 0;
+    color: var(--graphite-ink);
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font-size: 13px;
+  }
+
+  .forex-pair-search input::placeholder { color: var(--graphite-muted); opacity: .82; }
+  .forex-pair-search-results {
+    position: absolute;
+    top: calc(100% + 7px);
+    left: 0;
+    right: 0;
+    overflow: hidden;
+    padding: 5px;
+    border: 1px solid var(--graphite-line-strong);
+    border-radius: 17px;
+    background: rgba(16,18,20,.98);
+    box-shadow: 0 22px 48px rgba(0,0,0,.48);
+  }
+
+  .forex-pair-search-results button {
+    width: 100%;
+    min-height: 58px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 9px;
+    color: var(--graphite-ink);
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    text-align: left;
+  }
+  .forex-pair-search-results button:hover { background: rgba(255,255,255,.055); }
+  .forex-pair-search-results button > span { display: grid; gap: 3px; }
+  .forex-pair-search-results strong { font-size: 13px; }
+  .forex-pair-search-results small { color: var(--graphite-muted); font-size: 11px; }
+  .forex-pair-search-empty { position: absolute; top: calc(100% + 7px); left: 0; right: 0; padding: 13px; color: var(--graphite-muted); border: 1px solid var(--graphite-line); border-radius: 14px; background: var(--graphite-panel); box-shadow: var(--graphite-shadow); }
+
   .graphite-hero-card,
   .graphite-regime-card,
   .graphite-scan-card,

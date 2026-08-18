@@ -193,6 +193,10 @@ export function getForexPairs() {
   return request("/api/forex/pairs");
 }
 
+export function getForexPairChart(symbol, timeframe = "1H") {
+  return request(`/api/forex/pairs/${encodeURIComponent(symbol)}/chart?timeframe=${encodeURIComponent(timeframe)}&limit=240`);
+}
+
 export function getMt5Status() {
   return request("/api/performance");
 }

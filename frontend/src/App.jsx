@@ -5,6 +5,7 @@ import MobileDemo from "./components/MobileDemo.jsx";
 import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
+import PairChartScreen from "./pages/ForexPairPage.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
 import { getActiveCryptoTrades, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
@@ -35,9 +36,11 @@ export default function App() {
   const isMobileAlias = path === "/mobile-demo";
   const isAppPage = path === "/app"
     || /^\/app\/(home|scan|history|account|notifications)$/.test(path)
-    || /^\/app\/signal\/[^/]+$/.test(path);
+    || /^\/app\/signal\/[^/]+$/.test(path)
+    || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
   const isPublicReadOnlyAppPage = /^\/app\/(?:home|scan)(?:\/|$)/i.test(path)
-    || /^\/app\/signal\/[^/]+$/i.test(path);
+    || /^\/app\/signal\/[^/]+$/i.test(path)
+    || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
   const isDisabledCommercePage = /^\/(?:admin\/payments?|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path)
     || /^\/app\/(?:upgrade|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path);
   const isAuthPage = ["/auth", "/login", "/signup", "/forgot-password", "/reset-password"].includes(path);
@@ -145,6 +148,18 @@ export default function App() {
   }
   if (isDisabledCommercePage || path.startsWith("/analysis/")) return <AuthLoading />;
 
+  const forexPairMatch = path.match(/^\/app\/forex\/([A-Z0-9]+)$/i);
+  if (forexPairMatch) {
+    return (
+      <>
+        <main className="app-shell dark-mode app-view mobile-only-app">
+          <PairChartScreen symbol={forexPairMatch[1].toUpperCase()} onNavigate={navigate} />
+        </main>
+        <Analytics />
+      </>
+    );
+  }
+
   return (
     <>
       <main className="app-shell dark-mode app-view mobile-only-app">
@@ -155,6 +170,7 @@ export default function App() {
           initialConfigLoading={loadingTopIdeas}
           initialTab={appTabFromPath(path)}
           onRefreshCrypto={() => refreshTopIdeas({ manual: true })}
+          onNavigate={navigate}
         />
       </main>
       <Analytics />
