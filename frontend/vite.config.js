@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import mdx from "@mdx-js/rollup";
+import { readFileSync } from "node:fs";
 
 const releaseSha = process.env.SWIFTCHART_RELEASE_SHA
   || process.env.VERCEL_GIT_COMMIT_SHA
@@ -20,8 +21,22 @@ function releaseManifest() {
   };
 }
 
+function oryVerificationFile() {
+  return {
+    name: "ory-verification-file",
+    apply: "build",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: ".well-known/ory-verify.txt",
+        source: readFileSync(new URL("./public/.well-known/ory-verify.txt", import.meta.url)),
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [mdx(), react(), releaseManifest()],
+  plugins: [mdx(), react(), releaseManifest(), oryVerificationFile()],
   build: {
     rollupOptions: {
       output: {
