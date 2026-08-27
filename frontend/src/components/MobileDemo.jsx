@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/AuthContext.jsx";
 import {
+  getCandles,
   getForexCurrencyStrength,
   getForexOverview,
   getForexLimitOpportunities,
@@ -90,6 +91,7 @@ function displayRange(values) {
 function normalizeIdea(idea, index) {
   const score = Math.round(Number(idea?.setup_score ?? idea?.confidence_score ?? 0));
   const entryZone = Array.isArray(idea?.entry_zone) ? idea.entry_zone : [];
+  const latestPrice = idea?.latest_price ?? idea?.current_price ?? idea?.mark_price ?? idea?.price ?? null;
   return {
     rawIdea: idea,
     market: MARKET_TYPES.crypto,
@@ -109,6 +111,10 @@ function normalizeIdea(idea, index) {
     thesis: idea?.reason || "This setup passed SwiftChart's live confirmation checks.",
     exchange: idea?.exchange,
     status: idea?.status || "Open",
+    entryLow: entryZone[0] !== undefined ? Number(entryZone[0]) : undefined,
+    entryHigh: entryZone[1] !== undefined ? Number(entryZone[1]) : entryZone[0] !== undefined ? Number(entryZone[0]) : undefined,
+    latestPrice: latestPrice === null ? null : Number(latestPrice),
+    latestPriceAt: idea?.latest_price_at ?? idea?.current_price_at ?? idea?.updated_at ?? null,
   };
 }
 
@@ -140,6 +146,8 @@ function normalizePendingSetup(setup, index) {
 }
 
 function normalizeActiveCryptoTrade(trade, index) {
+  const lifecycleStatus = trade.lifecycle_status
+    || (trade.status === "tp_hit" ? "TP1_HIT_TP2_RUNNING" : trade.status === "sl_hit" ? "STOPPED" : trade.result === "win" ? "TP2_HIT" : "OPEN");
   return {
     ...normalizeIdea({
       symbol: trade.symbol,
@@ -315,7 +323,16 @@ function normalizeSavedTrade(trade) {
       confidence_score: trade.confidence ?? trade.setup_score,
       market_regime: trade.market_regime || trade.market_bias,
       reason: trade.reason || "Saved SwiftChart setup.",
+      status: lifecycleStatus,
+      latest_price: trade.latest_price,
+      latest_price_at: trade.latest_price_at,
     }, 0),
+    status: lifecycleStatus,
+    latestPrice: trade.latest_price ?? null,
+    latestPriceAt: trade.latest_price_at ?? null,
+    activatedEntryPrice: trade.entry_price,
+    entryLow: trade.entry_low ?? trade.entry_price,
+    entryHigh: trade.entry_high ?? trade.entry_price,
     isHistory: true,
     historyTradeId: trade.id,
     historyResult: lifecycleLabel,
@@ -1054,6 +1071,7 @@ function ExecutionLadder({ signal }) {
       <div className="graphite-ladder-live">
         <span>Current: <strong>{progress.currentPrice === null ? "-" : fmt(progress.currentPrice, priceDigits)}</strong></span>
         <span>Updated: {updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"}</span>
+        {progress.nearestLevel ? <span>Nearest: <strong>{progress.nearestLevel} · {progress.nearestDistancePct.toFixed(2)}%</strong></span> : null}
       </div>
       <div className="graphite-ladder-rail" aria-hidden="true">
         <i className={`target tp2${progress.tp2Complete ? " complete" : ""}`} style={{ left: `${progress.tp2Position}%` }} />
@@ -1473,6 +1491,52 @@ export default function MobileDemo({
   }, [selectedSignal?.id, selectedSignal?.market]);
 
   useEffect(() => {
+    if (!selectedSignal || selectedSignal.market !== MARKET_TYPES.crypto) return undefined;
+    let cancelled = false;
+    const refreshCryptoTrade = async () => {
+      try {
+        if (selectedSignal.isHistory && selectedSignal.historyTradeId && auth.user?.id) {
+          const freshTrade = await getPaperTradeDetail(
+            selectedSignal.historyTradeId,
+            auth.user.id,
+            auth.session?.access_token,
+          );
+          if (cancelled) return;
+          setPaperTrades((current) => current.map((item) => item.id === freshTrade.id ? freshTrade : item));
+          setSelectedSignal(normalizeSavedTrade(freshTrade));
+          return;
+        }
+        const candles = await getCandles({
+          exchange: selectedSignal.exchange || "hyperliquid",
+          symbol: selectedSignal.symbol,
+          timeframe: selectedSignal.timeframe || "4h",
+        });
+        const latest = candles?.[candles.length - 1];
+        if (cancelled || !latest) return;
+        setSelectedSignal((current) => current?.market === MARKET_TYPES.crypto && current?.symbol === selectedSignal.symbol
+          ? { ...current, latestPrice: Number(latest.close), latestPriceAt: latest.timestamp }
+          : current);
+      } catch {
+        // Keep the last verified crypto price and lifecycle visible during transient failures.
+      }
+    };
+    refreshCryptoTrade();
+    const timer = window.setInterval(refreshCryptoTrade, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    auth.session?.access_token,
+    auth.user?.id,
+    selectedSignal?.exchange,
+    selectedSignal?.historyTradeId,
+    selectedSignal?.market,
+    selectedSignal?.symbol,
+    selectedSignal?.timeframe,
+  ]);
+
+  useEffect(() => {
     setMarketPreferenceReady(true);
   }, []);
 
@@ -1520,11 +1584,24 @@ export default function MobileDemo({
   useEffect(() => {
     if (!auth.user?.id) {
       setPaperTrades([]);
-      return;
+      return undefined;
     }
-    listPaperTrades(auth.user.id, auth.session?.access_token)
-      .then(setPaperTrades)
-      .catch(() => setPaperTrades([]));
+    let cancelled = false;
+    const loadPaperTrades = () => {
+      listPaperTrades(auth.user.id, auth.session?.access_token)
+        .then((trades) => {
+          if (!cancelled) setPaperTrades(trades);
+        })
+        .catch(() => {
+          // Preserve the last known user history during transient market-data failures.
+        });
+    };
+    loadPaperTrades();
+    const timer = window.setInterval(loadPaperTrades, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [auth.session?.access_token, auth.user?.id]);
 
   useEffect(() => {

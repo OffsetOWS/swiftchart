@@ -1,13 +1,17 @@
 import sqlite3
 import json
+import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import PaperTrade, PaperTradeCreate
 from app.forex.storage import ensure_forex_schema
+from app.services.market_data import get_candles_cached
 from app.utils.database import get_connection
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _notes(row: sqlite3.Row) -> dict:
@@ -119,6 +123,187 @@ def _enrich_paper_trade(connection: sqlite3.Connection, row: sqlite3.Row) -> dic
     return result
 
 
+def _datetime(value) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _crypto_result_r(trade: dict, *, stopped_after_tp1: bool = False) -> float:
+    if not stopped_after_tp1:
+        return float(trade.get("risk_reward") or 0)
+    entry = float(trade["entry_price"])
+    stop = float(trade["stop_loss"])
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return -0.5
+    tp1_r = abs(float(trade["take_profit_1"]) - entry) / risk
+    return round((tp1_r * 0.5) - 0.5, 4)
+
+
+def evaluate_crypto_paper_trade(trade: dict, candles) -> dict:
+    """Evaluate a user-saved crypto trade from the moment it was taken."""
+    taken_at = _datetime(trade.get("taken_at") or trade.get("created_at"))
+    direction = _normalized_direction(trade.get("direction"))
+    is_long = direction == "BUY"
+    stop = float(trade["stop_loss"])
+    tp1 = float(trade["take_profit_1"])
+    tp2 = float(trade["take_profit_2"])
+    ordered = candles.copy().sort_values("timestamp") if candles is not None and not candles.empty else None
+    latest_price = None
+    latest_price_at = None
+    if ordered is not None and not ordered.empty:
+        latest = ordered.iloc[-1]
+        latest_price = float(latest["close"])
+        latest_price_at = _datetime(latest["timestamp"]).isoformat()
+
+    tp1_hit_at = None
+    tp2_hit_at = None
+    stopped_at = None
+    closed_at = None
+    lifecycle_status = "OPEN"
+    lifecycle_label = "Open"
+    lifecycle_result = "open"
+    paper_status = "open"
+    paper_result = "open"
+    result_r = None
+
+    if ordered is not None:
+        for _, candle in ordered.iterrows():
+            candle_at = _datetime(candle["timestamp"])
+            if candle_at <= taken_at:
+                continue
+            high = float(candle["high"])
+            low = float(candle["low"])
+            tp1_hit = high >= tp1 if is_long else low <= tp1
+            tp2_hit = high >= tp2 if is_long else low <= tp2
+            stop_hit = low <= stop if is_long else high >= stop
+
+            if tp1_hit_at is None:
+                if stop_hit and (tp1_hit or tp2_hit):
+                    lifecycle_status = "AMBIGUOUS"
+                    lifecycle_label = "TP/SL order unclear"
+                    lifecycle_result = "closed"
+                    paper_status = "closed"
+                    paper_result = "closed"
+                    closed_at = candle_at.isoformat()
+                    break
+                if tp2_hit:
+                    tp1_hit_at = candle_at.isoformat()
+                    tp2_hit_at = candle_at.isoformat()
+                    closed_at = candle_at.isoformat()
+                    lifecycle_status = "TP2_HIT"
+                    lifecycle_label = "TP2 Hit"
+                    lifecycle_result = "win"
+                    paper_status = "closed"
+                    paper_result = "win"
+                    result_r = _crypto_result_r(trade)
+                    break
+                if tp1_hit:
+                    tp1_hit_at = candle_at.isoformat()
+                    lifecycle_status = "TP1_HIT_TP2_RUNNING"
+                    lifecycle_label = "TP1 Hit · TP2 running"
+                    lifecycle_result = "open"
+                    paper_status = "tp_hit"
+                    continue
+                if stop_hit:
+                    stopped_at = candle_at.isoformat()
+                    closed_at = candle_at.isoformat()
+                    lifecycle_status = "STOPPED"
+                    lifecycle_label = "Stop Loss"
+                    lifecycle_result = "loss"
+                    paper_status = "sl_hit"
+                    paper_result = "loss"
+                    result_r = -1.0
+                    break
+            else:
+                if stop_hit and tp2_hit:
+                    lifecycle_status = "AMBIGUOUS"
+                    lifecycle_label = "TP2/SL order unclear"
+                    lifecycle_result = "closed"
+                    paper_status = "closed"
+                    paper_result = "closed"
+                    closed_at = candle_at.isoformat()
+                    break
+                if tp2_hit:
+                    tp2_hit_at = candle_at.isoformat()
+                    closed_at = candle_at.isoformat()
+                    lifecycle_status = "TP2_HIT"
+                    lifecycle_label = "TP2 Hit"
+                    lifecycle_result = "win"
+                    paper_status = "closed"
+                    paper_result = "win"
+                    result_r = _crypto_result_r(trade)
+                    break
+                if stop_hit:
+                    stopped_at = candle_at.isoformat()
+                    closed_at = candle_at.isoformat()
+                    lifecycle_status = "CLOSED_AFTER_TP1"
+                    lifecycle_label = "TP1 then Stop"
+                    result_r = _crypto_result_r(trade, stopped_after_tp1=True)
+                    lifecycle_result = "win" if result_r > 0 else "loss" if result_r < 0 else "closed"
+                    paper_status = "closed"
+                    paper_result = lifecycle_result
+                    break
+
+    return {
+        "status": paper_status,
+        "result": paper_result,
+        "pnl": result_r,
+        "lifecycle_status": lifecycle_status,
+        "lifecycle_label": lifecycle_label,
+        "lifecycle_result": lifecycle_result,
+        "result_r": result_r,
+        "latest_price": latest_price,
+        "latest_price_at": latest_price_at,
+        "activated_at": taken_at.isoformat(),
+        "tp1_hit_at": tp1_hit_at,
+        "tp2_hit_at": tp2_hit_at,
+        "stopped_at": stopped_at,
+        "closed_at": closed_at,
+        "entry_low": float(trade["entry_price"]),
+        "entry_high": float(trade["entry_price"]),
+    }
+
+
+async def _refresh_crypto_paper_trades(rows: list[dict]) -> list[dict]:
+    candle_cache = {}
+    refreshed = []
+    persistence_updates = []
+    for row in rows:
+        if str(row.get("exchange") or "").lower() == "forex":
+            refreshed.append(row)
+            continue
+        key = (
+            str(row.get("exchange") or "hyperliquid").lower(),
+            str(row.get("symbol") or "").upper(),
+            str(row.get("timeframe") or "4h").lower(),
+        )
+        try:
+            if key not in candle_cache:
+                candle_cache[key] = await get_candles_cached(*key, 1000)
+            outcome = evaluate_crypto_paper_trade(row, candle_cache[key])
+        except Exception:
+            logger.exception("Crypto paper-trade refresh failed id=%s symbol=%s", row.get("id"), row.get("symbol"))
+            refreshed.append(row)
+            continue
+        enriched = {**row, **outcome}
+        refreshed.append(enriched)
+        if (row.get("status"), row.get("result"), row.get("pnl")) != (
+            outcome["status"], outcome["result"], outcome["pnl"],
+        ):
+            persistence_updates.append((outcome["status"], outcome["result"], outcome["pnl"], row["id"]))
+    if persistence_updates:
+        with get_connection() as connection:
+            connection.executemany(
+                "UPDATE paper_trades SET status = ?, result = ?, pnl = ? WHERE id = ?",
+                persistence_updates,
+            )
+    return refreshed
+
+
 def _payload_user_id(payload: PaperTradeCreate) -> str:
     if payload.user_id:
         return str(payload.user_id)
@@ -198,6 +383,7 @@ async def list_paper_trades(user_id: str | None = Query(default=None)):
         else:
             rows = connection.execute("SELECT * FROM paper_trades ORDER BY taken_at DESC, created_at DESC").fetchall()
         enriched = [_enrich_paper_trade(connection, row) for row in rows]
+    enriched = await _refresh_crypto_paper_trades(enriched)
     return [PaperTrade(**row) for row in enriched]
 
 
@@ -215,6 +401,7 @@ async def get_paper_trade(trade_id: int, user_id: str | None = Query(default=Non
         if row is None:
             raise HTTPException(status_code=404, detail="Paper trade not found.")
         enriched = _enrich_paper_trade(connection, row)
+    enriched = (await _refresh_crypto_paper_trades([enriched]))[0]
     return PaperTrade(**enriched)
 
 

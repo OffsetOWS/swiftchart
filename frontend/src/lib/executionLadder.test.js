@@ -68,3 +68,14 @@ test("marker is clamped beyond target and stop", () => {
   assert.equal(executionLadderState({ ...short, latest_price: 1 }).markerPosition, 0);
   assert.equal(executionLadderState({ ...short, latest_price: 999 }).markerPosition, 100);
 });
+
+test("active trade reports whether TP or stop is nearest", () => {
+  const nearTarget = executionLadderState({ ...long, latest_price: 109 });
+  const nearStop = executionLadderState({ ...long, latest_price: 96 });
+  const runner = executionLadderState({ ...long, status: "TP1_HIT_TP2_RUNNING", latest_price: 118 });
+
+  assert.equal(nearTarget.nearestLevel, "TP1");
+  assert.ok(nearTarget.nearestDistancePct < 1);
+  assert.equal(nearStop.nearestLevel, "Stop");
+  assert.equal(runner.nearestLevel, "TP2");
+});

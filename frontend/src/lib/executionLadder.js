@@ -91,6 +91,21 @@ export function executionLadderState(signal) {
   const targetDistance = entry === null || activeTarget === null
     ? 0
     : Math.abs(activeTarget - entry);
+  const targetDistanceFromPrice = storedPrice === null || activeTarget === null
+    ? null
+    : Math.abs(activeTarget - storedPrice);
+  const stopDistanceFromPrice = storedPrice === null || stop === null
+    ? null
+    : Math.abs(stop - storedPrice);
+  const terminal = ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(status);
+  const targetLabel = status === "TP1_HIT_TP2_RUNNING" ? "TP2" : "TP1";
+  const nearestLevel = terminal || targetDistanceFromPrice === null || stopDistanceFromPrice === null
+    ? null
+    : targetDistanceFromPrice <= stopDistanceFromPrice ? targetLabel : "Stop";
+  const nearestDistance = nearestLevel === "Stop" ? stopDistanceFromPrice : targetDistanceFromPrice;
+  const nearestDistancePct = storedPrice && nearestDistance !== null
+    ? (nearestDistance / Math.abs(storedPrice)) * 100
+    : 0;
 
   return {
     status,
@@ -104,6 +119,8 @@ export function executionLadderState(signal) {
     tp2Position,
     stopPosition,
     favorableProgress: targetDistance > 0 ? clamp((favorableDistance / targetDistance) * 100, -100, 100) : 0,
+    nearestLevel,
+    nearestDistancePct,
     tp1Complete: tp1Reached,
     tp2Complete: status === "TP2_HIT",
     stopComplete: status === "STOPPED",
