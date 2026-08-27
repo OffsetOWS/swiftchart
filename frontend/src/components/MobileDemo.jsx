@@ -7,6 +7,7 @@ import {
   HelpCircle,
   History,
   House,
+  Info,
   LineChart,
   LogOut,
   MessageCircle,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/AuthContext.jsx";
 import {
+  getForexCurrencyStrength,
   getForexOverview,
   getForexLimitOpportunities,
   getForexSignal,
@@ -30,9 +32,10 @@ import {
 import { MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
 import { formatSessionCountdown, formatUtcClock, getForexSessionState } from "../lib/forexSessions.js";
 import { createPaperTradeFromSignal, getPaperTradeDetail, listPaperTrades, signalIdForIdea } from "../lib/paperTrades.js";
-import { useNotifications } from "../lib/notifications.js";
+import { pushSwiftChartNotification, useNotifications } from "../lib/notifications.js";
 import { useAppPreferences } from "../lib/appPreferences.js";
 import AppSplashScreen from "./AppSplashScreen.jsx";
+import { CurrencyStrengthOpportunities, CurrencyStrengthRanking } from "./CurrencyStrength.jsx";
 import GraphiteStateCard from "./GraphiteStateCard.jsx";
 import InstrumentLogo from "./InstrumentLogo.jsx";
 import NotificationCenter from "./NotificationCenter.jsx";
@@ -429,9 +432,9 @@ function StatTile({ label, value, tone }) {
   );
 }
 
-function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forexSignals, forexOverview, forexPairs, onSelectPair }) {
+function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forexSignals, forexOverview, forexStrength, onViewStrength, onSelectPair }) {
   if (market === MARKET_TYPES.forex) {
-    return <ForexHomeScreen signals={forexSignals} overview={forexOverview} pairs={forexPairs} onSelectPair={onSelectPair} onSelect={onSelect} onViewAll={onViewAll} />;
+    return <ForexHomeScreen signals={forexSignals} overview={forexOverview} strength={forexStrength} onSelect={onSelect} onViewAll={onViewAll} onViewStrength={onViewStrength} onSelectPair={onSelectPair} />;
   }
   const best = signals[0] || null;
   const bullish = best ? !/short|sell/i.test(best.direction) : null;
@@ -576,20 +579,8 @@ function ForexHomeSignalLists({ signals, onSelect, onViewAll }) {
   });
 }
 
-function ForexHomeScreen({ signals, overview, pairs, onSelectPair, onSelect, onViewAll }) {
-  const [sessionClock, setSessionClock] = useState(() => new Date());
+function ForexPairSearch({ pairs, onSelectPair }) {
   const [pairQuery, setPairQuery] = useState("");
-  const session = useMemo(() => getForexSessionState(sessionClock), [sessionClock]);
-  const homeSignals = useMemo(
-    () => activeForexSignals(signals),
-    [signals],
-  );
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setSessionClock(new Date()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   const pairMatches = useMemo(() => {
     const query = pairQuery.trim().toLowerCase();
     if (!query) return [];
@@ -605,43 +596,80 @@ function ForexHomeScreen({ signals, overview, pairs, onSelectPair, onSelect, onV
   };
 
   return (
+    <section className="forex-pair-search" aria-label="Find a Forex pair">
+      <Search size={18} aria-hidden="true" />
+      <input
+        value={pairQuery}
+        onChange={(event) => setPairQuery(event.target.value)}
+        placeholder="Search EURUSD, XAUUSD, GBPJPY..."
+        aria-label="Search Forex pairs"
+        autoComplete="off"
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && pairMatches[0]) {
+            event.preventDefault();
+            openFirstPairMatch();
+          }
+        }}
+      />
+      <button
+        type="button"
+        className="forex-pair-search-submit"
+        onClick={openFirstPairMatch}
+        disabled={!pairMatches.length}
+        aria-label="Open first matching Forex pair"
+      >
+        Search
+      </button>
+      {pairMatches.length ? (
+        <div className="forex-pair-search-results">
+          {pairMatches.map((item) => (
+            <button key={item.pair} type="button" onClick={() => onSelectPair(item.pair)}>
+              <InstrumentLogo symbol={item.pair} market="forex" />
+              <span><strong>{item.pair}</strong><small>{item.display_name}</small></span>
+              <ChevronRight size={17} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      ) : pairQuery.trim() ? <p className="forex-pair-search-empty">No matching supported pair.</p> : null}
+    </section>
+  );
+}
+
+function CurrencyStrengthPreview({ snapshot, onViewAll, onSelectPair }) {
+  return (
+    <section className="currency-strength-card" aria-label="Currency Strength">
+      <header>
+        <div>
+          <span className="currency-strength-title">Currency Strength <Info size={14} aria-label="Calculated from OANDA price changes across 28 major currency crosses" /></span>
+          <small>OANDA · LIVE · 24H · informational</small>
+        </div>
+        <button type="button" onClick={onViewAll}>View all</button>
+      </header>
+      {snapshot ? <>
+        <CurrencyStrengthRanking rows={snapshot.ranking} compact />
+        <div className="currency-strength-opportunity-heading"><span>Top pair opportunities</span><small>Strength gap</small></div>
+        <CurrencyStrengthOpportunities opportunities={snapshot.opportunities} limit={3} onSelectPair={onSelectPair} compact />
+        <p className="currency-strength-note">{snapshot.available_pair_count}/{snapshot.total_pair_count} major crosses available</p>
+      </> : <p className="currency-strength-empty">Calculating relative strength from OANDA price changes…</p>}
+    </section>
+  );
+}
+
+function ForexHomeScreen({ signals, overview, strength, onSelect, onViewAll, onViewStrength, onSelectPair }) {
+  const [sessionClock, setSessionClock] = useState(() => new Date());
+  const session = useMemo(() => getForexSessionState(sessionClock), [sessionClock]);
+  const homeSignals = useMemo(
+    () => activeForexSignals(signals),
+    [signals],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setSessionClock(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
     <div className="graphite-screen forex-home">
-      <section className="forex-pair-search" aria-label="Find a Forex pair">
-        <Search size={18} aria-hidden="true" />
-        <input
-          value={pairQuery}
-          onChange={(event) => setPairQuery(event.target.value)}
-          placeholder="Search EURUSD, XAUUSD, GBPJPY..."
-          aria-label="Search Forex pairs"
-          autoComplete="off"
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && pairMatches[0]) {
-              event.preventDefault();
-              openFirstPairMatch();
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="forex-pair-search-submit"
-          onClick={openFirstPairMatch}
-          disabled={!pairMatches.length}
-          aria-label="Open first matching Forex pair"
-        >
-          Search
-        </button>
-        {pairMatches.length ? (
-          <div className="forex-pair-search-results">
-            {pairMatches.map((item) => (
-              <button key={item.pair} type="button" onClick={() => onSelectPair(item.pair)}>
-                <InstrumentLogo symbol={item.pair} market="forex" />
-                <span><strong>{item.pair}</strong><small>{item.display_name}</small></span>
-                <ChevronRight size={17} aria-hidden="true" />
-              </button>
-            ))}
-          </div>
-        ) : pairQuery.trim() ? <p className="forex-pair-search-empty">No matching supported pair.</p> : null}
-      </section>
       <section className="graphite-hero-card forex">
         <div className="graphite-hero-copy">
           <span>Forex Market</span>
@@ -654,6 +682,8 @@ function ForexHomeScreen({ signals, overview, pairs, onSelectPair, onSelect, onV
           <p>{formatUtcClock(sessionClock)} UTC</p>
         </div>
       </section>
+
+      <CurrencyStrengthPreview snapshot={strength} onViewAll={onViewStrength} onSelectPair={onSelectPair} />
 
       {overview?.message ? (
         <GraphiteStateCard
@@ -690,6 +720,8 @@ function ScanScreen({
   forexScanError,
   onRetryForex,
   tradingPreferences,
+  forexPairs,
+  onSelectPair,
 }) {
   const [scanState, setScanState] = useState("idle");
   const [coinQuery, setCoinQuery] = useState("");
@@ -780,6 +812,8 @@ function ScanScreen({
                 : "Scan Forex"}
           </button>
         </section>
+
+        <ForexPairSearch pairs={forexPairs} onSelectPair={onSelectPair} />
 
         {forexFeedState.status === "loading" && !forexSignals.length ? (
           <GraphiteStateCard
@@ -1317,7 +1351,7 @@ export default function MobileDemo({
   onNavigate,
 }) {
   const auth = useAuth();
-  const notificationCenter = useNotifications();
+  const notificationCenter = useNotifications(auth.user?.id);
   const preferencesController = useAppPreferences(auth.user?.id);
   const { preferences } = preferencesController;
   const [showAppSplash, setShowAppSplash] = useState(() => !hasSeenAppSplash());
@@ -1343,6 +1377,7 @@ export default function MobileDemo({
     return /^(settings(?:-[a-z]+)?|support(?:-[a-z]+)?)$/.test(requestedView || "") ? requestedView : "main";
   });
   const [forexOverview, setForexOverview] = useState(null);
+  const [forexStrength, setForexStrength] = useState(null);
   const [forexSignals, setForexSignals] = useState([]);
   const [forexLimitOpportunities, setForexLimitOpportunities] = useState([]);
   const [forexPairs, setForexPairs] = useState([]);
@@ -1526,7 +1561,12 @@ export default function MobileDemo({
     const loadForex = async () => {
       setForexLoading(true);
       setForexFeedState((current) => ({ ...current, status: "loading", message: "", cached: false }));
-      const [overviewResult, signalsResult, limitsResult] = await Promise.allSettled([getForexOverview(), getForexSignals(), getForexLimitOpportunities()]);
+      const [overviewResult, signalsResult, limitsResult, strengthResult] = await Promise.allSettled([
+        getForexOverview(),
+        getForexSignals(),
+        getForexLimitOpportunities(),
+        getForexCurrencyStrength("24H"),
+      ]);
       if (cancelled) return;
 
       if (overviewResult.status === "fulfilled") {
@@ -1581,6 +1621,9 @@ export default function MobileDemo({
       }
       if (limitsResult.status === "fulfilled") {
         setForexLimitOpportunities(limitsResult.value?.opportunities || []);
+      }
+      if (strengthResult.status === "fulfilled") {
+        setForexStrength(strengthResult.value);
       }
       if (!cancelled) setForexLoading(false);
     };
@@ -1679,6 +1722,23 @@ export default function MobileDemo({
           : [saved, ...current];
       });
       setTradeSaveState({ signalId, symbol: signal.symbol, status: "saved" });
+      if (preferences.notifications.tradeOpened) {
+        const market = normalizeMarket(signal.market);
+        pushSwiftChartNotification({
+          id: `trade-opened-${saved.id || signalId}`,
+          type: "trade_opened",
+          category: "trades",
+          title: signal.symbol,
+          message: `${String(signal.direction || "Trade").toUpperCase()} saved to History.`,
+          symbol: signal.symbol,
+          direction: signal.direction,
+          timestamp: saved.created_at || new Date().toISOString(),
+          read: false,
+          priority: "normal",
+          statusBadge: "Trade Opened",
+          actionUrl: `/app/history?market=${market}`,
+        });
+      }
       return saved;
     } catch (error) {
       setTradeSaveState({ signalId, symbol: signal.symbol, status: "error", message: error.message || "Could not save trade to History." });
@@ -1861,8 +1921,8 @@ export default function MobileDemo({
             />
           ) : <>
           <main className="graphite-content">
-            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} forexPairs={forexPairs} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
-            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} /> : null}
+            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} forexStrength={forexStrength} onViewStrength={() => onNavigate?.("/app/forex/currency-strength")} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
+            {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} forexPairs={forexPairs} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} onSelect={openHistoryTrade} /> : null}
             {tab === "account" && accountView === "main" ? (
               <AccountScreen

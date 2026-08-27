@@ -25,7 +25,6 @@ export default function ForexPairPage({ symbol, onNavigate }) {
   const preferences = loadAppPreferences(auth.user?.id);
   const light = preferences.appearance.theme === "light";
   const [timeframe, setTimeframe] = useState("1H");
-  const [layer, setLayer] = useState("zones");
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -69,7 +68,6 @@ export default function ForexPairPage({ symbol, onNavigate }) {
       <main className="forex-pair-scroll">
         <section className="forex-pair-heading">
           <div><h1>{symbol}</h1><p>{snapshot?.display_name || "Forex pair"}</p></div>
-          <span className="forex-live-pill"><i /> Live</span>
         </section>
 
         {loading && !snapshot ? (
@@ -95,13 +93,7 @@ export default function ForexPairPage({ symbol, onNavigate }) {
             <strong className={decisionTone}>{words(snapshot.decision)}</strong>
           </section>
 
-          <ForexPairChart snapshot={snapshot} layer={layer} light={light} />
-
-          <div className="forex-chart-layers" aria-label="Chart overlays">
-            <button type="button" className={layer === "zones" ? "active" : ""} onClick={() => setLayer("zones")}>Zones {layer === "zones" ? "✓" : ""}</button>
-            <button type="button" className={layer === "structure" ? "active" : ""} onClick={() => setLayer("structure")}>Structure</button>
-            <button type="button" className={layer === "clean" ? "active" : ""} onClick={() => setLayer("clean")}>Clean</button>
-          </div>
+          <ForexPairChart snapshot={snapshot} light={light} />
 
           <section className="swift-ta-card">
             <header><div><span>Swift TA</span><small>Updated {new Date(snapshot.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small></div><strong className={decisionTone}>{forexZoneStatus(snapshot)}</strong></header>

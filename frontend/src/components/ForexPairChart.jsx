@@ -14,7 +14,7 @@ function chartCandles(candles) {
     .sort((a, b) => a.time - b.time);
 }
 
-export default function ForexPairChart({ snapshot, layer = "zones", light = false }) {
+export default function ForexPairChart({ snapshot, light = false }) {
   const hostRef = useRef(null);
   const overlayRef = useRef(null);
 
@@ -58,27 +58,23 @@ export default function ForexPairChart({ snapshot, layer = "zones", light = fals
         axisLabelVisible: true, title,
       });
     };
-    if (layer !== "clean") {
-      addLine(levels.confirmation, "#9ba4aa", "CONF", LineStyle.Dashed);
-      addLine(levels.retest, "#6f7a80", "RETEST", LineStyle.Dotted);
-      addLine(levels.invalidation, "#ff646d", "INVALID", LineStyle.Solid);
-      addLine(levels.target_1, "#5dd9cf", "TP1", LineStyle.Dashed);
-      addLine(levels.target_2, "#5dd9cf", "TP2", LineStyle.Dashed);
-    }
+    addLine(levels.confirmation, "#9ba4aa", "CONF", LineStyle.Dashed);
+    addLine(levels.retest, "#6f7a80", "RETEST", LineStyle.Dotted);
+    addLine(levels.invalidation, "#ff646d", "INVALID", LineStyle.Solid);
+    addLine(levels.target_1, "#5dd9cf", "TP1", LineStyle.Dashed);
+    addLine(levels.target_2, "#5dd9cf", "TP2", LineStyle.Dashed);
 
     const zoneElements = [];
-    if (layer === "zones") {
-      [
-        ...(snapshot.buy_zones || []).map((zone) => ({ ...zone, side: "buy" })),
-        ...(snapshot.sell_zones || []).map((zone) => ({ ...zone, side: "sell" })),
-      ].forEach((zone) => {
-        const element = document.createElement("div");
-        element.className = `forex-chart-zone ${zone.side}`;
-        element.innerHTML = `<span>${zone.side === "buy" ? "BUY" : "SELL"} ZONE · ${String(zone.state).replaceAll("_", " ")}</span>`;
-        overlayRef.current?.appendChild(element);
-        zoneElements.push({ element, zone });
-      });
-    }
+    [
+      ...(snapshot.buy_zones || []).map((zone) => ({ ...zone, side: "buy" })),
+      ...(snapshot.sell_zones || []).map((zone) => ({ ...zone, side: "sell" })),
+    ].forEach((zone) => {
+      const element = document.createElement("div");
+      element.className = `forex-chart-zone ${zone.side}`;
+      element.innerHTML = `<span>${zone.side === "buy" ? "BUY" : "SELL"} ZONE · ${String(zone.state).replaceAll("_", " ")}</span>`;
+      overlayRef.current?.appendChild(element);
+      zoneElements.push({ element, zone });
+    });
 
     const positionZones = () => {
       zoneElements.forEach(({ element, zone }) => {
@@ -111,7 +107,7 @@ export default function ForexPairChart({ snapshot, layer = "zones", light = fals
       zoneElements.forEach(({ element }) => element.remove());
       chart.remove();
     };
-  }, [layer, light, snapshot]);
+  }, [light, snapshot]);
 
   return (
     <div className="forex-live-chart">

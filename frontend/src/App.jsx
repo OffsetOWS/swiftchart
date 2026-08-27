@@ -6,6 +6,7 @@ import Auth from "./pages/Auth.jsx";
 import Docs from "./pages/Docs.jsx";
 import LaunchFlow from "./pages/LaunchFlow.jsx";
 import PairChartScreen from "./pages/ForexPairPage.jsx";
+import CurrencyStrengthPage from "./pages/CurrencyStrengthPage.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
 import { getActiveCryptoTrades, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
@@ -37,9 +38,11 @@ export default function App() {
   const isAppPage = path === "/app"
     || /^\/app\/(home|scan|history|account|notifications)$/.test(path)
     || /^\/app\/signal\/[^/]+$/.test(path)
+    || path === "/app/forex/currency-strength"
     || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
   const isPublicReadOnlyAppPage = /^\/app\/(?:home|scan)(?:\/|$)/i.test(path)
     || /^\/app\/signal\/[^/]+$/i.test(path)
+    || path === "/app/forex/currency-strength"
     || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
   const isDisabledCommercePage = /^\/(?:admin\/payments?|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path)
     || /^\/app\/(?:upgrade|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path);
@@ -147,6 +150,17 @@ export default function App() {
     return <><AuthLoading /><Analytics /></>;
   }
   if (isDisabledCommercePage || path.startsWith("/analysis/")) return <AuthLoading />;
+
+  if (path === "/app/forex/currency-strength") {
+    return (
+      <>
+        <main className="app-shell dark-mode app-view mobile-only-app">
+          <CurrencyStrengthPage onNavigate={navigate} />
+        </main>
+        <Analytics />
+      </>
+    );
+  }
 
   const forexPairMatch = path.match(/^\/app\/forex\/([A-Z0-9]+)$/i);
   if (forexPairMatch) {

@@ -30,6 +30,8 @@ export default function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationPending, setVerificationPending] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -86,7 +88,10 @@ export default function Auth() {
       } else if (mode === "signup") {
         const data = await auth.signUpWithPassword({ email: email.trim(), password, username: username.trim() });
         if (data.session) enterApp();
-        else setSuccess("Check your email to confirm your account, then sign in.");
+        else {
+          setVerificationPending(true);
+          setSuccess("Enter the verification code from your email below.");
+        }
       } else if (mode === "forgot") {
         await auth.sendPasswordReset(email.trim(), returnTo);
         setSuccess("Reset link sent. Check your inbox and spam folder.");
@@ -121,7 +126,7 @@ export default function Auth() {
     auth.clearError();
     try {
       await auth.resendSignupConfirmation(email.trim(), returnTo);
-      setSuccess("Verification email sent again. Check your inbox and spam folder.");
+      setSuccess("A new verification code was sent. Check your inbox and spam folder.");
     } catch (error) {
       setFormError(error.message || "Verification email could not be resent. Please try again.");
     } finally {
@@ -129,7 +134,29 @@ export default function Auth() {
     }
   }
 
-  const awaitingVerification = mode === "signup" && Boolean(success);
+  async function verifyCode(event) {
+    event.preventDefault();
+    if (verificationCode.length !== 6) {
+      setFormError("Enter the six-digit verification code from your email.");
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError("");
+    setSuccess("");
+    auth.clearError();
+    try {
+      const data = await auth.verifySignupCode(email.trim(), verificationCode);
+      if (!data.session) await auth.signInWithPassword(email.trim(), password);
+      enterApp();
+    } catch (error) {
+      setFormError(error.message || "That verification code could not be confirmed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const awaitingVerification = mode === "signup" && verificationPending;
 
   return (
     <main className="auth-shell auth-graphite">
@@ -139,16 +166,39 @@ export default function Auth() {
 
       <section className="auth-card" aria-labelledby="auth-title">
         {awaitingVerification ? (
-          <div className="auth-confirmation" role="status">
+          <div className="auth-confirmation">
             <div className="auth-copy">
               <Mail size={28} aria-hidden="true" />
-              <h1 id="auth-title">Check your email</h1>
-              <p>We sent a verification link to <strong>{email.trim()}</strong>. Open it to finish creating your SwiftChart account.</p>
+              <h1 id="auth-title">Verify your email</h1>
+              <p>We sent a six-digit verification code to <strong>{email.trim()}</strong>. Enter it below to finish creating your account.</p>
             </div>
             {formError || auth.error ? <p className="auth-error" role="alert">{formError || auth.error}</p> : null}
-            {success ? <p className="auth-success">{success}</p> : null}
-            <button className="auth-primary" type="button" onClick={resendVerification} disabled={submitting}>
-              {submitting ? "Sending..." : "Resend verification email"}
+            {success ? <p className="auth-success" role="status">{success}</p> : null}
+            <form className="auth-form" onSubmit={verifyCode} noValidate>
+              <label className="auth-field auth-code-field">
+                <span>Verification code</span>
+                <div>
+                  <LockKeyhole size={18} aria-hidden="true" />
+                  <input
+                    value={verificationCode}
+                    onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    placeholder="000000"
+                    aria-label="Six-digit verification code"
+                    disabled={submitting}
+                    autoFocus
+                  />
+                </div>
+              </label>
+              <button className="auth-primary" type="submit" disabled={submitting || verificationCode.length !== 6}>
+                {submitting ? "Verifying..." : "Verify and continue"}
+              </button>
+            </form>
+            <button className="auth-resend" type="button" onClick={resendVerification} disabled={submitting}>
+              Resend verification code
             </button>
             <a className="auth-confirmation-back" href={routeWithReturnTo("/login", returnTo)}>Back to login</a>
           </div>

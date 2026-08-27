@@ -27,6 +27,7 @@ function safeReturnTo(value, fallback = "/app/home") {
 
 function friendlyAuthError(error) {
   const message = String(error?.message || error || "").toLowerCase();
+  if (/(token|otp).*(expired|invalid)|(expired|invalid).*(token|otp)/.test(message)) return "That verification code is invalid or expired. Enter the latest code sent to your email.";
   if (/invalid login credentials|invalid credentials/.test(message)) return "Incorrect email or password.";
   if (/email not confirmed/.test(message)) return "Confirm your email before signing in.";
   if (/user already registered|already been registered/.test(message)) return "An account already exists for this email.";
@@ -171,6 +172,22 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function verifySignupCode(email, token) {
+    requireSupabase();
+    setError("");
+    const { data, error: verifyError } = await supabase.auth.verifyOtp({
+      email,
+      token: String(token || "").replace(/\D/g, ""),
+      type: "signup",
+    });
+    if (verifyError) {
+      const safeError = friendlyAuthError(verifyError);
+      setError(safeError);
+      throw new Error(safeError);
+    }
+    return data;
+  }
+
   async function updatePassword(password) {
     requireSupabase();
     setError("");
@@ -276,6 +293,7 @@ export function AuthProvider({ children }) {
       clearError: () => setError(""),
       signInWithPassword,
       signUpWithPassword,
+      verifySignupCode,
       resendSignupConfirmation,
       sendPasswordReset,
       updatePassword,

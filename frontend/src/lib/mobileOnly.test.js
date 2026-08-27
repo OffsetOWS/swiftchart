@@ -38,6 +38,18 @@ test("SwiftChart Refined preserves the four-item navigation and market branches"
   assert.match(mobileApp, /event\.key === "Enter"/);
 });
 
+test("Forex pair search is rendered by Scan, not Home", () => {
+  const homeStart = mobileApp.indexOf("function ForexHomeScreen");
+  const scanStart = mobileApp.indexOf("function ScanScreen");
+  const scanEnd = mobileApp.indexOf("function HistoryScreen", scanStart);
+  const homeSource = mobileApp.slice(homeStart, scanStart);
+  const scanSource = mobileApp.slice(scanStart, scanEnd);
+
+  assert.doesNotMatch(homeSource, /<ForexPairSearch/);
+  assert.match(scanSource, /<ForexPairSearch pairs=\{forexPairs\} onSelectPair=\{onSelectPair\}/);
+  assert.equal((mobileApp.match(/aria-label="Search Forex pairs"/g) || []).length, 1);
+});
+
 test("refined state presentation reuses one Forex loading state", () => {
   assert.match(mobileApp, /import GraphiteStateCard/);
   assert.equal((mobileApp.match(/title="Loading Forex signals"/g) || []).length, 1);

@@ -189,6 +189,10 @@ export function getForexSessions() {
   return request("/api/forex/sessions");
 }
 
+export function getForexCurrencyStrength(horizon = "24H") {
+  return request(`/api/forex/currency-strength?horizon=${encodeURIComponent(horizon)}`);
+}
+
 export function getForexPairs() {
   return request("/api/forex/pairs");
 }
