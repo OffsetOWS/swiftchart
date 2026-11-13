@@ -2,6 +2,7 @@ import logging
 
 import pandas as pd
 
+from app.config import get_settings
 from app.models.schemas import AnalysisResponse, LiquiditySweep, MarketRegimeSnapshot, RiskSettings, SignalReview, TradeIdea, Zone
 from app.strategy.liquidity_sweep import detect_liquidity_sweeps
 from app.strategy.market_structure import (
@@ -955,6 +956,9 @@ def build_trade_ideas(
         ):
             softened_regime = "TRANSITION_TO_BEARISH" if market_regime_data.trade_decision == "WAIT" else "RANGE_BOUND"
             soften_note = f"short evidence at resistance/edge: {', '.join(short_evidence)}"
+        if softened_regime == "RANGE_BOUND" and not get_settings().allow_no_trade_range_softening:
+            # A NO_TRADE regime stays NO_TRADE unless softening is explicitly enabled.
+            softened_regime = None
         if softened_regime is None:
             logger.info(
                 "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=%s long_evidence=%s short_evidence=%s",

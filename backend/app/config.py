@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     signal_max_entry_deviation_percent: float = Field(default=1.5, ge=0)
     trade_history_expiry_bars: int = Field(default=12, ge=1)
     trade_history_move_stop_to_entry_after_tp1: bool = False
+    tracking_cost_bps_per_side: float = Field(default=5.0, ge=0, le=100)
+    allow_no_trade_range_softening: bool = False
     execution_autotrade_enabled: bool = False
     execution_signal_webhook_url: str = ""
     execution_webhook_secret: str = ""

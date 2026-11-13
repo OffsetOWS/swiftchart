@@ -19,8 +19,11 @@ TradeHistoryStatus = Literal[
     "BREAK_EVEN",
     "PARTIAL_WIN",
     "PARTIAL_LOSS",
+    "UNRESOLVED",
+    "EXPIRED_POSITION",
+    "EXPIRED_RUNNER",
 ]
-TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN"]
+TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN", "UNRESOLVED"]
 MarketCondition = Literal[
     "RANGE_BOUND",
     "TRENDING_UP",
@@ -381,6 +384,12 @@ class TradeStats(BaseModel):
     tp1_then_expiry_count: int = 0
     break_even_count: int = 0
     partial_loss_count: int = 0
+    unresolved_count: int = 0
+    cost_bps_per_side: float = 0
+    costed_trade_count: int = 0
+    gross_r_total: float = 0
+    net_r_total: float = 0
+    average_net_r_multiple: float = 0
     best_setup_grade_performance: list[dict]
     best_timeframe_performance: list[dict]
     best_symbol_performance: list[dict]
