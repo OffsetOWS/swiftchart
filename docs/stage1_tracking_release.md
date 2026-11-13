@@ -143,7 +143,7 @@ if ! "$python" "$admin" schema --root "$release_root" --state "$state"; then
   exit 1
 fi
 # Restart immediately after schema, before replay.
-if ! pm2 startOrRestart "$state/release-processes.cjs" \
+if ! pm2 startOrRestart "$state/release-processes.json" \
   --only swiftchart-api,swiftchart-bot --update-env; then
   "$python" "$admin" rollback --root "$release_root" --state "$state"
   exit 1
@@ -173,8 +173,9 @@ Backups use SQLite's online backup API and integrity checks; API/bot are stopped
 for the final pre-schema backup. The schema step is idempotent and additive:
 initialize the existing canonical schema and create the append-only correction
 ledger/index/triggers. It does not run Forex strategy migrations or Supabase SQL.
-Data and virtualenv paths remain in the old directory; only API/bot code cwd is
-changed. Do not restart the executor or private agent processes. Do not run a
+Database, bot state and virtualenv paths remain in the old directory; only
+API/bot code cwd is changed. JSON process configurations are validated using the
+installed PM2 parser before stopping services. Do not restart the executor or private agent processes. Do not run a
 frontend command, Vercel publish or alias update.
 
 Existing settings stay unchanged. New defaults are built into code:

@@ -49,3 +49,25 @@ def test_release_hash_check_rejects_post_pack_source_changes(tmp_path):
     with pytest.raises(ValueError,match="approved commit"):verify_release(tmp_path,"1"*40)
     path.write_text("changed")
     with pytest.raises(ValueError,match="content mismatch"):verify_release(tmp_path)
+
+
+def test_prepare_uses_pm2_json_and_preserves_relative_bot_state(monkeypatch,tmp_path):
+    from scripts import stage1_admin
+    old=tmp_path/"old";new=tmp_path/"new";state=tmp_path/"state"
+    old.mkdir();new.mkdir();db=old/"data.db";db.touch()
+    apps=[{"name":name,"cwd":str(old),"script":"/usr/bin/bash","args":["-lc","original"],"interpreter":"none"}
+          for name in ("swiftchart-api","swiftchart-bot")]
+    monkeypatch.setenv("BOT_STATE_PATH","saved/subscriptions.json")
+    monkeypatch.setattr(stage1_admin,"verify_release",lambda _: {"release_commit":"new-commit"})
+    monkeypatch.setattr(stage1_admin,"verify_baseline",lambda *_: "old-commit")
+    monkeypatch.setattr(stage1_admin,"processes",lambda _: apps)
+    monkeypatch.setattr(stage1_admin,"command",lambda *_,**__:str(db))
+    validated=[]
+    monkeypatch.setattr(stage1_admin,"validate_pm2_config",lambda path: validated.append(path))
+    stage1_admin.prepare(old,new,state)
+    previous=json.loads((state/"previous-processes.json").read_text())
+    release=json.loads((state/"release-processes.json").read_text())
+    assert all(p["cwd"]==str(old) and p["args"]==["-lc","original"] for p in previous["apps"])
+    assert all(p["cwd"]==str(new) for p in release["apps"])
+    assert all("export BOT_STATE_PATH="+str(old/"saved/subscriptions.json") in p["args"][1] for p in release["apps"])
+    assert validated==[state/"previous-processes.json",state/"release-processes.json"]

@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -91,8 +92,21 @@ def restore_db(source,target,archive):
 
 
 def config(path,apps):
-    path.write_text("module.exports = "+json.dumps({"apps":apps},indent=2)+";\n")
+    path.write_text(json.dumps({"apps":apps},indent=2)+"\n")
     path.chmod(0o600)
+
+
+def validate_pm2_config(path):
+    """Ask the installed PM2 parser to validate configuration before downtime."""
+    binary=shutil.which("pm2")
+    if not binary:raise ValueError("PM2 binary missing")
+    common=Path(binary).resolve().parents[1]/"lib/Common.js"
+    code="""const fs=require('fs'); const common=require(process.argv[1]);
+const result=common.parseConfig(fs.readFileSync(process.argv[2],'utf8'),process.argv[2]);
+if (!result || !Array.isArray(result.apps) || result.apps.length !== 2 ||
+    result.apps.map(x=>x.name).sort().join(',') !== 'swiftchart-api,swiftchart-bot')
+  throw new Error('PM2 rejected the API/bot configuration');"""
+    command(["node","-e",code,str(common),str(path)])
 
 
 def prepare(old_root,new_root,state):
@@ -111,15 +125,19 @@ def prepare(old_root,new_root,state):
              "release_commit":release["release_commit"],"release_root":str(new_root),
              "prepared_at_utc":datetime.now(UTC).isoformat()}
     (state/"state.json").write_text(json.dumps(receipt,indent=2)+"\n")
-    config(state/"previous-processes.cjs",apps)
+    config(state/"previous-processes.json",apps)
+    bot_state=Path(os.environ.get("BOT_STATE_PATH") or ".swiftchart_bot_state.json")
+    if not bot_state.is_absolute():bot_state=(old_root/bot_state).resolve()
     for app in apps:
         name=app["name"]
         if name=="swiftchart-api":
             executable=shlex.quote(str(old_root/"backend/.venv/bin/uvicorn"))+" app.main:app --app-dir backend --host 127.0.0.1 --port 8000"
         else:executable=shlex.quote(str(old_root/"bot/.venv/bin/python"))+" -m bot.main"
         app["cwd"]=str(new_root)
-        app["args"]=["-lc","set -a; source "+shlex.quote(str(old_root/".env"))+"; set +a; export DATABASE_URL="+shlex.quote("sqlite:///"+str(db))+"; exec "+executable]
-    config(state/"release-processes.cjs",apps)
+        app["args"]=["-lc","set -a; source "+shlex.quote(str(old_root/".env"))+"; set +a; export DATABASE_URL="+shlex.quote("sqlite:///"+str(db))+"; export BOT_STATE_PATH="+shlex.quote(str(bot_state))+"; exec "+executable]
+    config(state/"release-processes.json",apps)
+    validate_pm2_config(state/"previous-processes.json")
+    validate_pm2_config(state/"release-processes.json")
     print(json.dumps({"prepared":True,"previous_commit":previous_head,"release_commit":release["release_commit"]}))
 
 
@@ -149,7 +167,7 @@ def main():
         if (args.state/"before-rollback.db").exists():raise ValueError("Rollback snapshot already exists; stop")
         subprocess.run(["pm2","stop",*sorted(NAMES)],check=True)
         restore_db(args.state/"before.db",db,args.state/"before-rollback.db")
-        subprocess.run(["pm2","startOrRestart",str(args.state/"previous-processes.cjs"),"--only",",".join(sorted(NAMES)),"--update-env"],check=True)
+        subprocess.run(["pm2","startOrRestart",str(args.state/"previous-processes.json"),"--only",",".join(sorted(NAMES)),"--update-env"],check=True)
     print(json.dumps({"action":args.action,"completed":True}))
 
 
