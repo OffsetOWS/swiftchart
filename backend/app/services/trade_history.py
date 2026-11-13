@@ -1178,7 +1178,15 @@ def stats() -> dict:
     with get_connection() as connection:
         connection.execute("BEGIN")
         rows = [dict(row) for row in connection.execute("SELECT * FROM trade_ideas").fetchall()]
-        review_rows = [dict(row) for row in connection.execute("SELECT * FROM signal_reviews").fetchall()]
+        # Reviews can exceed a million rows in production; aggregate inside
+        # SQLite instead of materializing their wide records in API/bot memory.
+        review_rows = {row["status"]: dict(row) for row in connection.execute("""
+            SELECT CASE WHEN COALESCE(accepted,0) != 0 THEN 'accepted' ELSE 'rejected' END AS status,
+                   COUNT(*) AS count,
+                   AVG(COALESCE(base_score,0)) AS average_base_score,
+                   AVG(COALESCE(adjusted_score,0)) AS average_adjusted_score
+            FROM signal_reviews GROUP BY 1
+        """).fetchall()}
         # Read results and their latest evidence in one consistent snapshot.
         rows = _public_tracking_rows(connection, rows)
     detected_total = len(rows)
@@ -1192,17 +1200,11 @@ def stats() -> dict:
         return summarize_grouped(rows, field, cost_bps)
 
     def review_grouped() -> list[dict]:
-        buckets: dict[str, list[dict]] = {"accepted": [], "rejected": []}
-        for row in review_rows:
-            buckets["accepted" if int(row.get("accepted") or 0) else "rejected"].append(row)
         return [
-            {
-                "status": key,
-                "count": len(items),
-                "average_base_score": round(sum(float(item["base_score"] or 0) for item in items) / len(items), 2) if items else 0,
-                "average_adjusted_score": round(sum(float(item["adjusted_score"] or 0) for item in items) / len(items), 2) if items else 0,
-            }
-            for key, items in buckets.items()
+            {"status": key, "count": review_rows.get(key, {}).get("count", 0),
+             "average_base_score": round(review_rows[key]["average_base_score"], 2) if key in review_rows else 0,
+             "average_adjusted_score": round(review_rows[key]["average_adjusted_score"], 2) if key in review_rows else 0}
+            for key in ("accepted", "rejected")
         ]
 
     return {
@@ -1234,10 +1236,13 @@ def _public_tracking_rows(connection, rows):
     evidence = {}
     if rows and "tracking_corrections" in tables:
         ids = [str(row["id"]) for row in rows]
-        records = connection.execute(f"""SELECT signal_id, evidence_json FROM tracking_corrections
-            WHERE id IN (SELECT MAX(id) FROM tracking_corrections WHERE asset='CRYPTO'
-                AND signal_id IN ({','.join('?' for _ in ids)}) GROUP BY signal_id)""", ids).fetchall()
-        evidence = {int(r["signal_id"]): json.loads(r["evidence_json"]) for r in records}
+        # Stay below SQLite's variable limit even for the complete history.
+        for offset in range(0, len(ids), 900):
+            batch = ids[offset:offset+900]
+            records = connection.execute(f"""SELECT signal_id, evidence_json FROM tracking_corrections
+                WHERE id IN (SELECT MAX(id) FROM tracking_corrections WHERE asset='CRYPTO'
+                    AND signal_id IN ({','.join('?' for _ in batch)}) GROUP BY signal_id)""", batch).fetchall()
+            evidence.update({int(r["signal_id"]): json.loads(r["evidence_json"]) for r in records})
     for row in rows:
         row["tracking_evidence"] = evidence.get(row["id"], {})
         costs = row["tracking_evidence"].get("costs", {})

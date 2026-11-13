@@ -59,6 +59,8 @@ That runs the complete backend and execution-bot suites without deselections or
 known-failure exceptions. Regression coverage exercises canonical
 receipts, replay-to-API/bot costs, identity/lock preservation, cohort exclusion,
 unknown funding, History timeout, 60-day candle budgets and rollback data safety.
+Production-sized review counts are aggregated in SQLite and correction evidence
+lookups are batched to stay below SQLite parameter limits.
 
 No production data is copied into tests. Read-only VPS inspection confirmed that
 both PM2 processes use `/opt/swiftchart`, `/usr/bin/bash`, the existing backend/bot
@@ -143,8 +145,7 @@ if ! "$python" "$admin" schema --root "$release_root" --state "$state"; then
   exit 1
 fi
 # Restart immediately after schema, before replay.
-if ! pm2 startOrRestart "$state/release-processes.json" \
-  --only swiftchart-api,swiftchart-bot --update-env; then
+if ! "$python" "$admin" activate --root "$release_root" --state "$state"; then
   "$python" "$admin" rollback --root "$release_root" --state "$state"
   exit 1
 fi
@@ -175,7 +176,10 @@ initialize the existing canonical schema and create the append-only correction
 ledger/index/triggers. It does not run Forex strategy migrations or Supabase SQL.
 Database, bot state and virtualenv paths remain in the old directory; only
 API/bot code cwd is changed. JSON process configurations are validated using the
-installed PM2 parser before stopping services. Do not restart the executor or private agent processes. Do not run a
+installed PM2 parser before stopping services. Only the API/bot process definitions
+are recreated so PM2 actually changes cwd; their actual `/proc` paths are checked.
+The saved previous definitions support the same verified switch on rollback.
+Do not restart the executor or private agent processes. Do not run a
 frontend command, Vercel publish or alias update.
 
 Existing settings stay unchanged. New defaults are built into code:

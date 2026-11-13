@@ -71,3 +71,18 @@ def test_prepare_uses_pm2_json_and_preserves_relative_bot_state(monkeypatch,tmp_
     assert all(p["cwd"]==str(new) for p in release["apps"])
     assert all("export BOT_STATE_PATH="+str(old/"saved/subscriptions.json") in p["args"][1] for p in release["apps"])
     assert validated==[state/"previous-processes.json",state/"release-processes.json"]
+
+
+def test_process_switch_recreates_only_api_bot_and_checks_actual_cwd(monkeypatch,tmp_path):
+    from scripts import stage1_admin
+    root=tmp_path/"release";root.mkdir();calls=[]
+    monkeypatch.setattr(stage1_admin,"validate_pm2_config",lambda _:None)
+    monkeypatch.setattr(stage1_admin.subprocess,"run",lambda args,**kwargs:calls.append(args))
+    processes=[{"name":name,"pid":123,"pm2_env":{"pm_cwd":str(root)}} for name in ("swiftchart-api","swiftchart-bot")]
+    monkeypatch.setattr(stage1_admin,"command",lambda _:json.dumps(processes))
+    resolve=Path.resolve
+    monkeypatch.setattr(Path,"resolve",lambda p,*a,**kw:root if str(p)=="/proc/123/cwd" else resolve(p,*a,**kw))
+    config=tmp_path/"processes.json"
+    stage1_admin.switch_processes(config,root)
+    assert calls==[["pm2","delete","swiftchart-api","swiftchart-bot"],
+        ["pm2","start",str(config),"--only","swiftchart-api,swiftchart-bot"]]

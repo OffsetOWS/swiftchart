@@ -139,3 +139,29 @@ def test_sixty_day_hourly_replay_requests_more_than_the_old_thousand_bar_limit(d
     result=asyncio.run(trade_history._evaluate_rows([row]))
     assert result["errors"]==0
     assert len(requested)==1 and 1440<requested[0]<=5000
+
+
+def test_review_summary_aggregates_scores_with_the_existing_null_as_zero_rule(db):
+    with db.get_connection() as c:
+        for accepted,base,adjusted in [(1,70,80),(1,None,60),(0,30,None)]:
+            c.execute("""INSERT INTO signal_reviews
+              (symbol,timeframe,exchange,direction,accepted,reason,base_score,adjusted_score,
+               regime_score,regime_label,trend_alignment)
+              VALUES ('BTCUSDT','4h','hyperliquid','LONG',?,'reason',?,?,0,'range','aligned')""",
+              (accepted,base,adjusted))
+    assert trade_history.stats()["accepted_vs_rejected"]==[
+        {"status":"accepted","count":2,"average_base_score":35.0,"average_adjusted_score":70.0},
+        {"status":"rejected","count":1,"average_base_score":30.0,"average_adjusted_score":0.0}]
+
+
+def test_history_evidence_lookup_handles_more_than_sqlite_variable_limit(db):
+    import sqlite3
+    from app.services.tracking_ledger import ensure_tracking_ledger, record_correction
+    with db.get_connection() as c:
+        ensure_tracking_ledger(c)
+        record_correction(c,"CRYPTO",1001,{}, {}, {"category":"unresolved","flags":["last-row"]},START)
+        c.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER,999)
+        records=trade_history._public_tracking_rows(c,[{"id":i} for i in range(1,1002)])
+    assert len(records)==1001
+    assert records[-1]["tracking_evidence"]["flags"]==["last-row"]
+    assert all(row["net_r_multiple"] is None for row in records)

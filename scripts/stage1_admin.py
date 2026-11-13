@@ -109,6 +109,20 @@ if (!result || !Array.isArray(result.apps) || result.apps.length !== 2 ||
     command(["node","-e",code,str(common),str(path)])
 
 
+def switch_processes(config_path, expected_root):
+    """Recreate saved definitions: PM2 restart retains the old pm_cwd."""
+    validate_pm2_config(config_path)
+    subprocess.run(["pm2","delete",*sorted(NAMES)],check=True)
+    subprocess.run(["pm2","start",str(config_path),"--only",",".join(sorted(NAMES))],check=True)
+    rows=json.loads(command(["pm2","jlist"]))
+    selected=[row for row in rows if row.get("name") in NAMES]
+    if {row["name"] for row in selected}!=NAMES:raise ValueError("API/bot missing after switch")
+    for row in selected:
+        actual=Path("/proc")/str(row["pid"])/"cwd"
+        if Path(row["pm2_env"]["pm_cwd"]).resolve()!=expected_root.resolve() or actual.resolve()!=expected_root.resolve():
+            raise ValueError("Process did not switch to the requested source directory")
+
+
 def prepare(old_root,new_root,state):
     release=verify_release(new_root)
     previous_head=verify_baseline(old_root,new_root)
@@ -143,7 +157,7 @@ def prepare(old_root,new_root,state):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument("action",choices=["verify","prepare","backup","schema","rollback"])
+    parser.add_argument("action",choices=["verify","prepare","backup","schema","activate","rollback"])
     parser.add_argument("--old-root",type=Path,default=Path("/opt/swiftchart"))
     parser.add_argument("--root",type=Path,default=Path(__file__).resolve().parents[1])
     parser.add_argument("--state",type=Path,required=True)
@@ -161,13 +175,16 @@ def main():
         env={**os.environ,"DATABASE_URL":"sqlite:///"+str(db),"PYTHONPATH":str(args.root/"backend"),"PYTHONDONTWRITEBYTECODE":"1"}
         code="from app.utils.database import init_db,get_connection;from app.services.tracking_ledger import ensure_tracking_ledger;init_db();\nwith get_connection() as c:ensure_tracking_ledger(c)"
         subprocess.run([str(args.old_root/"backend/.venv/bin/python"),"-c",code],cwd=args.root,env=env,check=True)
+    elif args.action=="activate":
+        verify_release(args.root,state["release_commit"])
+        switch_processes(args.state/"release-processes.json",args.root)
     elif args.action=="rollback":
         # Confirm that the preserved previous source still represents this release's baseline.
         verify_baseline(args.old_root,args.root)
         if (args.state/"before-rollback.db").exists():raise ValueError("Rollback snapshot already exists; stop")
         subprocess.run(["pm2","stop",*sorted(NAMES)],check=True)
         restore_db(args.state/"before.db",db,args.state/"before-rollback.db")
-        subprocess.run(["pm2","startOrRestart",str(args.state/"previous-processes.json"),"--only",",".join(sorted(NAMES)),"--update-env"],check=True)
+        switch_processes(args.state/"previous-processes.json",Path(state["previous_source_root"]))
     print(json.dumps({"action":args.action,"completed":True}))
 
 
