@@ -1,12 +1,15 @@
 from app.services.tracking_statistics import summarize, grouped
 from app.services.tracking_time_exit import apply_time_exit
+from app.services.tracking_costs import cost_r
 from test_tracking_corrections import idea, bars, run
 import pytest
 
 
 def resolved(data):
     row = idea()
-    return dict(row, **apply_time_exit(row, run(data=data), data))
+    result = dict(row, **apply_time_exit(row, run(data=data), data))
+    result['tracking_evidence']['costs'] = dict(fee_r=cost_r(result,5), funding_r=0)
+    return result
 
 
 def test_expectancy_excludes_unentered_open_unresolved_and_legacy_rows():
@@ -40,3 +43,5 @@ def test_missing_costs_are_not_silently_zero_in_expectancy():
     result = summarize([trade], 5)
     assert result['resolved_entered_count'] == 1
     assert result['expectancy_sample_count'] == 0
+    assert result['expectancy_per_trade'] is None
+    assert result['net_r_total'] is None

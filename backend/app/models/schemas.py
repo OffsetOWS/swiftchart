@@ -326,6 +326,12 @@ class PaperTrade(PaperTradeCreate):
 
 
 class TradeHistoryRecord(BaseModel):
+    gross_r_multiple: float | None = None
+    fee_r_multiple: float | None = None
+    funding_r_multiple: float | None = None
+    net_r_multiple: float | None = None
+    cost_basis: str | None = None
+    cost_status: str = "UNKNOWN"
     id: int
     symbol: str
     timeframe: str
@@ -379,7 +385,7 @@ class TradeStats(BaseModel):
     win_rate: float
     average_r_multiple: float
     average_candles_to_resolution: float
-    expectancy_per_trade: float
+    expectancy_per_trade: float | None
     tp1_then_sl_count: int = 0
     tp1_then_tp2_count: int = 0
     tp1_then_expiry_count: int = 0
@@ -397,8 +403,11 @@ class TradeStats(BaseModel):
     cost_bps_per_side: float = 0
     costed_trade_count: int = 0
     gross_r_total: float = 0
-    net_r_total: float = 0
-    average_net_r_multiple: float = 0
+    net_r_total: float | None = None
+    average_net_r_multiple: float | None = None
+    funding_unknown_count: int = 0
+    funding_r_total: float = 0
+    cost_basis: str = "modeled fees and historical funding rates valued at entry notional"
     best_setup_grade_performance: list[dict]
     best_timeframe_performance: list[dict]
     best_symbol_performance: list[dict]

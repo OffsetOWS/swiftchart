@@ -217,6 +217,30 @@ def row_to_dict(row) -> dict:
     return data
 
 
+def _public_tracking_rows(connection, rows):
+    """Attach the same append-only evidence and costs used by aggregate stats."""
+    from app.services.tracking_costs import cost_r, net_r
+    rows = [dict(row) for row in rows]
+    tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    evidence = {}
+    if rows and "tracking_corrections" in tables:
+        ids = [str(row["id"]) for row in rows]
+        records = connection.execute(f"""SELECT signal_id, evidence_json FROM tracking_corrections
+            WHERE id IN (SELECT MAX(id) FROM tracking_corrections WHERE asset='CRYPTO'
+                AND signal_id IN ({','.join('?' for _ in ids)}) GROUP BY signal_id)""", ids).fetchall()
+        evidence = {int(r["signal_id"]): json.loads(r["evidence_json"]) for r in records}
+    for row in rows:
+        row["tracking_evidence"] = evidence.get(row["id"], {})
+        costs = row["tracking_evidence"].get("costs", {})
+        row["gross_r_multiple"] = row.get("pnl_r_multiple") if row["tracking_evidence"].get("category") == "resolved" else None
+        row["fee_r_multiple"] = cost_r(row, get_settings().tracking_cost_bps_per_side) if costs else None
+        row["funding_r_multiple"] = costs.get("funding_r")
+        row["net_r_multiple"] = net_r(row, get_settings().tracking_cost_bps_per_side) if costs else None
+        row["cost_basis"] = costs.get("funding_basis")
+        row["cost_status"] = "MODELED" if row["net_r_multiple"] is not None else "UNKNOWN"
+    return rows
+
+
 def _history_where(filters: dict) -> tuple[str, list]:
     clauses = []
     values = []
@@ -250,6 +274,7 @@ def query_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str
             f"SELECT * FROM trade_ideas {where} ORDER BY created_at {direction}, id {direction} LIMIT ? OFFSET ?",
             [*values, limit, offset],
         ).fetchall()
+        rows = _public_tracking_rows(connection, rows)
     if total == 0:
         logger.info("No trade history records found for filters=%s", {key: value for key, value in filters.items() if value})
     return {
@@ -269,6 +294,7 @@ def list_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str 
 def get_trade_history(trade_id: int) -> dict | None:
     with get_connection() as connection:
         row = connection.execute("SELECT * FROM trade_ideas WHERE id = ?", (trade_id,)).fetchone()
+        row = _public_tracking_rows(connection, [row])[0] if row else None
     return row_to_dict(row) if row else None
 
 
@@ -391,6 +417,9 @@ def update_outcome(trade_id: int, outcome: dict) -> None:
         if old_outcome:
             before["previous_trade_outcome"] = dict(old_outcome)
         outcome = guard_crypto_transition(before, outcome)
+        # A rejected replay cannot retain a seemingly valid net result.
+        if outcome.get("tracking_evidence", {}).get("category") != "resolved":
+            outcome.get("tracking_evidence", {}).pop("costs", None)
         record_correction(connection, "CRYPTO", trade_id, before, outcome,
                           outcome.get("tracking_evidence", {}), outcome["outcome_checked_at"])
         connection.execute(
@@ -541,6 +570,8 @@ async def _evaluate_rows(rows) -> dict:
     changed = 0
     errors = 0
     candle_cache: dict[tuple[str, str, str], pd.DataFrame] = {}
+    funding_cache = {}
+    funding_unknown = 0
     for raw in rows:
         row = row_to_dict(raw)
         try:
@@ -554,6 +585,22 @@ async def _evaluate_rows(rows) -> dict:
             outcome = await _refine_with_intrabar(row, outcome, delivered, candle_cache)
             from app.services.tracking_time_exit import apply_time_exit
             outcome = apply_time_exit(row, outcome, candles.to_dict("records"))
+            if outcome.get("pnl_r_multiple") is not None:
+                from app.services.tracking_funding import BASIS, fetch_rates, funding_r
+                from app.services.tracking_costs import cost_r
+                funding = None
+                rates = None
+                try:
+                    rates = await fetch_rates(row, outcome, funding_cache)
+                    if rates is not None:
+                        funding = funding_r(row, outcome, rates)
+                except Exception:
+                    logger.exception("Funding history unavailable for signal id=%s", row.get("id"))
+                fee = cost_r(dict(row, **outcome), get_settings().tracking_cost_bps_per_side)
+                outcome["tracking_evidence"]["costs"] = dict(fee_r=fee, funding_r=funding,
+                    net_r=None if fee is None or funding is None else outcome["pnl_r_multiple"]-fee-funding,
+                    funding_basis=BASIS, rates=rates, bps_per_side=get_settings().tracking_cost_bps_per_side)
+                funding_unknown += funding is None
         except Exception:
             errors += 1
             logger.exception("Trade lifecycle evaluation failed id=%s symbol=%s timeframe=%s exchange=%s", row.get("id"), row.get("symbol"), row.get("timeframe"), row.get("exchange"))
@@ -562,7 +609,8 @@ async def _evaluate_rows(rows) -> dict:
         if outcome["status"] != row["status"] or outcome["result"] != row["result"]:
             changed += 1
         update_outcome(row["id"], outcome)
-    return {"checked": checked, "updated": changed, "errors": errors, "markets_fetched": len(candle_cache)}
+    return {"checked": checked, "updated": changed, "errors": errors, "markets_fetched": len(candle_cache),
+            "funding_unknown": funding_unknown}
 
 
 async def check_trade_outcomes() -> dict:
@@ -595,21 +643,13 @@ async def replay_trade_outcomes(days: int = 30) -> dict:
 
 
 def stats() -> dict:
+    from app.services.tracking_statistics import summarize, grouped as summarize_grouped
     with get_connection() as connection:
+        connection.execute("BEGIN")
         rows = [dict(row) for row in connection.execute("SELECT * FROM trade_ideas").fetchall()]
         review_rows = [dict(row) for row in connection.execute("SELECT * FROM signal_reviews").fetchall()]
-    from app.services.tracking_statistics import summarize, grouped as summarize_grouped
-    from app.services.tracking_ledger import ensure_tracking_ledger
-    with get_connection() as connection:
-        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if 'tracking_corrections' in tables:
-            records = connection.execute("""SELECT signal_id, evidence_json FROM tracking_corrections
-                WHERE id IN (SELECT MAX(id) FROM tracking_corrections WHERE asset='CRYPTO' GROUP BY signal_id)""").fetchall()
-            evidence = {int(r['signal_id']): json.loads(r['evidence_json']) for r in records}
-        else:
-            evidence = {}
-    for row in rows:
-        row['tracking_evidence'] = evidence.get(row['id'], {})
+        # Read results and their latest evidence in one consistent snapshot.
+        rows = _public_tracking_rows(connection, rows)
     cost_bps = get_settings().tracking_cost_bps_per_side
     totals = summarize(rows, cost_bps)
 

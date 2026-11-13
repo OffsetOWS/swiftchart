@@ -2,7 +2,7 @@
 
 Kept separate from tracking_rules.py so the audited replay rules stay unchanged.
 Cost = bps per side on entry notional plus quantity-weighted exit notionals,
-expressed in R (divided by initial stop distance). Funding is not modeled.
+expressed in R (divided by initial stop distance). Funding is recorded separately.
 """
 from __future__ import annotations
 
@@ -53,4 +53,9 @@ def cost_r(row: dict, bps_per_side: float) -> float | None:
 
 def net_r(row: dict, bps_per_side: float) -> float | None:
     cost = cost_r(row, bps_per_side)
+    funding = (row.get("tracking_evidence") or {}).get("costs", {})
+    if funding:
+        if funding.get("funding_r") is None:
+            return None
+        return None if cost is None else float(row["pnl_r_multiple"]) - cost - float(funding["funding_r"])
     return None if cost is None else float(row["pnl_r_multiple"]) - cost

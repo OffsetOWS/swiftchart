@@ -36,6 +36,8 @@ def record_delivery(trade_id, chat_id, message):
         raise ValueError("Future delivery receipt")
     with get_connection() as connection:
         ensure_delivery_receipts(connection)
+        if not connection.execute("SELECT 1 FROM trade_ideas WHERE id=?", (trade_id,)).fetchone():
+            raise ValueError("Delivery receipt has no saved signal")
         existing = connection.execute("SELECT trade_idea_id, sent_at FROM crypto_delivery_receipts WHERE chat_id=? AND message_id=?",
                                       (str(chat_id), int(message_id))).fetchone()
         if existing and (existing["trade_idea_id"] != trade_id or existing["sent_at"] != sent_at.isoformat()):
