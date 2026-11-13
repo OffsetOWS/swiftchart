@@ -27,9 +27,9 @@ The current public frontend is unchanged and is not part of the runtime payload.
 - Retain all VPS settings and add the fee/softening defaults. Live crypto scans
   still reach `analyze_dataframe -> build_trade_ideas`, including the softening
   block, so the default-off NO_TRADE range-softening switch applies there.
-- OKX ASP/x402 source and tests remain byte-identical to the snapshot. They are
-  not activated, installed or shipped in this backend runtime payload. Exactly
-  the 18 accepted existing failures are listed in `stage1_known_okx_failures.json`.
+- Remove OKX ASP/x402 integration modules, routes, gateway tests and dependency
+  declarations at the user's request. Retain the two core analysis regressions
+  in `test_market_analysis_service.py`. There are no test exclusions.
 - The only Forex runtime change is accepting `ACTIVE_SIGNAL_REUSED` in the scan
   result model, fixing the six observed validation failures. Other Forex source
   is unchanged. An older OANDA test stub was updated to accept the existing VPS
@@ -48,16 +48,15 @@ slippage certification is implied. References:
 
 ## Validation and limits
 
-The final report records the exact test counts, full-suite log and accepted
-failure comparison. Run all supported Python tests with:
+The final report records the exact test counts and full-suite log. Run all
+Python tests with:
 
 ```bash
 python scripts/check_stage1.py
 ```
 
-That runs both backend and execution-bot suites, deselecting only the 18 named,
-unchanged OKX failures. The full unfiltered suite is also checked to ensure its
-failure set is exactly those 18. New regression coverage exercises canonical
+That runs the complete backend and execution-bot suites without deselections or
+known-failure exceptions. Regression coverage exercises canonical
 receipts, replay-to-API/bot costs, identity/lock preservation, cohort exclusion,
 unknown funding, History timeout, 60-day candle budgets and rollback data safety.
 
@@ -79,8 +78,8 @@ until separately reconciled. Supabase paper data is not migrated by this release
 and source-baseline fingerprint. It excludes frontend, tests, OKX integration
 modules/routes, dependency installation and live environment/data files. The
 payload includes a per-file SHA-256 manifest and is verified before use. No new
-backend packages are required. Existing OKX dependency declarations remain source
-history only and are not installed by the deployment.
+backend packages are required. OKX source and dependency declarations have been
+removed; the payload denylist also prevents accidental reintroduction.
 
 Scan the changed source and entire runtime payload for secrets and hardcoded IPs.
 Loopback and bind addresses are allowed. Live env files, private agent paths,
@@ -88,7 +87,7 @@ analysis outputs and local preservation metadata must never be staged or packed.
 Existing public frontend/prototype files outside this backend release are neither
 deployed nor rewritten to claim that a historical repository-wide scan passed.
 
-## Deployment layout — only after one explicit backend approval
+## Deployment layout — backend approved, frontend remains on hold
 
 The old `/opt/swiftchart` checkout is deliberately preserved. It is dirty and
 must not be reset, stashed, cleaned, overwritten or fast-forwarded. Deployment
@@ -98,8 +97,9 @@ destroying uncommitted VPS work. The baseline guard checks its branch, HEAD,
 public origin and captured source hashes before services are stopped. Any drift
 stops deployment for review. No existing `.env` is edited or copied.
 
-Replace `APPROVED_SHA` with the full commit from the final report. These commands
-are proposed only; none have run on the server.
+Replace `APPROVED_SHA` with the full tested commit from the release report. The
+user has authorized removal of OKX and backend deployment; record the actual
+execution and post-deployment results separately. Frontend stays on hold.
 
 ```bash
 # On the local release worktree:
@@ -127,6 +127,11 @@ export PYTHONDONTWRITEBYTECODE=1
 set -a
 source "$old_root/.env"
 set +a
+# Verify imports with each existing VPS virtualenv before stopping services.
+(cd "$release_root" && PYTHONPATH="$release_root/backend:$release_root" \
+  "$python" -c 'from app.main import app')
+(cd "$release_root" && PYTHONPATH="$release_root/backend:$release_root" \
+  "$old_root/bot/.venv/bin/python" -c 'from bot.main import main')
 "$python" "$admin" prepare --root "$release_root" --state "$state"
 pm2 stop swiftchart-api swiftchart-bot
 if ! "$python" "$admin" backup --root "$release_root" --state "$state"; then
