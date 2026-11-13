@@ -808,6 +808,7 @@ def query_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str
             f"SELECT * FROM trade_ideas {where} ORDER BY created_at {direction}, id {direction} LIMIT ? OFFSET ?",
             [*values, limit, offset],
         ).fetchall()
+        rows = _public_tracking_rows(connection, rows)
     if total == 0:
         logger.info("No trade history records found for filters=%s", {key: value for key, value in filters.items() if value})
     return {
@@ -820,6 +821,7 @@ def query_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str
     }
 
 
+
 def list_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str = "desc") -> list[dict]:
     return query_trade_history(filters, page=page, limit=limit, sort=sort)["records"]
 
@@ -827,7 +829,9 @@ def list_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str 
 def get_trade_history(trade_id: int) -> dict | None:
     with get_connection() as connection:
         row = connection.execute("SELECT * FROM trade_ideas WHERE id = ?", (trade_id,)).fetchone()
+        row = _public_tracking_rows(connection, [row])[0] if row else None
     return row_to_dict(row) if row else None
+
 
 
 def _hit_checks(row: dict, candle: pd.Series) -> tuple[bool, bool, bool]:
@@ -847,7 +851,8 @@ def _hit_checks(row: dict, candle: pd.Series) -> tuple[bool, bool, bool]:
 def _entry_triggered(row: dict, candle: pd.Series) -> bool:
     high = float(candle["high"])
     low = float(candle["low"])
-    return low <= float(row["entry_zone_high"]) and high >= float(row["entry_zone_low"])
+    return low <= _entry_price(row) <= high
+
 
 
 def _expiry_time(row: dict) -> datetime:
@@ -857,7 +862,10 @@ def _expiry_time(row: dict) -> datetime:
 
 
 def _entry_price(row: dict) -> float:
-    return (float(row["entry_zone_low"]) + float(row["entry_zone_high"])) / 2
+    from app.services.tracking_rules import zone_bounds
+    low, high = zone_bounds(row["entry_zone_low"], row["entry_zone_high"])
+    return (low + high) / 2
+
 
 
 def _tp1_r(row: dict) -> float:
@@ -881,14 +889,17 @@ def _result_for_r(value: float) -> str:
 
 def _r_result(row: dict, status: str) -> tuple[str, float | None]:
     if status == "TP2_HIT":
-        return "WIN", float(row["risk_reward"])
+        risk = abs(_entry_price(row) - float(row["stop_loss"]))
+        if risk <= 0:
+            return "UNRESOLVED", None
+        return "WIN", _partial_r(row, abs(float(row["take_profit_2"]) - _entry_price(row)) / risk)
     if status == "BREAK_EVEN":
         return "BREAK_EVEN", round(_partial_r(row, 0.0), 4)
     if status == "CLOSED_AFTER_TP1":
         pnl = round(_partial_r(row, -1.0), 4)
         return _result_for_r(pnl), pnl
     if status == "PARTIAL_WIN":
-        return "PARTIAL_WIN", round(_partial_r(row, 0.0), 4)
+        return "UNRESOLVED", None  # Expiry is not an execution of the runner.
     if status == "PARTIAL_LOSS":
         return "PARTIAL_LOSS", round(_partial_r(row, -1.0), 4)
     if status == "TP1_HIT":
@@ -896,10 +907,11 @@ def _r_result(row: dict, status: str) -> tuple[str, float | None]:
     if status == "SL_HIT":
         return "LOSS", -1.0
     if status == "EXPIRED":
-        return "NO_ENTRY", 0.0
+        return ("UNRESOLVED", None) if row.get("entry_triggered_at") else ("NO_ENTRY", None)
     if status == "AMBIGUOUS":
         return "AMBIGUOUS", None
     return "OPEN", None
+
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -912,183 +924,54 @@ def _stop_hit(row: dict, candle: pd.Series, stop_price: float) -> bool:
     return low <= stop_price if row["direction"] == "LONG" else high >= stop_price
 
 
-def evaluate_trade(row: dict, candles: pd.DataFrame, *, expiry_bars: int | None = None, move_stop_to_entry_after_tp1: bool | None = None) -> dict:
-    v2_non_trackable = bool(
-        row.get("strategy_version")
-        and row.get("outcome_tracking_mode") not in {"PRODUCTION", "SHADOW"}
+def evaluate_trade(row: dict, candles: pd.DataFrame, *, expiry_bars: int | None = None,
+                   move_stop_to_entry_after_tp1: bool | None = None,
+                   first_delivery=None, as_of=None) -> dict:
+    from app.services.tracking_rules import replay_crypto
+    from app.services.tracking_time_exit import apply_time_exit
+    settings = get_settings()
+    records = candles.to_dict("records")
+    outcome = replay_crypto(
+        row, records,
+        first_delivery=first_delivery or row.get("first_delivered_at"),
+        as_of=as_of or datetime.now(UTC),
+        expiry_bars=expiry_bars or settings.trade_history_expiry_bars,
+        move_to_be=settings.trade_history_move_stop_to_entry_after_tp1
+        if move_stop_to_entry_after_tp1 is None else move_stop_to_entry_after_tp1,
     )
-    legacy_non_executable = bool(
-        not row.get("strategy_version")
-        and row.get("opportunity_key")
-        and not row.get("executable_at")
-    )
-    if row.get("entry_status") == "WAIT_FOR_RETEST" or v2_non_trackable or legacy_non_executable:
-        return {
-            "status": row.get("status") or "PENDING",
-            "result": "OPEN",
-            "entry_triggered_at": None,
-            "tp1_hit_at": None,
-            "tp2_hit_at": None,
-            "sl_hit_at": None,
-            "expired_at": None,
-            "closed_at": None,
-            "outcome_checked_at": _now_iso(),
-            "pnl_r_multiple": None,
-            "candles_to_resolution": None,
-            "lifecycle_events": row.get("lifecycle_events") or "[]",
-        }
-    created_at = _parse_dt(row["created_at"])
-    later = candles[candles["timestamp"].apply(_parse_dt) > created_at].copy().sort_values("timestamp")
-    max_bars = int(expiry_bars or getattr(get_settings(), "trade_history_expiry_bars", 12))
-    move_to_be = bool(get_settings().trade_history_move_stop_to_entry_after_tp1 if move_stop_to_entry_after_tp1 is None else move_stop_to_entry_after_tp1)
-    status = "OPEN"
-    entry_time: datetime | None = None
-    tp1_time: datetime | None = None
-    tp2_time: datetime | None = None
-    sl_time: datetime | None = None
-    expired_time: datetime | None = None
-    closed_at: datetime | None = None
-    candles_to_resolution: int | None = None
-    lifecycle_events: list[dict] = []
+    return apply_time_exit(row, outcome, records)
 
-    for candle_index, (_, candle) in enumerate(later.iterrows(), start=1):
-        candle_time = _parse_dt(candle["timestamp"])
-        if entry_time is None:
-            if _entry_triggered(row, candle):
-                entry_time = candle_time
-                status = "ENTRY_TRIGGERED"
-                lifecycle_events.append({"event": "ENTRY_TRIGGERED", "at": candle_time.isoformat(), "candle": candle_index})
-            else:
-                if candle_index >= max_bars:
-                    status = "EXPIRED"
-                    expired_time = candle_time
-                    closed_at = candle_time
-                    candles_to_resolution = candle_index
-                    lifecycle_events.append({"event": "EXPIRED", "at": candle_time.isoformat(), "candle": candle_index})
-                    break
-                continue
-
-        tp1_hit, tp2_hit, sl_hit = _hit_checks(row, candle)
-
-        if tp1_time is None:
-            if sl_hit and (tp1_hit or tp2_hit):
-                status = "AMBIGUOUS"
-                sl_time = candle_time
-                closed_at = candle_time
-                candles_to_resolution = candle_index
-                lifecycle_events.append({"event": "AMBIGUOUS", "at": candle_time.isoformat(), "candle": candle_index})
-                break
-            if tp2_hit:
-                tp1_time = candle_time
-                tp2_time = candle_time
-                status = "TP2_HIT"
-                closed_at = candle_time
-                candles_to_resolution = candle_index
-                lifecycle_events.append({"event": "TP1_HIT", "at": candle_time.isoformat(), "candle": candle_index})
-                lifecycle_events.append({"event": "TP2_HIT", "at": candle_time.isoformat(), "candle": candle_index})
-                break
-            if tp1_hit:
-                tp1_time = candle_time
-                status = "TP1_HIT"
-                lifecycle_events.append({"event": "TP1_HIT", "at": candle_time.isoformat(), "candle": candle_index})
-                if candle_index >= max_bars:
-                    status = "PARTIAL_WIN"
-                    expired_time = candle_time
-                    closed_at = candle_time
-                    candles_to_resolution = candle_index
-                    lifecycle_events.append({"event": "EXPIRED_AFTER_TP1", "at": candle_time.isoformat(), "candle": candle_index})
-                    break
-                continue
-            if sl_hit:
-                status = "SL_HIT"
-                sl_time = candle_time
-                closed_at = candle_time
-                candles_to_resolution = candle_index
-                lifecycle_events.append({"event": "SL_HIT", "at": candle_time.isoformat(), "candle": candle_index})
-                break
-        else:
-            active_stop = _entry_price(row) if move_to_be else float(row["stop_loss"])
-            runner_stop_hit = _stop_hit(row, candle, active_stop)
-            if runner_stop_hit and tp2_hit:
-                status = "AMBIGUOUS"
-                sl_time = candle_time
-                closed_at = candle_time
-                candles_to_resolution = candle_index
-                lifecycle_events.append({"event": "AMBIGUOUS_AFTER_TP1", "at": candle_time.isoformat(), "candle": candle_index})
-                break
-            if tp2_hit:
-                tp2_time = candle_time
-                status = "TP2_HIT"
-                closed_at = candle_time
-                candles_to_resolution = candle_index
-                lifecycle_events.append({"event": "TP2_HIT", "at": candle_time.isoformat(), "candle": candle_index})
-                break
-            if runner_stop_hit:
-                sl_time = candle_time
-                status = "BREAK_EVEN" if move_to_be else "CLOSED_AFTER_TP1"
-                closed_at = candle_time
-                candles_to_resolution = candle_index
-                lifecycle_events.append({"event": status, "at": candle_time.isoformat(), "candle": candle_index})
-                break
-
-        if candle_index >= max_bars:
-            expired_time = candle_time
-            closed_at = candle_time
-            candles_to_resolution = candle_index
-            if tp1_time is None:
-                status = "EXPIRED"
-                lifecycle_events.append({"event": "EXPIRED", "at": candle_time.isoformat(), "candle": candle_index})
-            else:
-                status = "PARTIAL_WIN"
-                lifecycle_events.append({"event": "EXPIRED_AFTER_TP1", "at": candle_time.isoformat(), "candle": candle_index})
-            break
-
-    if not later.empty and closed_at is None and len(later) >= max_bars:
-        candle = later.iloc[max_bars - 1]
-        candle_time = _parse_dt(candle["timestamp"])
-        expired_time = candle_time
-        closed_at = candle_time
-        candles_to_resolution = max_bars
-        if tp1_time is None:
-            status = "EXPIRED"
-            lifecycle_events.append({"event": "EXPIRED", "at": candle_time.isoformat(), "candle": max_bars})
-        else:
-            status = "PARTIAL_WIN"
-            lifecycle_events.append({"event": "EXPIRED_AFTER_TP1", "at": candle_time.isoformat(), "candle": max_bars})
-
-    if closed_at is None and entry_time is not None:
-        status = "TP1_HIT" if tp1_time is not None else "OPEN"
-    elif closed_at is None:
-        status = "OPEN"
-
-    result, pnl = _r_result(row, status)
-    return {
-        "status": status,
-        "result": result,
-        "entry_triggered_at": _iso(entry_time),
-        "tp1_hit_at": _iso(tp1_time),
-        "tp2_hit_at": _iso(tp2_time),
-        "sl_hit_at": _iso(sl_time),
-        "expired_at": _iso(expired_time),
-        "closed_at": _iso(closed_at),
-        "outcome_checked_at": _now_iso(),
-        "pnl_r_multiple": pnl,
-        "candles_to_resolution": candles_to_resolution,
-        "lifecycle_events": json.dumps(lifecycle_events),
-    }
 
 
 def update_outcome(trade_id: int, outcome: dict) -> None:
-    status = str(outcome["status"] or "").upper()
-    if status in {"TP2_HIT", "SL_HIT", "AMBIGUOUS", "BREAK_EVEN", "CLOSED_AFTER_TP1", "PARTIAL_LOSS"}:
-        lifecycle_status = "closed"
-    elif status == "TP1_HIT":
-        lifecycle_status = "tp1_hit"
-    elif status in {"EXPIRED", "PARTIAL_WIN"}:
-        lifecycle_status = "expired"
-    else:
-        lifecycle_status = "active"
+    from app.services.tracking_ledger import guard_crypto_transition, record_correction
     with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        before_row = connection.execute("SELECT * FROM trade_ideas WHERE id=?", (trade_id,)).fetchone()
+        if before_row is None:
+            raise LookupError(trade_id)
+        before = dict(before_row)
+        if before.get("outcome_checked_at") and _parse_dt(before["outcome_checked_at"]) > _parse_dt(outcome["outcome_checked_at"]):
+            return
+        previous = connection.execute("SELECT * FROM trade_outcomes WHERE trade_idea_id=?", (trade_id,)).fetchone()
+        if previous:
+            before["previous_trade_outcome"] = dict(previous)
+        outcome = guard_crypto_transition(before, outcome)
+        if outcome.get("tracking_evidence", {}).get("category") != "resolved":
+            outcome.get("tracking_evidence", {}).pop("costs", None)
+        status = str(outcome["status"] or "").upper()
+        if status in {"TP2_HIT", "SL_HIT", "AMBIGUOUS", "BREAK_EVEN", "CLOSED_AFTER_TP1", "PARTIAL_LOSS", "TIME_EXIT"}:
+            lifecycle_status = "closed"
+        elif status == "TP1_HIT":
+            lifecycle_status = "tp1_hit"
+        elif status in {"EXPIRED", "PARTIAL_WIN"}:
+            lifecycle_status = "expired"
+        elif status in {"UNRESOLVED", "EXPIRED_POSITION", "EXPIRED_RUNNER"}:
+            lifecycle_status = before.get("lifecycle_status") or "active"
+        else:
+            lifecycle_status = "active"
+        record_correction(connection, "CRYPTO", trade_id, before, outcome,
+                          outcome.get("tracking_evidence", {}), outcome["outcome_checked_at"])
         connection.execute(
             """
             UPDATE trade_ideas
@@ -1157,6 +1040,7 @@ def update_outcome(trade_id: int, outcome: dict) -> None:
         )
 
 
+
 ACTIVE_TRADE_STATUSES = ("PENDING", "OPEN", "ENTRY_TRIGGERED", "TP1_HIT")
 
 
@@ -1205,18 +1089,38 @@ def list_active_crypto_trades(exchange: str | None = None, limit: int = 50) -> l
 
 
 async def _evaluate_rows(rows) -> dict:
+    from app.services.tracking_ledger import first_crypto_delivery
     checked = 0
     changed = 0
     errors = 0
     candle_cache: dict[tuple[str, str, str], pd.DataFrame] = {}
+    funding_cache = {}
+    funding_unknown = 0
+    # Fetch enough recent history for the oldest row in each market, including
+    # the requested 60-day 1h replay. Exchange retention remains a hard limit.
+    from app.services.tracking_rules import timeframe_duration
+    import math
+    limits = {}
+    for raw in rows:
+        key = (raw["exchange"], raw["symbol"], raw["timeframe"])
+        age = max(0, (datetime.now(UTC) - _parse_dt(raw["created_at"])).total_seconds())
+        needed = math.ceil(age / timeframe_duration(raw["timeframe"]).total_seconds()) + 8
+        limits[key] = max(limits.get(key, 0), min(5000, max(1000, needed)))
     for raw in rows:
         row = row_to_dict(raw)
         try:
             cache_key = (row["exchange"], row["symbol"], row["timeframe"])
             if cache_key not in candle_cache:
-                candle_cache[cache_key] = await get_candles_cached(row["exchange"], row["symbol"], row["timeframe"], 1000)
+                candle_cache[cache_key] = await get_candles_cached(row["exchange"], row["symbol"], row["timeframe"], limits[cache_key])
             candles = candle_cache[cache_key]
-            outcome = evaluate_trade(row, candles)
+            with get_connection() as connection:
+                delivered = first_crypto_delivery(connection, row["id"])
+            outcome = evaluate_trade(row, candles, first_delivery=delivered)
+            outcome = await _refine_with_intrabar(row, outcome, delivered, candle_cache)
+            from app.services.tracking_time_exit import apply_time_exit
+            outcome = apply_time_exit(row, outcome, candles.to_dict("records"))
+            outcome = await _cost_outcome(row, outcome, funding_cache)
+            funding_unknown += outcome.get("pnl_r_multiple") is not None and outcome["tracking_evidence"]["costs"]["funding_r"] is None
         except Exception:
             errors += 1
             logger.exception("Trade lifecycle evaluation failed id=%s symbol=%s timeframe=%s exchange=%s", row.get("id"), row.get("symbol"), row.get("timeframe"), row.get("exchange"))
@@ -1225,7 +1129,9 @@ async def _evaluate_rows(rows) -> dict:
         if outcome["status"] != row["status"] or outcome["result"] != row["result"]:
             changed += 1
         update_outcome(row["id"], outcome)
-    return {"checked": checked, "updated": changed, "errors": errors, "markets_fetched": len(candle_cache)}
+    return {"checked": checked, "updated": changed, "errors": errors, "markets_fetched": len(candle_cache),
+            "funding_unknown": funding_unknown}
+
 
 
 async def check_trade_outcomes() -> dict:
@@ -1233,7 +1139,7 @@ async def check_trade_outcomes() -> dict:
         rows = connection.execute(
             """
             SELECT * FROM trade_ideas
-            WHERE status IN ('PENDING', 'OPEN', 'ENTRY_TRIGGERED', 'TP1_HIT')
+            WHERE status IN ('PENDING', 'OPEN', 'ENTRY_TRIGGERED', 'TP1_HIT', 'UNRESOLVED', 'AMBIGUOUS', 'EXPIRED_POSITION', 'EXPIRED_RUNNER')
               AND COALESCE(entry_status, 'READY') = 'READY'
               AND (
                     (strategy_version IS NULL AND (opportunity_key IS NULL OR executable_at IS NOT NULL))
@@ -1251,7 +1157,7 @@ async def replay_trade_outcomes(days: int = 30) -> dict:
         rows = connection.execute(
             """
             SELECT * FROM trade_ideas
-            WHERE created_at >= ?
+            WHERE datetime(created_at) >= datetime(?)
               AND COALESCE(entry_status, 'READY') = 'READY'
               AND (
                     (strategy_version IS NULL AND (opportunity_key IS NULL OR executable_at IS NOT NULL))
@@ -1268,65 +1174,22 @@ async def replay_trade_outcomes(days: int = 30) -> dict:
 
 
 def stats() -> dict:
+    from app.services.tracking_statistics import summarize, grouped as summarize_grouped
     with get_connection() as connection:
+        connection.execute("BEGIN")
         rows = [dict(row) for row in connection.execute("SELECT * FROM trade_ideas").fetchall()]
         review_rows = [dict(row) for row in connection.execute("SELECT * FROM signal_reviews").fetchall()]
+        # Read results and their latest evidence in one consistent snapshot.
+        rows = _public_tracking_rows(connection, rows)
     detected_total = len(rows)
-    pending_rows = [
-        row
-        for row in rows
-        if row.get("entry_status") == "WAIT_FOR_RETEST" or row.get("strategy_decision") == "WAIT_FOR_RETEST"
-    ]
-    pending_ids = {row["id"] for row in pending_rows}
-    performance_rows = [
-        row
-        for row in rows
-        if row["id"] not in pending_ids
-        and (
-            row.get("strategy_version") is None
-            or row.get("strategy_decision") == "TRADE"
-        )
-    ]
-    total = len(performance_rows)
-    entry_triggered = [row for row in performance_rows if row.get("entry_triggered_at")]
-    wins = [row for row in performance_rows if row["result"] in {"WIN", "PARTIAL_WIN"}]
-    losses = [row for row in performance_rows if row["result"] in {"LOSS", "PARTIAL_LOSS"}]
-    no_entries = [row for row in performance_rows if row["result"] == "NO_ENTRY"]
-    break_evens = [row for row in performance_rows if row["result"] == "BREAK_EVEN"]
-    ambiguous = [row for row in performance_rows if row["result"] == "AMBIGUOUS"]
-    open_rows = [row for row in performance_rows if row["result"] == "OPEN"]
-    tp_hits = [row for row in performance_rows if row.get("tp1_hit_at") or row["status"] in {"TP1_HIT", "TP2_HIT", "CLOSED_AFTER_TP1", "BREAK_EVEN", "PARTIAL_WIN", "PARTIAL_LOSS"}]
-    sl_hits = [row for row in performance_rows if row.get("sl_hit_at") or row["status"] == "SL_HIT"]
-    closed_decided = len(wins) + len(losses)
-    r_values = [float(row["pnl_r_multiple"]) for row in performance_rows if row.get("pnl_r_multiple") is not None]
-    resolved_candles = [int(row["candles_to_resolution"]) for row in performance_rows if row.get("candles_to_resolution") is not None]
+    pending_rows = [row for row in rows if row.get("entry_status") == "WAIT_FOR_RETEST" or row.get("strategy_decision") == "WAIT_FOR_RETEST"]
+    shadow_rows = [row for row in rows if row.get("outcome_tracking_mode") == "SHADOW" or row.get("strategy_decision") == "SHADOW"]
+    rows = [row for row in rows if production_statistics_row(row)]
+    cost_bps = get_settings().tracking_cost_bps_per_side
+    totals = summarize(rows, cost_bps)
 
-    def event_contains(row: dict, event: str) -> bool:
-        return event in str(row.get("lifecycle_events") or "")
-
-    tp1_then_sl = [row for row in performance_rows if row.get("tp1_hit_at") and row.get("sl_hit_at") and not row.get("tp2_hit_at")]
-    tp1_then_tp2 = [row for row in performance_rows if row.get("tp1_hit_at") and row.get("tp2_hit_at")]
-    tp1_then_expiry = [row for row in performance_rows if row.get("tp1_hit_at") and row.get("expired_at") and event_contains(row, "EXPIRED_AFTER_TP1")]
-
-    def grouped(field: str) -> list[dict]:
-        buckets: dict[str, list[dict]] = {}
-        for row in performance_rows:
-            buckets.setdefault(row.get(field) or "Unknown", []).append(row)
-        output = []
-        for key, items in buckets.items():
-            decided = [item for item in items if item["result"] in {"WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "BREAK_EVEN"}]
-            item_wins = [item for item in decided if item["result"] in {"WIN", "PARTIAL_WIN"}]
-            item_r_values = [float(item["pnl_r_multiple"]) for item in items if item.get("pnl_r_multiple") is not None]
-            output.append(
-                {
-                    field: key,
-                    "count": len(items),
-                    "win_rate": round((len(item_wins) / len(decided) * 100) if decided else 0, 2),
-                    "average_r": round(sum(item_r_values) / len(item_r_values), 2) if item_r_values else 0,
-                    "expectancy": round(sum(item_r_values) / len(items), 2) if items else 0,
-                }
-            )
-        return sorted(output, key=lambda item: (item["expectancy"], item["win_rate"], item["count"]), reverse=True)[:5]
+    def grouped(field):
+        return summarize_grouped(rows, field, cost_bps)
 
     def review_grouped() -> list[dict]:
         buckets: dict[str, list[dict]] = {"accepted": [], "rejected": []}
@@ -1343,28 +1206,13 @@ def stats() -> dict:
         ]
 
     return {
+        **totals,
         "total_ideas": detected_total,
         "detected_ideas": detected_total,
         "pending_retest_count": len(pending_rows),
-        "executable_ideas": total,
-        "completed_opportunities": len([row for row in performance_rows if row["result"] not in {"OPEN", "NO_ENTRY", "AMBIGUOUS"}]),
-        "entry_triggered_count": len(entry_triggered),
-        "win_count": len(wins),
-        "loss_count": len(losses),
-        "no_entry_count": len(no_entries),
-        "ambiguous_count": len(ambiguous),
-        "open_count": len(open_rows),
-        "tp_hit_rate": round((len(tp_hits) / total * 100) if total else 0, 2),
-        "sl_hit_rate": round((len(sl_hits) / total * 100) if total else 0, 2),
-        "win_rate": round((len(wins) / closed_decided * 100) if closed_decided else 0, 2),
-        "average_r_multiple": round(sum(r_values) / len(r_values), 2) if r_values else 0,
-        "average_candles_to_resolution": round(sum(resolved_candles) / len(resolved_candles), 2) if resolved_candles else 0,
-        "expectancy_per_trade": round(sum(r_values) / total, 2) if total else 0,
-        "tp1_then_sl_count": len(tp1_then_sl),
-        "tp1_then_tp2_count": len(tp1_then_tp2),
-        "tp1_then_expiry_count": len(tp1_then_expiry),
-        "break_even_count": len(break_evens),
-        "partial_loss_count": len([row for row in performance_rows if row["result"] == "PARTIAL_LOSS"]),
+        "shadow_count": len(shadow_rows),
+        "executable_ideas": len(rows),
+        "completed_opportunities": totals["resolved_entered_count"],
         "best_setup_grade_performance": grouped("setup_grade"),
         "best_timeframe_performance": grouped("timeframe"),
         "best_symbol_performance": grouped("symbol"),
@@ -1375,3 +1223,89 @@ def stats() -> dict:
         "expectancy_by_regime": grouped("regime_label"),
         "expectancy_by_setup_type": grouped("setup_grade"),
     }
+
+
+
+def _public_tracking_rows(connection, rows):
+    """Attach the same append-only evidence and costs used by aggregate stats."""
+    from app.services.tracking_costs import cost_r, net_r
+    rows = [dict(row) for row in rows]
+    tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    evidence = {}
+    if rows and "tracking_corrections" in tables:
+        ids = [str(row["id"]) for row in rows]
+        records = connection.execute(f"""SELECT signal_id, evidence_json FROM tracking_corrections
+            WHERE id IN (SELECT MAX(id) FROM tracking_corrections WHERE asset='CRYPTO'
+                AND signal_id IN ({','.join('?' for _ in ids)}) GROUP BY signal_id)""", ids).fetchall()
+        evidence = {int(r["signal_id"]): json.loads(r["evidence_json"]) for r in records}
+    for row in rows:
+        row["tracking_evidence"] = evidence.get(row["id"], {})
+        costs = row["tracking_evidence"].get("costs", {})
+        row["gross_r_multiple"] = row.get("pnl_r_multiple") if row["tracking_evidence"].get("category") == "resolved" else None
+        row["fee_r_multiple"] = cost_r(row, get_settings().tracking_cost_bps_per_side) if costs else None
+        row["funding_r_multiple"] = costs.get("funding_r")
+        row["net_r_multiple"] = net_r(row, get_settings().tracking_cost_bps_per_side) if costs else None
+        row["cost_basis"] = costs.get("funding_basis")
+        row["cost_status"] = "MODELED" if row["net_r_multiple"] is not None else "UNKNOWN"
+    return rows
+
+
+
+async def _refine_with_intrabar(row: dict, outcome: dict, delivered, candle_cache: dict) -> dict:
+    """Settle a same-candle AMBIGUOUS outcome with 15m candles; keep it if they cannot."""
+    if outcome.get("status") != "AMBIGUOUS":
+        return outcome
+    from app.services.tracking_intrabar import INTRABAR_TIMEFRAME, intrabar_candles_needed, refine_ambiguous
+    settings = get_settings()
+    as_of = datetime.now(UTC)
+    needed = intrabar_candles_needed(row, as_of)
+    if needed is None:
+        return outcome
+    limit = -(-needed // 200) * 200
+    cache_key = (row["exchange"], row["symbol"], INTRABAR_TIMEFRAME)
+    try:
+        cached = candle_cache.get(cache_key)
+        if cached is None or len(cached) < needed:
+            candle_cache[cache_key] = await get_candles_cached(row["exchange"], row["symbol"], INTRABAR_TIMEFRAME, limit)
+        return refine_ambiguous(
+            row, outcome, candle_cache[cache_key].to_dict("records"),
+            first_delivery=delivered or row.get("first_delivered_at"), as_of=as_of,
+            expiry_bars=settings.trade_history_expiry_bars,
+            move_to_be=settings.trade_history_move_stop_to_entry_after_tp1,
+            coarse_candles=candle_cache[(row["exchange"], row["symbol"], row["timeframe"])].to_dict("records"),
+        )
+    except Exception:
+        logger.exception("Intrabar refinement failed id=%s symbol=%s", row.get("id"), row.get("symbol"))
+        return outcome
+
+
+
+async def _cost_outcome(row, outcome, cache):
+    if outcome.get("pnl_r_multiple") is None:
+        return outcome
+    from app.services.tracking_funding import BASIS, fetch_rates, funding_r
+    from app.services.tracking_costs import cost_r
+    funding = rates = None
+    try:
+        rates = await fetch_rates(row, outcome, cache)
+        if rates is not None:
+            funding = funding_r(row, outcome, rates)
+    except Exception:
+        logger.exception("Funding history unavailable for signal id=%s", row.get("id"))
+    fee = cost_r(dict(row, **outcome), get_settings().tracking_cost_bps_per_side)
+    outcome["tracking_evidence"]["costs"] = dict(fee_r=fee, funding_r=funding,
+        net_r=None if fee is None or funding is None else outcome["pnl_r_multiple"]-fee-funding,
+        funding_basis=BASIS, rates=rates, bps_per_side=get_settings().tracking_cost_bps_per_side)
+    return outcome
+
+
+
+def production_statistics_row(row: dict) -> bool:
+    """Never mix research or pending-retest cohorts into production accounting."""
+    if row.get("entry_status") == "WAIT_FOR_RETEST" or row.get("strategy_decision") in {"WAIT_FOR_RETEST", "SHADOW", "NO_TRADE"}:
+        return False
+    if row.get("outcome_tracking_mode") == "SHADOW":
+        return False
+    if row.get("strategy_version"):
+        return row.get("strategy_decision") == "TRADE" and row.get("outcome_tracking_mode") == "PRODUCTION"
+    return not row.get("opportunity_key") or row.get("executable_at") is not None

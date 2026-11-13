@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from app.models.schemas import MarketRegimeSnapshot
 from app.models.schemas import LiquiditySweep
@@ -272,7 +274,12 @@ def test_short_after_large_dump_waits_for_retest_without_full_exhaustion_cluster
     assert any("ATR" in reason or "RSI" in reason for reason in quality["reasons"])
 
 
-def test_wait_no_trade_near_edge_with_evidence_can_build_confirmed_setup():
+@pytest.mark.parametrize("softening_allowed", [True, False])
+def test_wait_no_trade_near_edge_with_evidence_can_build_confirmed_setup(monkeypatch, softening_allowed):
+    monkeypatch.setattr(
+        "app.strategy.trade_ideas.get_settings",
+        lambda: SimpleNamespace(allow_no_trade_range_softening=softening_allowed),
+    )
     started = datetime(2026, 1, 1, tzinfo=UTC)
     rows = []
     for idx in range(84):
@@ -342,6 +349,12 @@ def test_wait_no_trade_near_edge_with_evidence_can_build_confirmed_setup():
         "HTF_BULLISH",
         snapshot,
     )
+
+    if not softening_allowed:
+        # A NO_TRADE regime must stay NO_TRADE unless softening is explicitly enabled.
+        assert ideas == []
+        assert warning is not None and "NO TRADE" in warning
+        return
 
     assert warning is None
     assert ideas

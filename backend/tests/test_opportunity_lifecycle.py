@@ -145,7 +145,8 @@ def test_wait_for_retest_is_pending_and_excluded_from_outcomes_and_stats(monkeyp
     assert snapshot["pending_retest_count"] == 1
     assert snapshot["executable_ideas"] == 0
     assert snapshot["completed_opportunities"] == 0
-    assert snapshot["expectancy_per_trade"] == 0
+    assert snapshot["expectancy_per_trade"] is None
+    assert snapshot["expectancy_sample_count"] == 0
 
 
 def test_later_confirmed_retest_promotes_without_duplicate(monkeypatch, tmp_path):

@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     signal_max_entry_deviation_percent: float = Field(default=1.5, ge=0)
     trade_history_expiry_bars: int = Field(default=12, ge=1)
     trade_history_move_stop_to_entry_after_tp1: bool = False
+    tracking_cost_bps_per_side: float = Field(default=5.0, ge=0, le=100)
+    allow_no_trade_range_softening: bool = False
     crypto_lifecycle_enabled: bool = True
     crypto_lifecycle_interval_seconds: int = Field(default=120, ge=30)
     crypto_lifecycle_startup_delay_seconds: int = Field(default=10, ge=0, le=300)

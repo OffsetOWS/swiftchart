@@ -312,7 +312,8 @@ def mark_telegram_recipient_success(
         connection.execute(
             """
             UPDATE telegram_dispatch_recipients
-            SET status = 'SENT', sent_at = ?, telegram_message_id = ?,
+            SET status = 'SENT', sent_at = COALESCE(sent_at, ?),
+                telegram_message_id = COALESCE(telegram_message_id, ?),
                 last_error = NULL, updated_at = ?
             WHERE dispatch_id = ? AND chat_id = ?
             """,

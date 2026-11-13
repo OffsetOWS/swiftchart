@@ -21,8 +21,12 @@ TradeHistoryStatus = Literal[
     "BREAK_EVEN",
     "PARTIAL_WIN",
     "PARTIAL_LOSS",
+    "UNRESOLVED",
+    "EXPIRED_POSITION",
+    "EXPIRED_RUNNER",
+    "TIME_EXIT",
 ]
-TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN"]
+TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN", "UNRESOLVED"]
 MarketCondition = Literal[
     "RANGE_BOUND",
     "TRENDING_UP",
@@ -328,6 +332,12 @@ class PaperTradeCreate(BaseModel):
 
 
 class PaperTrade(PaperTradeCreate):
+    gross_r_multiple: float | None = None
+    fee_r_multiple: float | None = None
+    funding_r_multiple: float | None = None
+    net_r_multiple: float | None = None
+    cost_basis: str | None = None
+    cost_status: str = "UNKNOWN"
     id: int
     user_id: str | None = None
     status: Literal["taken", "open", "tp_hit", "sl_hit", "closed"] = "taken"
@@ -357,6 +367,12 @@ class PaperTrade(PaperTradeCreate):
 
 
 class TradeHistoryRecord(BaseModel):
+    gross_r_multiple: float | None = None
+    fee_r_multiple: float | None = None
+    funding_r_multiple: float | None = None
+    net_r_multiple: float | None = None
+    cost_basis: str | None = None
+    cost_status: str = "UNKNOWN"
     id: int
     symbol: str
     timeframe: str
@@ -435,7 +451,7 @@ class TradeStats(BaseModel):
     win_rate: float
     average_r_multiple: float
     average_candles_to_resolution: float
-    expectancy_per_trade: float
+    expectancy_per_trade: float | None
     tp1_then_sl_count: int = 0
     tp1_then_tp2_count: int = 0
     tp1_then_expiry_count: int = 0
@@ -450,6 +466,23 @@ class TradeStats(BaseModel):
     counter_trend_performance: list[dict] = Field(default_factory=list)
     expectancy_by_regime: list[dict] = Field(default_factory=list)
     expectancy_by_setup_type: list[dict] = Field(default_factory=list)
+    full_win_count: int = 0
+    partial_win_count: int = 0
+    time_exit_win_count: int = 0
+    resolved_entered_count: int = 0
+    entered_unresolved_count: int = 0
+    legacy_unreplayed_count: int = 0
+    expectancy_sample_count: int = 0
+    expectancy_basis: str = "completed entered trades with known modeled costs"
+    unresolved_count: int = 0
+    cost_bps_per_side: float = 0
+    costed_trade_count: int = 0
+    gross_r_total: float = 0
+    net_r_total: float | None = None
+    average_net_r_multiple: float | None = None
+    funding_unknown_count: int = 0
+    funding_r_total: float = 0
+    cost_basis: str = "modeled fees and historical funding rates valued at entry notional"
 
 
 class TradeHistoryPage(BaseModel):

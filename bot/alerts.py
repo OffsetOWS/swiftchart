@@ -108,6 +108,7 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
                     candidate.dispatch_id,
                     chat_id,
                     telegram_message_id=getattr(response, "message_id", None),
+                    now=getattr(response, "date", None),
                 )
             except Exception as exc:
                 failed += 1

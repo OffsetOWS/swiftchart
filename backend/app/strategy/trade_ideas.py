@@ -1,3 +1,4 @@
+from app.config import get_settings
 import logging
 
 import pandas as pd
@@ -1034,6 +1035,8 @@ def build_trade_ideas(
         ):
             softened_regime = "TRANSITION_TO_BEARISH" if market_regime_data.trade_decision == "WAIT" else "RANGE_BOUND"
             soften_note = f"short evidence at resistance/edge: {', '.join(short_evidence)}"
+        if softened_regime == "RANGE_BOUND" and not get_settings().allow_no_trade_range_softening:
+            softened_regime = None
         if softened_regime is None:
             logger.info(
                 "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=%s long_evidence=%s short_evidence=%s",
