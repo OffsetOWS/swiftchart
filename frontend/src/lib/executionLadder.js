@@ -75,10 +75,10 @@ export function executionLadderState(signal) {
       const neutralBand = Math.max(Math.abs((entryHigh ?? entry) - (entryLow ?? entry)), Math.abs(entry) * 0.0001);
       if (Math.abs(favorableDistance) <= neutralBand) label = "Near entry";
       else if (favorableDistance > 0) {
-        label = "In profit";
+        label = "Favorable price move";
         tone = "profit";
       } else {
-        label = "In loss";
+        label = "Adverse price move";
         tone = "loss";
       }
     }

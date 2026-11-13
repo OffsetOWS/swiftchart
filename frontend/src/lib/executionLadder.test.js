@@ -28,8 +28,8 @@ const short = {
 test("LONG marker moves favorably toward TP1 and unfavorably toward stop", () => {
   const profit = executionLadderState({ ...long, latest_price: 108 });
   const loss = executionLadderState({ ...long, latest_price: 97 });
-  assert.equal(profit.label, "In profit");
-  assert.equal(loss.label, "In loss");
+  assert.equal(profit.label, "Favorable price move");
+  assert.equal(loss.label, "Adverse price move");
   assert.ok(profit.markerPosition > loss.markerPosition);
   assert.ok(profit.favorableProgress > 0);
   assert.ok(loss.favorableProgress < 0);
@@ -38,8 +38,8 @@ test("LONG marker moves favorably toward TP1 and unfavorably toward stop", () =>
 test("SHORT marker moves favorably down toward TP1 and unfavorably up toward stop", () => {
   const profit = executionLadderState({ ...short, latest_price: 94 });
   const loss = executionLadderState({ ...short, latest_price: 104 });
-  assert.equal(profit.label, "In profit");
-  assert.equal(loss.label, "In loss");
+  assert.equal(profit.label, "Favorable price move");
+  assert.equal(loss.label, "Adverse price move");
   assert.ok(profit.markerPosition < loss.markerPosition);
   assert.ok(profit.favorableProgress > 0);
   assert.ok(loss.favorableProgress < 0);
