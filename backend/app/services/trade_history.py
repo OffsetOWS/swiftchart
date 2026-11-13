@@ -565,6 +565,25 @@ async def _refine_with_intrabar(row: dict, outcome: dict, delivered, candle_cach
         return outcome
 
 
+async def _cost_outcome(row, outcome, cache):
+    if outcome.get("pnl_r_multiple") is None:
+        return outcome
+    from app.services.tracking_funding import BASIS, fetch_rates, funding_r
+    from app.services.tracking_costs import cost_r
+    funding = rates = None
+    try:
+        rates = await fetch_rates(row, outcome, cache)
+        if rates is not None:
+            funding = funding_r(row, outcome, rates)
+    except Exception:
+        logger.exception("Funding history unavailable for signal id=%s", row.get("id"))
+    fee = cost_r(dict(row, **outcome), get_settings().tracking_cost_bps_per_side)
+    outcome["tracking_evidence"]["costs"] = dict(fee_r=fee, funding_r=funding,
+        net_r=None if fee is None or funding is None else outcome["pnl_r_multiple"]-fee-funding,
+        funding_basis=BASIS, rates=rates, bps_per_side=get_settings().tracking_cost_bps_per_side)
+    return outcome
+
+
 async def _evaluate_rows(rows) -> dict:
     from app.services.tracking_ledger import first_crypto_delivery
     checked = 0
@@ -586,22 +605,8 @@ async def _evaluate_rows(rows) -> dict:
             outcome = await _refine_with_intrabar(row, outcome, delivered, candle_cache)
             from app.services.tracking_time_exit import apply_time_exit
             outcome = apply_time_exit(row, outcome, candles.to_dict("records"))
-            if outcome.get("pnl_r_multiple") is not None:
-                from app.services.tracking_funding import BASIS, fetch_rates, funding_r
-                from app.services.tracking_costs import cost_r
-                funding = None
-                rates = None
-                try:
-                    rates = await fetch_rates(row, outcome, funding_cache)
-                    if rates is not None:
-                        funding = funding_r(row, outcome, rates)
-                except Exception:
-                    logger.exception("Funding history unavailable for signal id=%s", row.get("id"))
-                fee = cost_r(dict(row, **outcome), get_settings().tracking_cost_bps_per_side)
-                outcome["tracking_evidence"]["costs"] = dict(fee_r=fee, funding_r=funding,
-                    net_r=None if fee is None or funding is None else outcome["pnl_r_multiple"]-fee-funding,
-                    funding_basis=BASIS, rates=rates, bps_per_side=get_settings().tracking_cost_bps_per_side)
-                funding_unknown += funding is None
+            outcome = await _cost_outcome(row, outcome, funding_cache)
+            funding_unknown += outcome.get("pnl_r_multiple") is not None and outcome["tracking_evidence"]["costs"]["funding_r"] is None
         except Exception:
             errors += 1
             logger.exception("Trade lifecycle evaluation failed id=%s symbol=%s timeframe=%s exchange=%s", row.get("id"), row.get("symbol"), row.get("timeframe"), row.get("exchange"))
@@ -619,7 +624,7 @@ async def check_trade_outcomes() -> dict:
         rows = connection.execute(
             """
             SELECT * FROM trade_ideas
-            WHERE status IN ('PENDING', 'OPEN', 'ENTRY_TRIGGERED', 'TP1_HIT', 'UNRESOLVED')
+            WHERE status IN ('PENDING', 'OPEN', 'ENTRY_TRIGGERED', 'TP1_HIT', 'UNRESOLVED', 'AMBIGUOUS', 'EXPIRED_POSITION', 'EXPIRED_RUNNER')
             ORDER BY created_at ASC
             """
         ).fetchall()

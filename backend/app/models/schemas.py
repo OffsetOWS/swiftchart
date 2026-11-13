@@ -297,6 +297,12 @@ class PaperTradeCreate(BaseModel):
 
 
 class PaperTrade(PaperTradeCreate):
+    gross_r_multiple: float | None = None
+    fee_r_multiple: float | None = None
+    funding_r_multiple: float | None = None
+    net_r_multiple: float | None = None
+    cost_basis: str | None = None
+    cost_status: str = "UNKNOWN"
     id: int
     user_id: str | None = None
     status: Literal["taken", "open", "tp_hit", "sl_hit", "closed"] = "taken"

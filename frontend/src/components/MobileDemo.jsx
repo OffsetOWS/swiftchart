@@ -43,6 +43,7 @@ import NotificationCenter from "./NotificationCenter.jsx";
 import SettingsSupport from "./SettingsSupport.jsx";
 import { normalizeCryptoSymbol } from "../lib/instruments.js";
 import { executionLadderState } from "../lib/executionLadder.js";
+import { trackedResultR, trackedResultTotal } from "../lib/trackedResults.js";
 import {
   activeForexSignals,
   canonicalForexTimeframe,
@@ -284,7 +285,7 @@ function normalizeForexSignal(signal, index = 0) {
 
 function normalizeSavedTrade(trade) {
   const isForex = String(trade.exchange || "").toLowerCase() === MARKET_TYPES.forex;
-  const resultR = trade.result_r ?? trade.pnl;
+  const resultR = trackedResultR(trade);
   const lifecycleLabel = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
   if (isForex) {
     return {
@@ -1184,7 +1185,7 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
         {signal.isHistory ? (
           <section className={`graphite-history-result ${Number(signal.historyResultR) < 0 ? "loss" : Number(signal.historyResultR) > 0 ? "profit" : ""}`}>
             <div>
-              <span>Trade result</span>
+              <span>Modeled result after costs</span>
               <strong>{signal.historyResult || "Tracking"}</strong>
             </div>
             <em>{signal.historyResultR === null || signal.historyResultR === undefined ? "Tracking" : `${Number(signal.historyResultR) >= 0 ? "+" : ""}${Number(signal.historyResultR).toFixed(1)}R`}</em>
@@ -1224,7 +1225,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
   }, [market]);
   const savedRows = paperTrades.map((trade) => {
     const lifecycleStatus = String(trade.lifecycle_status || "").toUpperCase();
-    const resultR = trade.result_r ?? trade.pnl;
+    const resultR = trackedResultR(trade);
     const state = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
     const displayResult = resultR === null || resultR === undefined
       ? lifecycleStatus === "TP1_HIT" ? "TP1 Hit" : ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(lifecycleStatus) ? state : "Tracking"
@@ -1238,6 +1239,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
       filterStatus: lifecycleStatus === "STOPPED" ? "sl" : lifecycleStatus.toLowerCase(),
       state,
       r: displayResult,
+      resultValue: resultR,
       date: trade.taken_at ? new Date(trade.taken_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "Today",
       market: String(trade.exchange || "").toLowerCase() === "forex" ? MARKET_TYPES.forex : MARKET_TYPES.crypto,
       id: trade.id,
@@ -1247,16 +1249,14 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
   const rows = savedRows
     .filter((item) => (marketFilter === "all" ? true : item.market === marketFilter))
     .filter((item) => statusFilter === "all" || item.filterStatus.includes(statusFilter) || item.result.toLowerCase().includes(statusFilter));
-  const totalR = rows.reduce((sum, item) => {
-    const value = Number.parseFloat(item.r);
-    return Number.isFinite(value) ? sum + value : sum;
-  }, 0);
+  const results = trackedResultTotal(rows.map((item) => item.trade));
+  const totalR = results.total;
   return (
     <div className="graphite-screen">
       <section className="graphite-history-hero">
-        <span>{market === MARKET_TYPES.forex ? "Forex Total R" : "Total R"}</span>
-        <strong>{`${totalR >= 0 ? "+" : ""}${totalR.toFixed(1)}R`}</strong>
-        <p>{rows.length} tracked ideas · market filter active</p>
+        <span>Modeled net R</span>
+        <strong>{totalR === null ? "—" : `${totalR >= 0 ? "+" : ""}${totalR.toFixed(1)}R`}</strong>
+        <p>{results.sample} costed entries · {results.unknown} awaiting evidence</p>
       </section>
 
       <div className="graphite-filter-row">
@@ -1286,7 +1286,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
               </div>
               <small>{item.timeframe.toUpperCase()} · {item.date} · {item.state}</small>
             </div>
-            <span className={`market-pair-quality ${item.r.startsWith("-") ? "loss" : item.r === "Tracking" ? "" : "profit"}`}>
+            <span className={`market-pair-quality ${item.resultValue < 0 ? "loss" : item.resultValue > 0 ? "profit" : ""}`}>
               <strong>{item.r}</strong>
               <small>{item.score} score</small>
             </span>
