@@ -385,6 +385,14 @@ class TradeStats(BaseModel):
     tp1_then_expiry_count: int = 0
     break_even_count: int = 0
     partial_loss_count: int = 0
+    full_win_count: int = 0
+    partial_win_count: int = 0
+    time_exit_win_count: int = 0
+    resolved_entered_count: int = 0
+    entered_unresolved_count: int = 0
+    legacy_unreplayed_count: int = 0
+    expectancy_sample_count: int = 0
+    expectancy_basis: str = "completed entered trades with known modeled costs"
     unresolved_count: int = 0
     cost_bps_per_side: float = 0
     costed_trade_count: int = 0

@@ -598,50 +598,23 @@ def stats() -> dict:
     with get_connection() as connection:
         rows = [dict(row) for row in connection.execute("SELECT * FROM trade_ideas").fetchall()]
         review_rows = [dict(row) for row in connection.execute("SELECT * FROM signal_reviews").fetchall()]
-    total = len(rows)
-    entry_triggered = [row for row in rows if row.get("entry_triggered_at")]
-    wins = [row for row in rows if row["result"] in {"WIN", "PARTIAL_WIN"}]
-    losses = [row for row in rows if row["result"] in {"LOSS", "PARTIAL_LOSS"}]
-    no_entries = [row for row in rows if row["result"] == "NO_ENTRY"]
-    break_evens = [row for row in rows if row["result"] == "BREAK_EVEN"]
-    ambiguous = [row for row in rows if row["result"] == "AMBIGUOUS"]
-    open_rows = [row for row in rows if row["result"] == "OPEN"]
-    tp_hits = [row for row in rows if row.get("tp1_hit_at") or row["status"] in {"TP1_HIT", "TP2_HIT", "CLOSED_AFTER_TP1", "BREAK_EVEN", "PARTIAL_WIN", "PARTIAL_LOSS"}]
-    sl_hits = [row for row in rows if row.get("sl_hit_at") or row["status"] == "SL_HIT"]
-    closed_decided = len(wins) + len(losses)
-    r_values = [float(row["pnl_r_multiple"]) for row in rows if row.get("pnl_r_multiple") is not None]
-    resolved_candles = [int(row["candles_to_resolution"]) for row in rows if row.get("candles_to_resolution") is not None]
-    from app.services.tracking_costs import net_r
+    from app.services.tracking_statistics import summarize, grouped as summarize_grouped
+    from app.services.tracking_ledger import ensure_tracking_ledger
+    with get_connection() as connection:
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'tracking_corrections' in tables:
+            records = connection.execute("""SELECT signal_id, evidence_json FROM tracking_corrections
+                WHERE id IN (SELECT MAX(id) FROM tracking_corrections WHERE asset='CRYPTO' GROUP BY signal_id)""").fetchall()
+            evidence = {int(r['signal_id']): json.loads(r['evidence_json']) for r in records}
+        else:
+            evidence = {}
+    for row in rows:
+        row['tracking_evidence'] = evidence.get(row['id'], {})
     cost_bps = get_settings().tracking_cost_bps_per_side
-    net_values = [value for value in (net_r(row, cost_bps) for row in rows) if value is not None]
-    unresolved = [row for row in rows if row["result"] == "UNRESOLVED"]
+    totals = summarize(rows, cost_bps)
 
-    def event_contains(row: dict, event: str) -> bool:
-        return event in str(row.get("lifecycle_events") or "")
-
-    tp1_then_sl = [row for row in rows if row.get("tp1_hit_at") and row.get("sl_hit_at") and not row.get("tp2_hit_at")]
-    tp1_then_tp2 = [row for row in rows if row.get("tp1_hit_at") and row.get("tp2_hit_at")]
-    tp1_then_expiry = [row for row in rows if row.get("tp1_hit_at") and row.get("expired_at") and event_contains(row, "EXPIRED_AFTER_TP1")]
-
-    def grouped(field: str) -> list[dict]:
-        buckets: dict[str, list[dict]] = {}
-        for row in rows:
-            buckets.setdefault(row.get(field) or "Unknown", []).append(row)
-        output = []
-        for key, items in buckets.items():
-            decided = [item for item in items if item["result"] in {"WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "BREAK_EVEN"}]
-            item_wins = [item for item in decided if item["result"] in {"WIN", "PARTIAL_WIN"}]
-            item_r_values = [float(item["pnl_r_multiple"]) for item in items if item.get("pnl_r_multiple") is not None]
-            output.append(
-                {
-                    field: key,
-                    "count": len(items),
-                    "win_rate": round((len(item_wins) / len(decided) * 100) if decided else 0, 2),
-                    "average_r": round(sum(item_r_values) / len(item_r_values), 2) if item_r_values else 0,
-                    "expectancy": round(sum(item_r_values) / len(items), 2) if items else 0,
-                }
-            )
-        return sorted(output, key=lambda item: (item["expectancy"], item["win_rate"], item["count"]), reverse=True)[:5]
+    def grouped(field):
+        return summarize_grouped(rows, field, cost_bps)
 
     def review_grouped() -> list[dict]:
         buckets: dict[str, list[dict]] = {"accepted": [], "rejected": []}
@@ -658,30 +631,7 @@ def stats() -> dict:
         ]
 
     return {
-        "total_ideas": total,
-        "entry_triggered_count": len(entry_triggered),
-        "win_count": len(wins),
-        "loss_count": len(losses),
-        "no_entry_count": len(no_entries),
-        "ambiguous_count": len(ambiguous),
-        "open_count": len(open_rows),
-        "tp_hit_rate": round((len(tp_hits) / total * 100) if total else 0, 2),
-        "sl_hit_rate": round((len(sl_hits) / total * 100) if total else 0, 2),
-        "win_rate": round((len(wins) / closed_decided * 100) if closed_decided else 0, 2),
-        "average_r_multiple": round(sum(r_values) / len(r_values), 2) if r_values else 0,
-        "average_candles_to_resolution": round(sum(resolved_candles) / len(resolved_candles), 2) if resolved_candles else 0,
-        "expectancy_per_trade": round(sum(r_values) / total, 2) if total else 0,
-        "tp1_then_sl_count": len(tp1_then_sl),
-        "tp1_then_tp2_count": len(tp1_then_tp2),
-        "tp1_then_expiry_count": len(tp1_then_expiry),
-        "break_even_count": len(break_evens),
-        "partial_loss_count": len([row for row in rows if row["result"] == "PARTIAL_LOSS"]),
-        "unresolved_count": len(unresolved),
-        "cost_bps_per_side": cost_bps,
-        "costed_trade_count": len(net_values),
-        "gross_r_total": round(sum(r_values), 2),
-        "net_r_total": round(sum(net_values), 2),
-        "average_net_r_multiple": round(sum(net_values) / len(net_values), 2) if net_values else 0,
+        **totals,
         "best_setup_grade_performance": grouped("setup_grade"),
         "best_timeframe_performance": grouped("timeframe"),
         "best_symbol_performance": grouped("symbol"),
