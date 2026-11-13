@@ -74,7 +74,7 @@ def test_replay_preserves_identity_and_uses_canonical_cost_evidence(db, monkeypa
     assert record.net_r_multiple==pytest.approx(1.38925)
     stats=TradeStats.model_validate(trade_history.stats())
     assert stats.expectancy_sample_count==1 and stats.expectancy_per_trade==1.39
-    assert "Costed sample: 1" in format_stats(stats.model_dump())
+    assert format_stats(stats.model_dump()) == "Performance statistics are unavailable."
     with db.get_connection() as c:
         after=dict(c.execute("SELECT * FROM trade_ideas WHERE id=1").fetchone())
         for key in ("opportunity_key","strategy_decision","outcome_tracking_mode","executable_at","entry_status"):
@@ -110,7 +110,7 @@ def test_missing_funding_remains_unknown(db,monkeypatch):
     assert record["net_r_multiple"] is None and record["cost_status"]=="UNKNOWN"
     stats=trade_history.stats()
     assert stats["expectancy_per_trade"] is None and stats["funding_unknown_count"]==1
-    assert "Unknown costs" in format_paper_trades([{"pnl_r":5}])
+    assert "Result:" not in format_paper_trades([{"pnl_r":5}])
 
 
 def test_history_timeout_preserves_records_without_gross_or_zero_fallback(monkeypatch):

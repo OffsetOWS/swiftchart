@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.models.schemas import RiskSettings
 from app.services.market_data import get_candles_cached
-from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas, stats
+from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas
 from app.strategy.trade_ideas import analyze_dataframe
 from bot.formatter import format_analysis, format_history, format_paper_trades, format_stats, format_top_ideas, help_text, strategy_text
 from bot.keyboards import command_keyboard, main_menu_keyboard
@@ -140,7 +140,7 @@ async def alerts_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     enabled = update.effective_chat.id in subscribers
     await update.effective_message.reply_text(
         f"Alert status: {'enabled' if enabled else 'disabled'}\n"
-        f"Subscribers: {len(subscribers)}\n\n"
+        "\n"
         "Use /subscribe to receive setup alerts or /unsubscribe to stop them."
     )
 
@@ -151,14 +151,14 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_message.reply_text(format_stats(stats()))
+    await update.effective_message.reply_text(format_stats({}))
 
 
 async def check_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     status = await update.effective_message.reply_text("Checking saved trade outcomes...")
     try:
-        result = await check_trade_outcomes()
-        await status.edit_text(f"Trade outcome check complete.\nChecked: {result['checked']}\nUpdated: {result['updated']}")
+        await check_trade_outcomes()
+        await status.edit_text("Trade outcome check complete.")
     except Exception as exc:
         logger.exception("Trade outcome check failed")
         await status.edit_text(f"Could not check trades: {exc}")
