@@ -217,6 +217,7 @@ class ForexScanRunResult(BaseModel):
     trigger_source: Literal["scheduled", "manual"] = "scheduled"
     result_status: Literal[
         "TRADE_FOUND",
+        "ACTIVE_SIGNAL_REUSED",
         "WAIT_FOR_RETEST",
         "NO_TRADE",
         "MARKET_CLOSED",
