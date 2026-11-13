@@ -18,6 +18,20 @@ HIGHER_TIMEFRAMES = {"15M": "4H", "1H": "4H", "4H": "1D", "1D": None}
 SYNTHETIC_USD_PAIRS = ("EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDJPY", "USDCHF", "USDCAD")
 SYNTHETIC_USD_MIN_COMPONENTS = 4
 SYNTHETIC_USD_COMPONENT_CAP_ATR = 2.5
+DEFAULT_CONTEXT_STALE_MULTIPLIER = 2.5
+DEFAULT_CONTEXT_MAX_POSITIVE_ADJUSTMENT = 10.0
+DEFAULT_CONTEXT_MAX_NEGATIVE_ADJUSTMENT = -10.0
+
+
+def _context_setting(name: str, default: bool | float) -> bool | float:
+    """Keep optional cross-market context from blocking technical signals.
+
+    Production deployments can briefly contain a newer context module and an
+    older Settings model while files are being synchronized. Context is only a
+    scoring adjustment, so missing optional settings must fall back to their
+    documented defaults instead of aborting the entire Forex scan.
+    """
+    return getattr(get_settings(), name, default)
 
 
 def _unavailable(instrument: str, timeframe: str, reason: str) -> MarketContextComponent:
@@ -104,7 +118,13 @@ def classify_external_market(
     candle_time = pd.Timestamp(ordered.iloc[-1]["timestamp"]).to_pydatetime()
     candle_time = candle_time if candle_time.tzinfo else candle_time.replace(tzinfo=UTC)
     stale_after = timedelta(
-        seconds=TIMEFRAME_SECONDS[timeframe] * get_settings().forex_cross_market_stale_multiplier
+        seconds=TIMEFRAME_SECONDS[timeframe]
+        * float(
+            _context_setting(
+                "forex_cross_market_stale_multiplier",
+                DEFAULT_CONTEXT_STALE_MULTIPLIER,
+            )
+        )
     )
     stale = now - candle_time.astimezone(UTC) > stale_after
     explanation = (
@@ -163,7 +183,13 @@ def _synthetic_usd_contribution(
     candle_time = candle_time if candle_time.tzinfo else candle_time.replace(tzinfo=UTC)
     candle_time = candle_time.astimezone(UTC)
     stale_after = timedelta(
-        seconds=TIMEFRAME_SECONDS[timeframe] * get_settings().forex_cross_market_stale_multiplier
+        seconds=TIMEFRAME_SECONDS[timeframe]
+        * float(
+            _context_setting(
+                "forex_cross_market_stale_multiplier",
+                DEFAULT_CONTEXT_STALE_MULTIPLIER,
+            )
+        )
     )
     if now - candle_time > stale_after:
         raise ValueError(f"Stale synthetic USD candles for {pair}.")
@@ -339,7 +365,9 @@ async def evaluate_cross_market_context(
     evaluated_at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
     usd = None
     oil = None
-    if "USD" in pair and settings.forex_dxy_context_enabled:
+    if "USD" in pair and bool(
+        getattr(settings, "forex_dxy_context_enabled", True)
+    ):
         usd = await _component(
             market_data, instrument="DXY", scan_timeframe=timeframe,
             desired_direction=_desired_currency_direction(pair, trade_direction, "USD"), now=evaluated_at,
@@ -350,15 +378,32 @@ async def evaluate_cross_market_context(
                 desired_direction=_desired_currency_direction(pair, trade_direction, "USD"),
                 now=evaluated_at,
             )
-    if "CAD" in pair and settings.forex_oil_context_enabled:
+    if "CAD" in pair and bool(
+        getattr(settings, "forex_oil_context_enabled", True)
+    ):
         oil = await _component(
             market_data, instrument="WTI", scan_timeframe=timeframe,
             desired_direction=_desired_currency_direction(pair, trade_direction, "CAD"), now=evaluated_at,
         )
     raw = sum(component.confidence_adjustment for component in (usd, oil) if component)
     total = max(
-        settings.forex_cross_market_max_negative_adjustment,
-        min(settings.forex_cross_market_max_positive_adjustment, raw),
+        float(
+            getattr(
+                settings,
+                "forex_cross_market_max_negative_adjustment",
+                DEFAULT_CONTEXT_MAX_NEGATIVE_ADJUSTMENT,
+            )
+        ),
+        min(
+            float(
+                getattr(
+                    settings,
+                    "forex_cross_market_max_positive_adjustment",
+                    DEFAULT_CONTEXT_MAX_POSITIVE_ADJUSTMENT,
+                )
+            ),
+            raw,
+        ),
     )
     aligned = [c.instrument for c in (usd, oil) if c and "ALIGN" in c.alignment_status]
     conflicted = [c.instrument for c in (usd, oil) if c and "CONFLICT" in c.alignment_status]

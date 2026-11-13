@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.utils.opportunities import SetupFamily
+
 
 Direction = Literal["Long", "Short"]
 TradeHistoryStatus = Literal[
@@ -63,6 +65,10 @@ PendingSetupStatus = Literal[
 GenLayerDecision = Literal["APPROVE", "REJECT", "WAIT", "REDUCE_SIZE"]
 GenLayerRiskLevel = Literal["Low", "Medium", "High"]
 GenLayerPaperExecutionStatus = Literal["NOT_EXECUTED", "PAPER_EXECUTED"]
+StrategyEdgeStatus = Literal["VALIDATED", "EXPERIMENTAL", "UNVALIDATED", "DISABLED"]
+StrategyDecision = Literal["TRADE", "SHADOW", "NO_TRADE", "WAIT_FOR_RETEST"]
+EntryQualityStatus = Literal["PASS", "WAIT_FOR_RETEST", "REJECTED", "UNKNOWN"]
+OutcomeTrackingMode = Literal["PRODUCTION", "SHADOW", "NONE"]
 
 
 class Candle(BaseModel):
@@ -146,6 +152,29 @@ class TradeIdea(BaseModel):
     entry_status: EntryStatus = "READY"
     downgraded_reasons: list[str] = Field(default_factory=list)
     signal_candle_time: datetime | None = None
+    setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    v2_decision_reason: str | None = None
+    regime_confidence: float | None = None
+    entry_quality_status: EntryQualityStatus | None = None
+    entry_quality_score: float | None = None
+    entry_quality_reason: str | None = None
+    outcome_tracking_mode: OutcomeTrackingMode | None = None
+    v2_evaluated_at: datetime | None = None
+    opportunity_key: str | None = None
+    retest_confirmed_at: datetime | None = None
+    executable_at: datetime | None = None
+    signal_candle_high: float | None = None
+    signal_candle_low: float | None = None
+    signal_candle_close: float | None = None
+    production_rule_accepted: bool | None = None
+    strict_trend_short_eligible: bool | None = None
+    strict_trigger_type: str | None = None
+    strict_confirmation_type: str | None = None
+    strict_trigger_candle_time: datetime | None = None
+    strict_trigger_candle_completed: bool | None = None
 
 
 class PendingSetup(BaseModel):
@@ -167,6 +196,12 @@ class PendingSetup(BaseModel):
     timeframe: str
     exchange: str
     created_at: datetime
+    setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    opportunity_key: str | None = None
+    signal_candle_time: datetime | None = None
 
 
 class GenLayerSignalPayload(BaseModel):
@@ -360,10 +395,35 @@ class TradeHistoryRecord(BaseModel):
     reversal_confirmations: str | None = None
     regime_explanation: str | None = None
     signal_candle_time: datetime | None = None
+    entry_status: EntryStatus | None = None
+    setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    v2_decision_reason: str | None = None
+    regime_confidence: float | None = None
+    entry_quality_status: EntryQualityStatus | None = None
+    entry_quality_score: float | None = None
+    entry_quality_reason: str | None = None
+    outcome_tracking_mode: OutcomeTrackingMode | None = None
+    v2_evaluated_at: datetime | None = None
+    opportunity_key: str | None = None
+    retest_confirmed_at: datetime | None = None
+    executable_at: datetime | None = None
+    production_rule_accepted: bool | None = None
+    strict_trend_short_eligible: bool | None = None
+    strict_trigger_type: str | None = None
+    strict_confirmation_type: str | None = None
+    strict_trigger_candle_time: datetime | None = None
+    strict_trigger_candle_completed: bool | None = None
 
 
 class TradeStats(BaseModel):
     total_ideas: int
+    detected_ideas: int = 0
+    pending_retest_count: int = 0
+    executable_ideas: int = 0
+    completed_opportunities: int = 0
     entry_triggered_count: int
     win_count: int
     loss_count: int

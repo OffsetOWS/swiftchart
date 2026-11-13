@@ -1,9 +1,10 @@
+import asyncio
 import sqlite3
 import json
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.models.schemas import PaperTrade, PaperTradeCreate
 from app.forex.storage import ensure_forex_schema
@@ -268,7 +269,24 @@ def evaluate_crypto_paper_trade(trade: dict, candles) -> dict:
     }
 
 
+HISTORY_REFRESH_TIMEOUT_SECONDS = 5.0
+
+
 async def _refresh_crypto_paper_trades(rows: list[dict]) -> list[dict]:
+    """Market-data failures must never hide records already saved in History."""
+    try:
+        return await asyncio.wait_for(
+            _refresh_crypto_paper_trade_outcomes(rows),
+            timeout=HISTORY_REFRESH_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        logger.warning("History outcome refresh timed out; returning %s saved trades", len(rows))
+    except Exception:
+        logger.exception("History outcome refresh failed; returning saved trades")
+    return rows
+
+
+async def _refresh_crypto_paper_trade_outcomes(rows: list[dict]) -> list[dict]:
     candle_cache = {}
     refreshed = []
     persistence_updates = []
@@ -372,7 +390,7 @@ async def create_paper_trade(payload: PaperTradeCreate):
 
 
 @router.get("/paper-trades", response_model=list[PaperTrade])
-async def list_paper_trades(user_id: str | None = Query(default=None)):
+async def list_paper_trades(background_tasks: BackgroundTasks, user_id: str | None = Query(default=None)):
     ensure_forex_schema()
     with get_connection() as connection:
         if user_id:
@@ -383,7 +401,7 @@ async def list_paper_trades(user_id: str | None = Query(default=None)):
         else:
             rows = connection.execute("SELECT * FROM paper_trades ORDER BY taken_at DESC, created_at DESC").fetchall()
         enriched = [_enrich_paper_trade(connection, row) for row in rows]
-    enriched = await _refresh_crypto_paper_trades(enriched)
+    background_tasks.add_task(_refresh_crypto_paper_trades, enriched)
     return [PaperTrade(**row) for row in enriched]
 
 

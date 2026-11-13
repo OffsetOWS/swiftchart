@@ -30,7 +30,14 @@ class ForexDataProvider(ABC):
     supports_cross_market_context: bool = False
 
     @abstractmethod
-    async def candles(self, pair: ForexPairConfig, timeframe: str, limit: int = 240) -> pd.DataFrame:
+    async def candles(
+        self,
+        pair: ForexPairConfig,
+        timeframe: str,
+        limit: int = 240,
+        *,
+        include_incomplete: bool = False,
+    ) -> pd.DataFrame:
         raise NotImplementedError
 
 
@@ -44,7 +51,14 @@ class TwelveDataForexProvider(ForexDataProvider):
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key if api_key is not None else get_settings().twelve_data_api_key
 
-    async def candles(self, pair: ForexPairConfig, timeframe: str, limit: int = 240) -> pd.DataFrame:
+    async def candles(
+        self,
+        pair: ForexPairConfig,
+        timeframe: str,
+        limit: int = 240,
+        *,
+        include_incomplete: bool = False,
+    ) -> pd.DataFrame:
         if not self.api_key:
             raise ForexProviderNotConfigured("Forex data provider is not configured.")
         now = datetime.now(UTC)
@@ -131,9 +145,13 @@ class FallbackForexProvider(ForexDataProvider):
         pair: ForexPairConfig,
         timeframe: str,
         limit: int = 240,
+        *,
+        include_incomplete: bool = False,
     ) -> pd.DataFrame:
         try:
-            result = await self.primary.candles(pair, timeframe, limit)
+            result = await self.primary.candles(
+                pair, timeframe, limit, include_incomplete=include_incomplete
+            )
             self.last_provider_name = self.primary.name
             return result
         except ForexProviderError as primary_error:
@@ -147,7 +165,9 @@ class FallbackForexProvider(ForexDataProvider):
                 self.fallback.name,
             )
             try:
-                result = await self.fallback.candles(pair, timeframe, limit)
+                result = await self.fallback.candles(
+                    pair, timeframe, limit, include_incomplete=include_incomplete
+                )
                 self.last_provider_name = self.fallback.name
                 return result
             except ForexProviderError as fallback_error:
