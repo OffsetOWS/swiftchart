@@ -10,6 +10,7 @@ from app.models.schemas import TradeIdea
 from app.services.alert_dedupe import mark_alert_sent as mark_dedupe_sent
 from app.services.alert_dedupe import should_skip_alert
 from app.services.trade_history import save_trade_ideas
+from app.services.tracking_delivery import find_saved_signal, record_delivery
 from bot.formatter import format_trade_alert
 from bot.scanner import scan_top_ideas
 from bot.storage import get_subscribers
@@ -132,23 +133,32 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
             rejection_reasons["entry_status rejected/exhausted"] += 1
             continue
         eligible_ideas.append(idea)
-    persisted_ids = save_trade_ideas(eligible_ideas)
+    saved = [(idea, save_trade_ideas([idea])) for idea in eligible_ideas]
+    persisted_ids = [trade_id for _, ids in saved for trade_id in ids]
     sent = 0
     skipped_by_dedup = 0
-    for idea in eligible_ideas:
+    for idea, ids in saved:
         if should_skip_alert(idea, namespace="telegram"):
             skipped_by_dedup += 1
             rejection_reasons["duplicate alert"] += 1
             continue
         message = format_trade_alert(idea)
+        trade_id = ids[0] if ids else find_saved_signal(idea)
+        if trade_id is None:
+            rejection_reasons["missing saved signal"] += 1
+            continue
+        delivered = 0
         for chat_id in subscribers:
             try:
-                await bot.send_message(chat_id=chat_id, text=message)
+                receipt = await bot.send_message(chat_id=chat_id, text=message)
+                record_delivery(trade_id, chat_id, receipt)
                 sent += 1
+                delivered += 1
             except Exception as exc:
                 rejection_reasons["send error"] += 1
                 logger.warning("Could not send alert to chat %s: %s", chat_id, exc)
-        mark_dedupe_sent(idea, namespace="telegram")
+        if delivered:
+            mark_dedupe_sent(idea, namespace="telegram")
 
     logger.info(
         (

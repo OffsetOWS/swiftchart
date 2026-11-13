@@ -70,9 +70,16 @@ def guard_crypto_transition(before, after):
 
 def first_crypto_delivery(connection, trade_id):
     tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    receipts = []
+    if "crypto_delivery_receipts" in tables:
+        receipts.extend(r[0] for r in connection.execute(
+            "SELECT sent_at FROM crypto_delivery_receipts WHERE trade_idea_id=?", (trade_id,)))
     if not {"telegram_dispatches", "telegram_dispatch_recipients"} <= tables:
-        return None  # Legacy local dedupe state is not a per-signal delivery receipt.
-    row = connection.execute("""SELECT MIN(r.sent_at) sent_at
+        from app.services.tracking_rules import timestamp
+        return min(receipts, key=timestamp) if receipts else None
+    rows = connection.execute("""SELECT r.sent_at
         FROM telegram_dispatches d JOIN telegram_dispatch_recipients r ON r.dispatch_id=d.id
-        WHERE d.trade_idea_id=? AND r.sent_at IS NOT NULL""",(trade_id,)).fetchone()
-    return row["sent_at"] if row else None
+        WHERE d.trade_idea_id=? AND r.sent_at IS NOT NULL""",(trade_id,)).fetchall()
+    receipts.extend(r["sent_at"] for r in rows)
+    from app.services.tracking_rules import timestamp
+    return min(receipts, key=timestamp) if receipts else None
