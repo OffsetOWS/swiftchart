@@ -66,13 +66,14 @@ def test_lifecycle_tracks_sl_after_tp1_without_break_even():
 def test_lifecycle_tracks_expiry_after_tp1():
     outcome = evaluate_trade(row(), candles((102.0, 100.0), (106.0, 99.0), (103.0, 99.0)), expiry_bars=3)
 
-    assert outcome["status"] == "EXPIRED_RUNNER"
-    assert outcome["result"] == "UNRESOLVED"
-    assert outcome["pnl_r_multiple"] is None
+    assert outcome["status"] == "TIME_EXIT"
+    assert outcome["result"] == "WIN"
+    assert outcome["pnl_r_multiple"] is not None
     assert outcome["tp1_hit_at"] is not None
     assert outcome["expired_at"] is not None
     assert outcome["candles_to_resolution"] == 3
     assert "TRACKING_HORIZON_ENDED_WITH_EXPOSURE" in outcome["lifecycle_events"]
+    assert "TIME_EXIT" in outcome["lifecycle_events"]
 
 
 def test_lifecycle_can_move_stop_to_break_even_after_tp1():

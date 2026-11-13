@@ -22,6 +22,7 @@ TradeHistoryStatus = Literal[
     "UNRESOLVED",
     "EXPIRED_POSITION",
     "EXPIRED_RUNNER",
+    "TIME_EXIT",
 ]
 TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN", "UNRESOLVED"]
 MarketCondition = Literal[

@@ -7,6 +7,7 @@ expressed in R (divided by initial stop distance). Funding is not modeled.
 from __future__ import annotations
 
 import math
+import json
 
 from app.services.tracking_rules import zone_bounds
 
@@ -22,6 +23,13 @@ _LEGS = {
 def cost_r(row: dict, bps_per_side: float) -> float | None:
     """Modeled cost in R for a resolved row, or None when it cannot be derived."""
     legs = _LEGS.get(str(row.get("status") or ""))
+    if row.get("status") == "TIME_EXIT":
+        events = row.get("lifecycle_events") or []
+        events = json.loads(events) if isinstance(events, str) else events
+        time_exit = next((e for e in reversed(events) if e.get("event") == "TIME_EXIT"), None)
+        if time_exit is None:
+            return None
+        legs = (("time_exit", 1.0),) if time_exit["quantity"] == 1 else (("tp1", 0.5), ("time_exit", 0.5))
     if legs is None or row.get("pnl_r_multiple") is None:
         return None
     try:
@@ -32,6 +40,8 @@ def cost_r(row: dict, bps_per_side: float) -> float | None:
             "tp1": float(row["take_profit_1"]),
             "tp2": float(row["take_profit_2"]),
         }
+        if row.get("status") == "TIME_EXIT":
+            prices["time_exit"] = float(time_exit["price"])
     except (KeyError, TypeError, ValueError):
         return None
     risk = abs(prices["entry"] - prices["stop"])

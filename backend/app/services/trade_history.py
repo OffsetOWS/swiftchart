@@ -363,15 +363,18 @@ def evaluate_trade(row: dict, candles: pd.DataFrame, *, expiry_bars: int | None 
                    move_stop_to_entry_after_tp1: bool | None = None,
                    first_delivery=None, as_of=None) -> dict:
     from app.services.tracking_rules import replay_crypto
+    from app.services.tracking_time_exit import apply_time_exit
     settings = get_settings()
-    return replay_crypto(
-        row, candles.to_dict("records"),
+    records = candles.to_dict("records")
+    outcome = replay_crypto(
+        row, records,
         first_delivery=first_delivery or row.get("first_delivered_at"),
         as_of=as_of or datetime.now(UTC),
         expiry_bars=expiry_bars or settings.trade_history_expiry_bars,
         move_to_be=settings.trade_history_move_stop_to_entry_after_tp1
         if move_stop_to_entry_after_tp1 is None else move_stop_to_entry_after_tp1,
     )
+    return apply_time_exit(row, outcome, records)
 
 
 def update_outcome(trade_id: int, outcome: dict) -> None:
@@ -549,6 +552,8 @@ async def _evaluate_rows(rows) -> dict:
                 delivered = first_crypto_delivery(connection, row["id"])
             outcome = evaluate_trade(row, candles, first_delivery=delivered)
             outcome = await _refine_with_intrabar(row, outcome, delivered, candle_cache)
+            from app.services.tracking_time_exit import apply_time_exit
+            outcome = apply_time_exit(row, outcome, candles.to_dict("records"))
         except Exception:
             errors += 1
             logger.exception("Trade lifecycle evaluation failed id=%s symbol=%s timeframe=%s exchange=%s", row.get("id"), row.get("symbol"), row.get("timeframe"), row.get("exchange"))
