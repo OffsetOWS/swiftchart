@@ -144,129 +144,13 @@ def _crypto_result_r(trade: dict, *, stopped_after_tp1: bool = False) -> float:
     return round((tp1_r * 0.5) - 0.5, 4)
 
 
-def evaluate_crypto_paper_trade(trade: dict, candles) -> dict:
-    """Evaluate a user-saved crypto trade from the moment it was taken."""
-    taken_at = _datetime(trade.get("taken_at") or trade.get("created_at"))
-    direction = _normalized_direction(trade.get("direction"))
-    is_long = direction == "BUY"
-    stop = float(trade["stop_loss"])
-    tp1 = float(trade["take_profit_1"])
-    tp2 = float(trade["take_profit_2"])
-    ordered = candles.copy().sort_values("timestamp") if candles is not None and not candles.empty else None
-    latest_price = None
-    latest_price_at = None
-    if ordered is not None and not ordered.empty:
-        latest = ordered.iloc[-1]
-        latest_price = float(latest["close"])
-        latest_price_at = _datetime(latest["timestamp"]).isoformat()
+def evaluate_crypto_paper_trade(trade: dict, candles, *, as_of=None) -> dict:
+    """User save time establishes availability, not a fill or a cash result."""
+    from app.services.trade_history import evaluate_trade
+    outcome = evaluate_trade(_paper_tracking_row(trade), candles, as_of=as_of)
+    outcome["tracking_evidence"]["availability_basis"] = "user_saved_paper_plan"
+    return _paper_outcome(trade, outcome, candles)
 
-    tp1_hit_at = None
-    tp2_hit_at = None
-    stopped_at = None
-    closed_at = None
-    lifecycle_status = "OPEN"
-    lifecycle_label = "Open"
-    lifecycle_result = "open"
-    paper_status = "open"
-    paper_result = "open"
-    result_r = None
-
-    if ordered is not None:
-        for _, candle in ordered.iterrows():
-            candle_at = _datetime(candle["timestamp"])
-            if candle_at <= taken_at:
-                continue
-            high = float(candle["high"])
-            low = float(candle["low"])
-            tp1_hit = high >= tp1 if is_long else low <= tp1
-            tp2_hit = high >= tp2 if is_long else low <= tp2
-            stop_hit = low <= stop if is_long else high >= stop
-
-            if tp1_hit_at is None:
-                if stop_hit and (tp1_hit or tp2_hit):
-                    lifecycle_status = "AMBIGUOUS"
-                    lifecycle_label = "TP/SL order unclear"
-                    lifecycle_result = "closed"
-                    paper_status = "closed"
-                    paper_result = "closed"
-                    closed_at = candle_at.isoformat()
-                    break
-                if tp2_hit:
-                    tp1_hit_at = candle_at.isoformat()
-                    tp2_hit_at = candle_at.isoformat()
-                    closed_at = candle_at.isoformat()
-                    lifecycle_status = "TP2_HIT"
-                    lifecycle_label = "TP2 Hit"
-                    lifecycle_result = "win"
-                    paper_status = "closed"
-                    paper_result = "win"
-                    result_r = _crypto_result_r(trade)
-                    break
-                if tp1_hit:
-                    tp1_hit_at = candle_at.isoformat()
-                    lifecycle_status = "TP1_HIT_TP2_RUNNING"
-                    lifecycle_label = "TP1 Hit · TP2 running"
-                    lifecycle_result = "open"
-                    paper_status = "tp_hit"
-                    continue
-                if stop_hit:
-                    stopped_at = candle_at.isoformat()
-                    closed_at = candle_at.isoformat()
-                    lifecycle_status = "STOPPED"
-                    lifecycle_label = "Stop Loss"
-                    lifecycle_result = "loss"
-                    paper_status = "sl_hit"
-                    paper_result = "loss"
-                    result_r = -1.0
-                    break
-            else:
-                if stop_hit and tp2_hit:
-                    lifecycle_status = "AMBIGUOUS"
-                    lifecycle_label = "TP2/SL order unclear"
-                    lifecycle_result = "closed"
-                    paper_status = "closed"
-                    paper_result = "closed"
-                    closed_at = candle_at.isoformat()
-                    break
-                if tp2_hit:
-                    tp2_hit_at = candle_at.isoformat()
-                    closed_at = candle_at.isoformat()
-                    lifecycle_status = "TP2_HIT"
-                    lifecycle_label = "TP2 Hit"
-                    lifecycle_result = "win"
-                    paper_status = "closed"
-                    paper_result = "win"
-                    result_r = _crypto_result_r(trade)
-                    break
-                if stop_hit:
-                    stopped_at = candle_at.isoformat()
-                    closed_at = candle_at.isoformat()
-                    lifecycle_status = "CLOSED_AFTER_TP1"
-                    lifecycle_label = "TP1 then Stop"
-                    result_r = _crypto_result_r(trade, stopped_after_tp1=True)
-                    lifecycle_result = "win" if result_r > 0 else "loss" if result_r < 0 else "closed"
-                    paper_status = "closed"
-                    paper_result = lifecycle_result
-                    break
-
-    return {
-        "status": paper_status,
-        "result": paper_result,
-        "pnl": result_r,
-        "lifecycle_status": lifecycle_status,
-        "lifecycle_label": lifecycle_label,
-        "lifecycle_result": lifecycle_result,
-        "result_r": result_r,
-        "latest_price": latest_price,
-        "latest_price_at": latest_price_at,
-        "activated_at": taken_at.isoformat(),
-        "tp1_hit_at": tp1_hit_at,
-        "tp2_hit_at": tp2_hit_at,
-        "stopped_at": stopped_at,
-        "closed_at": closed_at,
-        "entry_low": float(trade["entry_price"]),
-        "entry_high": float(trade["entry_price"]),
-    }
 
 
 HISTORY_REFRESH_TIMEOUT_SECONDS = 5.0
@@ -283,43 +167,50 @@ async def _refresh_crypto_paper_trades(rows: list[dict]) -> list[dict]:
         logger.warning("History outcome refresh timed out; returning %s saved trades", len(rows))
     except Exception:
         logger.exception("History outcome refresh failed; returning saved trades")
-    return rows
+    return [dict(row, pnl=None, result_r=None, net_r_multiple=None, cost_status="UNKNOWN",
+                 lifecycle_label="Costs unknown") if str(row.get("exchange", "")).lower() != "forex" else row for row in rows]
+
 
 
 async def _refresh_crypto_paper_trade_outcomes(rows: list[dict]) -> list[dict]:
-    candle_cache = {}
+    from app.services.trade_history import _refine_with_intrabar, _cost_outcome
+    from app.services.tracking_time_exit import apply_time_exit
+    from app.services.tracking_ledger import record_correction
+    candle_cache, funding_cache = {}, {}
     refreshed = []
-    persistence_updates = []
     for row in rows:
         if str(row.get("exchange") or "").lower() == "forex":
             refreshed.append(row)
             continue
-        key = (
-            str(row.get("exchange") or "hyperliquid").lower(),
-            str(row.get("symbol") or "").upper(),
-            str(row.get("timeframe") or "4h").lower(),
-        )
+        key = (str(row.get("exchange") or "hyperliquid").lower(), str(row.get("symbol") or "").upper(), str(row.get("timeframe") or "4h").lower())
         try:
             if key not in candle_cache:
                 candle_cache[key] = await get_candles_cached(*key, 1000)
-            outcome = evaluate_crypto_paper_trade(row, candle_cache[key])
+            candles = candle_cache[key]
+            model = _paper_tracking_row(row)
+            tracked = evaluate_crypto_paper_trade(row, candles)["_tracking_outcome"]
+            tracked = await _refine_with_intrabar(model, tracked, model["first_delivered_at"], candle_cache)
+            tracked = apply_time_exit(model, tracked, candles.to_dict("records"))
+            tracked = await _cost_outcome(model, tracked, funding_cache)
+            outcome = _paper_outcome(row, tracked, candles)
+            outcome.pop("_tracking_outcome")
+            enriched = {**row, **outcome}
+            with get_connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute("SELECT * FROM paper_trades WHERE id=?", (row["id"],)).fetchone()
+                if current:
+                    record_correction(connection, "PAPER", row["id"], dict(current), enriched,
+                                      tracked["tracking_evidence"], tracked["outcome_checked_at"])
+                    connection.execute("UPDATE paper_trades SET status=?, result=?, pnl=? WHERE id=?",
+                        (outcome["status"], outcome["result"], outcome["pnl"], row["id"]))
+            refreshed.append(enriched)
         except Exception:
             logger.exception("Crypto paper-trade refresh failed id=%s symbol=%s", row.get("id"), row.get("symbol"))
-            refreshed.append(row)
-            continue
-        enriched = {**row, **outcome}
-        refreshed.append(enriched)
-        if (row.get("status"), row.get("result"), row.get("pnl")) != (
-            outcome["status"], outcome["result"], outcome["pnl"],
-        ):
-            persistence_updates.append((outcome["status"], outcome["result"], outcome["pnl"], row["id"]))
-    if persistence_updates:
-        with get_connection() as connection:
-            connection.executemany(
-                "UPDATE paper_trades SET status = ?, result = ?, pnl = ? WHERE id = ?",
-                persistence_updates,
-            )
+            refreshed.append({**row, "pnl": None, "result_r": None, "net_r_multiple": None,
+                "result": "closed", "lifecycle_result": "closed", "lifecycle_status": "UNRESOLVED",
+                "lifecycle_label": "Tracking unavailable", "cost_status": "UNKNOWN"})
     return refreshed
+
 
 
 def _payload_user_id(payload: PaperTradeCreate) -> str:
@@ -459,3 +350,34 @@ async def update_paper_trade_status(trade_id: int, payload: dict, user_id: str |
     if row is None:
         raise HTTPException(status_code=404, detail="Paper trade not found.")
     return PaperTrade(**dict(row))
+
+
+def _paper_tracking_row(trade):
+    taken = _datetime(trade.get("taken_at") or trade["created_at"])
+    return dict(trade, created_at=taken, entry_zone_low=trade["entry_price"],
+        entry_zone_high=trade["entry_price"], direction="LONG" if _normalized_direction(trade["direction"]) == "BUY" else "SHORT",
+        timeframe=str(trade["timeframe"]).lower(), first_delivered_at=taken,
+        entry_triggered_at=None, lifecycle_events="[]")
+
+
+
+def _paper_outcome(trade, outcome, candles):
+    costs = outcome.get("tracking_evidence", {}).get("costs", {})
+    net = costs.get("net_r")
+    status = outcome["status"]
+    terminal = outcome.get("closed_at") is not None
+    uncertain = status in {"AMBIGUOUS", "UNRESOLVED", "EXPIRED_POSITION", "EXPIRED_RUNNER"}
+    result = "win" if net is not None and net > 0 else "loss" if net is not None and net < 0 else "closed" if terminal or uncertain or status == "EXPIRED" else "open"
+    latest = candles.sort_values("timestamp").iloc[-1] if candles is not None and not candles.empty else None
+    return dict(status="closed" if terminal or uncertain or status == "EXPIRED" else "tp_hit" if status == "TP1_HIT" else "open",
+        result=result, pnl=net, result_r=net, gross_r_multiple=outcome.get("pnl_r_multiple"),
+        fee_r_multiple=costs.get("fee_r"), funding_r_multiple=costs.get("funding_r"), net_r_multiple=net,
+        cost_basis=costs.get("funding_basis"), cost_status="MODELED" if net is not None else "UNKNOWN",
+        lifecycle_status="STOPPED" if status == "SL_HIT" else "TP1_HIT_TP2_RUNNING" if status == "TP1_HIT" else status,
+        lifecycle_label="Time exit (modeled)" if status == "TIME_EXIT" else "Unresolved" if uncertain else status.replace("_", " ").title(),
+        lifecycle_result=result, activated_at=outcome.get("entry_triggered_at"),
+        tp1_hit_at=outcome.get("tp1_hit_at"), tp2_hit_at=outcome.get("tp2_hit_at"),
+        stopped_at=outcome.get("sl_hit_at"), closed_at=outcome.get("closed_at"),
+        latest_price=float(latest["close"]) if latest is not None else None,
+        latest_price_at=_datetime(latest["timestamp"]).isoformat() if latest is not None else None,
+        entry_low=trade["entry_price"], entry_high=trade["entry_price"], _tracking_outcome=outcome)

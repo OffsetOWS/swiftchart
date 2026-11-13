@@ -57,22 +57,14 @@ def test_trade_alert_formatter_preserves_intentional_public_alert_fields():
     message = format_trade_alert(trade_idea)
 
     assert message == (
-        "SwiftChart Trade Alert: LDOUSDT — 4H\n\n"
-        "Signal: Potential Short\n"
-        "Strength: Strong Setup\n"
-        "Setup Score: 77/100\n"
-        "Grade: Valid Setup\n\n"
-        "Entry: 0.34201 — 0.34512\n"
-        "Stop Loss: 0.352031\n"
-        "TP1: 0.328189\n"
-        "TP2: 0.315749\n"
-        "R:R: 3.29\n"
-        "Confidence: 77%\n"
-        "Bias: Bearish trend\n"
-        "BTC Context: -\n\n"
-        "Reason:\n"
-        "Market structure favors trend-continuation pullbacks. Short idea has confirmed "
-        "liquidity sweep/reclaim with quality score 100."
+        "🔴 LDO/USDT · 4H · SHORT\n"
+        "Score: 77/100 (Valid) · HTF bearish aligned\n\n"
+        "Entry: 0.34201 – 0.34512\n"
+        "Stop: 0.352031 (-2.5%)\n"
+        "TP1: 0.328189 (+4.5%) · 1.8R\n"
+        "TP2: 0.315749 (+8.1%) · 3.3R\n\n"
+        "Why: Market structure favors trend-continuation pullbacks.\n"
+        "BTC: Unavailable"
     )
     removed_fields = [
         "Source:",
@@ -100,15 +92,15 @@ def test_trade_alert_warns_when_direction_conflicts_with_bias():
     trade_idea = idea("ARBUSDT", score=81)
     trade_idea.direction = "Long"
     trade_idea.regime_bias = "Short bias"
+    trade_idea.higher_timeframe_bias = "HTF_BEARISH"
 
     message = format_trade_alert(
         trade_idea,
         {"regime": "bearish", "score_4h": -55, "score_1d": -30, "score": -42.5},
     )
 
-    assert "Bias: Short bias" in message
-    assert "BTC Context: Bearish | score -42.5 | 4H -55 | 1D -30" in message
-    assert "⚠️ Direction conflicts with market bias." in message
+    assert "HTF bearish opposed" in message
+    assert "BTC: Bearish" in message
 
 
 def test_manual_telegram_market_discovery_remains_available_for_diagnostics(monkeypatch):
