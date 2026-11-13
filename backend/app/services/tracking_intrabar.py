@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 import json
 import math
 
-from app.services.tracking_rules import replay_crypto, timeframe_duration, timestamp
+from app.services.tracking_rules import replay_crypto, timeframe_duration, timestamp, completed
 
 INTRABAR_TIMEFRAME = "15m"
 MAX_INTRABAR_CANDLES = 5000
@@ -38,7 +38,7 @@ def intrabar_candles_needed(row: dict, as_of: datetime) -> int | None:
 
 
 def refine_ambiguous(row: dict, outcome: dict, fine_candles: list[dict], *, first_delivery, as_of,
-                     expiry_bars: int = 12, move_to_be: bool = False) -> dict:
+                     expiry_bars: int = 12, move_to_be: bool = False, coarse_candles=None) -> dict:
     if outcome.get("status") != "AMBIGUOUS":
         return outcome
     coarse = timeframe_duration(row["timeframe"])
@@ -55,6 +55,24 @@ def refine_ambiguous(row: dict, outcome: dict, fine_candles: list[dict], *, firs
     evidence = refined["tracking_evidence"]
     if refined["status"] not in _ACCEPTED or not evidence.get("validated_entry_at"):
         return outcome
+    # Finer data can resolve ordering only if it reproduces the observed parent
+    # candles. A different/malformed feed must not replace an ambiguous result.
+    if not coarse_candles:
+        return outcome
+    end = timestamp(refined.get("closed_at")) or min(timestamp(as_of), timestamp(evidence["horizon_end"]))
+    parents = {timestamp(b["timestamp"]): b for b in coarse_candles}
+    children = {timestamp(b["timestamp"]): b for b in fine_candles}
+    opened = start
+    while opened < end:
+        parent = parents.get(opened)
+        chunk = [children.get(opened + fine*i) for i in range(ratio)]
+        if not parent or opened + coarse > timestamp(as_of) or any(not b or not completed(b.get("complete", True)) for b in chunk):
+            return outcome
+        aggregate = dict(open=chunk[0]["open"], close=chunk[-1]["close"],
+                         high=max(float(b["high"]) for b in chunk), low=min(float(b["low"]) for b in chunk))
+        if any(not math.isclose(float(parent[k]), float(v), rel_tol=1e-8, abs_tol=1e-10) for k,v in aggregate.items()):
+            return outcome
+        opened += coarse
 
     def bar_open(value):
         return start + coarse * ((timestamp(value) - start) // coarse)
@@ -71,6 +89,7 @@ def refine_ambiguous(row: dict, outcome: dict, fine_candles: list[dict], *, firs
         events=[dict(event) for event in evidence["events"]],
         replaced_status="AMBIGUOUS",
         replaced_flags=list(outcome.get("tracking_evidence", {}).get("flags", [])),
+        parent_candle_hash=outcome.get("tracking_evidence", {}).get("candle_hash"),
     )
     evidence["flags"].append("INTRABAR_15M_REFINED")
     evidence["validated_entry_at"] = bar_open(evidence["validated_entry_at"]).isoformat()

@@ -39,7 +39,8 @@ def coarse(fine_bars: list[dict]) -> list[dict]:
 def run(fine_bars):
     ambiguous = replay_crypto(row(), coarse(fine_bars), first_delivery=row()["first_delivered_at"], as_of=AS_OF)
     assert ambiguous["status"] == "AMBIGUOUS"
-    return ambiguous, refine_ambiguous(row(), ambiguous, fine_bars, first_delivery=row()["first_delivered_at"], as_of=AS_OF)
+    return ambiguous, refine_ambiguous(row(), ambiguous, fine_bars, first_delivery=row()["first_delivered_at"], as_of=AS_OF,
+                                       coarse_candles=coarse(fine_bars))
 
 
 def test_entry_then_stop_inside_one_candle_becomes_a_loss():
@@ -65,7 +66,8 @@ def test_order_unknown_inside_one_15m_candle_stays_ambiguous():
 def test_missing_15m_candles_keep_the_original_outcome():
     bars = fine([(101.0, 100.0), (99.0, 94.0)], filler=(94.5, 94.0))
     ambiguous = replay_crypto(row(), coarse(bars), first_delivery=row()["first_delivered_at"], as_of=AS_OF)
-    refined = refine_ambiguous(row(), ambiguous, bars[1:], first_delivery=row()["first_delivered_at"], as_of=AS_OF)
+    refined = refine_ambiguous(row(), ambiguous, bars[1:], first_delivery=row()["first_delivered_at"], as_of=AS_OF,
+                               coarse_candles=coarse(bars))
     assert refined is ambiguous
 
 
@@ -84,3 +86,12 @@ def test_candle_budget():
     assert intrabar_candles_needed(row(), AS_OF) == 280
     assert intrabar_candles_needed(dict(row(), timeframe="15m"), AS_OF) is None
     assert intrabar_candles_needed(row(), AS_OF + timedelta(days=90)) is None
+
+
+def test_fine_candles_must_reproduce_parent_ohlc():
+    data = fine([(101,100), (99,94)], filler=(94.5,94))
+    parent = coarse(data)
+    ambiguous = replay_crypto(row(), parent, first_delivery=row()['first_delivered_at'], as_of=AS_OF)
+    parent[0]['close'] += .01
+    assert refine_ambiguous(row(), ambiguous, data, first_delivery=row()['first_delivered_at'], as_of=AS_OF,
+                            coarse_candles=parent) is ambiguous

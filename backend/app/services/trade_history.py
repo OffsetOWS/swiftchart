@@ -558,6 +558,7 @@ async def _refine_with_intrabar(row: dict, outcome: dict, delivered, candle_cach
             first_delivery=delivered or row.get("first_delivered_at"), as_of=as_of,
             expiry_bars=settings.trade_history_expiry_bars,
             move_to_be=settings.trade_history_move_stop_to_entry_after_tp1,
+            coarse_candles=candle_cache[(row["exchange"], row["symbol"], row["timeframe"])].to_dict("records"),
         )
     except Exception:
         logger.exception("Intrabar refinement failed id=%s symbol=%s", row.get("id"), row.get("symbol"))
