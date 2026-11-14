@@ -163,3 +163,20 @@ def test_stats_releases_reader_before_enrichment_and_keeps_snapshot(monkeypatch,
     monkeypatch.setattr(history, '_public_tracking_rows', enrich_after_writer)
     result = history.stats()
     assert result['gross_r_total'] == 1
+
+
+def test_shipped_soak_validator_imports_without_local_packing_modules(tmp_path):
+    import os
+    from pathlib import Path
+    import shutil
+    import subprocess
+    import sys
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    shutil.copyfile(Path(gate.__file__), scripts / 'crypto_soak_gate.py')
+    # The backend payload contains the validator, not the local archive builder.
+    result = subprocess.run([sys.executable, '-c',
+                             'from scripts.crypto_soak_gate import validate_summary, fingerprint; assert callable(validate_summary); assert fingerprint({})'],
+                            cwd=tmp_path, env={**os.environ, 'PYTHONPATH': str(tmp_path), 'PYTHONDONTWRITEBYTECODE': '1'},
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

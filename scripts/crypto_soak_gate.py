@@ -4,10 +4,11 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
-from scripts.stage1_pack import included as legacy_included
 
 
 def included(name):
+    # Packing policy is local-only; the shipped validator needs only stdlib.
+    from scripts.stage1_pack import included as legacy_included
     return (legacy_included(name) and name != 'docs/stage1_vps_baseline.json') or name in {
         'scripts/final_phase_admin.py', 'scripts/final_phase_audit.py', 'scripts/crypto_soak_gate.py'}
 
