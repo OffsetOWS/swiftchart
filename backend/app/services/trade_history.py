@@ -835,6 +835,9 @@ def query_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str
     where, values = _history_where(filters)
     offset = (page - 1) * limit
     with get_connection() as connection:
+        # Worker writes can commit between SELECTs; projection and evidence must
+        # come from one read snapshot, just like the internal statistics API.
+        connection.execute("BEGIN")
         total = int(connection.execute(f"SELECT COUNT(*) AS count FROM trade_ideas {where}", values).fetchone()["count"])
         rows = connection.execute(
             f"SELECT * FROM trade_ideas {where} ORDER BY created_at {direction}, id {direction} LIMIT ? OFFSET ?",
@@ -860,6 +863,7 @@ def list_trade_history(filters: dict, page: int = 1, limit: int = 20, sort: str 
 
 def get_trade_history(trade_id: int) -> dict | None:
     with get_connection() as connection:
+        connection.execute("BEGIN")
         row = connection.execute("SELECT * FROM trade_ideas WHERE id = ?", (trade_id,)).fetchone()
         row = _public_tracking_rows(connection, [row])[0] if row else None
     return row_to_dict(row) if row else None

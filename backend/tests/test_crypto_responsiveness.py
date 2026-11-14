@@ -105,3 +105,30 @@ def test_completed_soak_is_bound_to_candidate_and_runtime_sources(tmp_path):
     manifest = tmp_path/'release-manifest.json'
     manifest.write_text(json.dumps({'files': {}}))
     with pytest.raises(ValueError, match='soak'):admin.require_soak(tmp_path, 'candidate')
+
+
+@pytest.mark.parametrize('detail', [False, True])
+def test_history_projection_and_evidence_share_snapshot_during_worker_commit(monkeypatch, tmp_path, detail):
+    from app.services import trade_history as history
+    from app.services.tracking_ledger import record_correction
+    from app.utils import database
+    from test_canonical_telegram_dispatch import configure_db, idea
+    configure_db(monkeypatch, tmp_path)
+    identifier = history.save_trade_ideas([idea()])[0]
+    with database.get_connection() as c:
+        c.execute('PRAGMA journal_mode=WAL')
+        c.execute('UPDATE trade_ideas SET pnl_r_multiple=1 WHERE id=?', (identifier,))
+        record_correction(c, 'CRYPTO', identifier, {}, {'pnl_r_multiple': 1},
+                          {'category': 'resolved', 'booked_r': 1}, datetime.now(UTC).isoformat())
+    original = history._public_tracking_rows
+    def commit_between_projection_and_evidence(connection, rows):
+        with database.get_connection() as writer:
+            writer.execute('UPDATE trade_ideas SET pnl_r_multiple=2 WHERE id=?', (identifier,))
+            record_correction(writer, 'CRYPTO', identifier, {}, {'pnl_r_multiple': 2},
+                              {'category': 'resolved', 'booked_r': 2}, datetime.now(UTC).isoformat())
+        return original(connection, rows)
+    monkeypatch.setattr(history, '_public_tracking_rows', commit_between_projection_and_evidence)
+    row = history.get_trade_history(identifier) if detail else history.query_trade_history({})['records'][0]
+    assert row['gross_r_multiple'] == row['tracking_evidence']['booked_r'] == 1
+    with database.get_connection() as c:
+        assert c.execute('SELECT pnl_r_multiple FROM trade_ideas WHERE id=?', (identifier,)).fetchone()[0] == 2
