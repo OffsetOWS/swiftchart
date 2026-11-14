@@ -5,6 +5,7 @@ from telegram.ext import ContextTypes
 
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.models.schemas import RiskSettings
+from app.services.telegram_dispatch import clear_crypto_recipient_block
 from app.services.market_data import get_candles_cached
 from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas
 from app.strategy.trade_ideas import analyze_dataframe
@@ -71,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = (
         "Welcome to SwiftChart Bot.\n\n"
         "SwiftChart helps traders detect support, resistance, liquidity sweeps, range conditions, "
-        "and high-probability crypto trade ideas.\n\n"
+        "and structured crypto trade ideas.\n\n"
         "Choose an option below or type /help."
     )
     await update.effective_message.reply_text(
@@ -120,10 +121,11 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     add_subscriber(chat_id)
+    clear_crypto_recipient_block(chat_id)
     await update.effective_message.reply_text(
         "Alerts enabled.\n\n"
         "SwiftChart will notify this chat when a new valid setup appears. "
-        "Only READY 1H, 2H, 3H, 4H, and 6H setups scoring 75/100 or higher are eligible.\n\n"
+        "Only confirmed setups meeting the liquidity and signal limits are eligible.\n\n"
         "Use /unsubscribe to stop alerts.\n\n"
         "Not financial advice. Manage your risk."
     )

@@ -303,6 +303,13 @@ def _ensure_telegram_dispatch_schema(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(telegram_dispatch_recipients)")}
+    if "next_attempt_at" not in columns:
+        connection.execute("ALTER TABLE telegram_dispatch_recipients ADD COLUMN next_attempt_at TEXT")
+    connection.execute("""CREATE TABLE IF NOT EXISTS telegram_dispatch_recipient_blocks (
+        chat_id TEXT PRIMARY KEY, reason_code TEXT NOT NULL, blocked_at TEXT NOT NULL,
+        cleared_at TEXT)""")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_telegram_recipient_chat_status ON telegram_dispatch_recipients(chat_id,status)")
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_telegram_dispatch_status ON telegram_dispatches(status, eligible_at)"
     )

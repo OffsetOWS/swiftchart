@@ -1,8 +1,12 @@
 import asyncio
 import logging
 import os
+from time import monotonic
 
 from telegram import Bot
+from telegram.error import Forbidden
+
+from app.config import get_settings
 
 from app.models.schemas import TradeIdea
 from app.services.alert_dedupe import mark_alert_sent as mark_dedupe_sent
@@ -10,10 +14,13 @@ from app.services.alert_dedupe import should_skip_canonical_alert
 from app.services.execution_signals import execution_signal_id
 from app.services.telegram_dispatch import (
     DISPATCH_SUCCEEDED,
+    DISPATCH_PARTIAL_FINAL,
     claim_telegram_dispatches,
     mark_telegram_recipient_failure,
     mark_telegram_recipient_success,
     suppress_telegram_dispatch_for_dedupe,
+    permanent_telegram_failure_reason,
+    recipient_is_claimed,
 )
 from bot.formatter import format_trade_alert
 from bot.scanner import _btc_context
@@ -42,9 +49,8 @@ def _crypto_subscribers() -> set[int]:
         return {int(chat_id) for chat_id in get_subscribers()}
 
 
-async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
-    forex_dispatch = await dispatch_pending_forex(bot)
-    forex_limit_dispatch = await dispatch_pending_forex_limits(bot)
+async def dispatch_crypto_outbox(bot: Bot) -> dict[str, int | str]:
+    """Drain the existing canonical outbox; never scan markets or poll Forex."""
     subscribers = _crypto_subscribers()
     candidates = claim_telegram_dispatches(subscribers)
     btc_contexts = {}
@@ -97,6 +103,8 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         )
         final_status = None
         for chat_id in candidate.recipient_chat_ids:
+            if not recipient_is_claimed(candidate.dispatch_id, chat_id):
+                continue
             try:
                 response = await bot.send_message(
                     chat_id=chat_id,
@@ -112,13 +120,17 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
                 )
             except Exception as exc:
                 failed += 1
+                reason = "FORBIDDEN" if isinstance(exc, Forbidden) else permanent_telegram_failure_reason(f"{type(exc).__name__}: {exc}")
+                retry_after = getattr(exc, "retry_after", 0)
+                if hasattr(retry_after, "total_seconds"):
+                    retry_after = retry_after.total_seconds()
                 final_status = mark_telegram_recipient_failure(
-                    candidate.dispatch_id,
-                    chat_id,
-                    f"{type(exc).__name__}: {exc}",
+                    candidate.dispatch_id, chat_id, f"{type(exc).__name__}: delivery failed",
+                    permanent_reason=reason, retry_after_seconds=float(retry_after or 0),
                 )
-                logger.warning("Could not send alert to chat %s: %s", chat_id, exc)
-        if final_status == DISPATCH_SUCCEEDED:
+                logger.warning("Canonical crypto delivery failed dispatch_id=%s error_type=%s permanent=%s",
+                               candidate.dispatch_id, type(exc).__name__, bool(reason))
+        if final_status in (DISPATCH_SUCCEEDED, DISPATCH_PARTIAL_FINAL):
             mark_dedupe_sent(idea, namespace="telegram")
 
     logger.info(
@@ -144,21 +156,28 @@ async def run_alert_scan(bot: Bot) -> dict[str, int | str]:
         "alerts_sent": sent,
         "failed": failed,
         "skipped_by_dedup": skipped_by_dedup,
-        "forex_dispatch": forex_dispatch,
-        "forex_limit_dispatch": forex_limit_dispatch,
     }
 
 
+async def run_alert_scan(bot: Bot) -> dict:
+    """Keep the existing manual combined entry point; scheduled crypto is separate."""
+    forex_dispatch = await dispatch_pending_forex(bot)
+    forex_limit_dispatch = await dispatch_pending_forex_limits(bot)
+    result = await dispatch_crypto_outbox(bot)
+    return {**result,"forex_dispatch":forex_dispatch,"forex_limit_dispatch":forex_limit_dispatch}
+
+
 async def alert_loop(bot: Bot) -> None:
-    interval = int(os.getenv("ALERT_SCAN_INTERVAL_SECONDS", "1800"))
+    interval = get_settings().crypto_telegram_dispatch_interval_seconds
     await asyncio.sleep(int(os.getenv("ALERT_STARTUP_DELAY_SECONDS", "20")))
     while True:
+        started = monotonic()
         try:
-            result = await run_alert_scan(bot)
+            result = await dispatch_crypto_outbox(bot)
             logger.info("Canonical Telegram dispatch poll complete: %s", result)
         except Exception:
             logger.exception("Canonical Telegram dispatch poll failed")
-        await asyncio.sleep(max(300, interval))
+        await asyncio.sleep(max(0.1, interval-(monotonic()-started)))
 
 
 async def forex_alert_loop(bot: Bot) -> None:

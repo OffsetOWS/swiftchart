@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     default_min_rr: float = Field(default=2.0, ge=0.1)
     default_max_open_trades: int = Field(default=3, ge=1)
     min_perp_volume_24h: float = Field(default=100_000, ge=0)
+    crypto_telegram_dispatch_interval_seconds: int = Field(default=30, ge=5, le=120)
     hyperliquid_candle_fetch_attempts: int = Field(default=3, ge=1, le=5)
     hyperliquid_candle_fetch_backoff_seconds: float = Field(default=0.7, ge=0)
     hyperliquid_candle_request_delay_seconds: float = Field(default=0.8, ge=0)

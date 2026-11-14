@@ -15,12 +15,15 @@ DISPATCH_SUCCEEDED = "SUCCEEDED"
 DISPATCH_PARTIAL = "PARTIAL"
 DISPATCH_FAILED_RETRYABLE = "FAILED_RETRYABLE"
 DISPATCH_SUPPRESSED_DEDUPE = "SUPPRESSED_DEDUPE"
+DISPATCH_PARTIAL_FINAL = "PARTIAL_FINAL"
+DISPATCH_FAILED_PERMANENT = "FAILED_PERMANENT"
 
 RECIPIENT_PENDING = "PENDING"
 RECIPIENT_ATTEMPTED = "ATTEMPTED"
 RECIPIENT_SENT = "SENT"
 RECIPIENT_FAILED_RETRYABLE = "FAILED_RETRYABLE"
 RECIPIENT_SUPPRESSED_DEDUPE = "SUPPRESSED_DEDUPE"
+RECIPIENT_FAILED_PERMANENT = "FAILED_PERMANENT"
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,9 @@ def claim_telegram_dispatches(
         ).fetchone()
         if cutoff is None:
             raise RuntimeError("Telegram canonical dispatch cutoff is not initialized")
+        blocked = {row["chat_id"] for row in connection.execute(
+            "SELECT chat_id FROM telegram_dispatch_recipient_blocks WHERE cleared_at IS NULL")}
+        subscribers = tuple(chat_id for chat_id in subscribers if str(chat_id) not in blocked)
         rows = connection.execute(
             """
             SELECT t.*
@@ -158,11 +164,16 @@ def claim_telegram_dispatches(
               AND t.status IN ('PENDING', 'OPEN')
               AND datetime(COALESCE(t.executable_at, t.created_at)) >= datetime(?)
               AND (t.expires_at IS NULL OR datetime(t.expires_at) >= datetime(?))
-              AND (d.id IS NULL OR d.status NOT IN ('SUCCEEDED', 'SUPPRESSED_DEDUPE'))
+              AND (d.id IS NULL OR d.status NOT IN ('SUCCEEDED', 'SUPPRESSED_DEDUPE', 'PARTIAL_FINAL', 'FAILED_PERMANENT'))
+              AND ((? AND (d.id IS NULL OR d.recipients_initialized_at IS NULL)) OR EXISTS (
+                  SELECT 1 FROM telegram_dispatch_recipients r WHERE r.dispatch_id=d.id
+                    AND (r.status='PENDING'
+                         OR (r.status='FAILED_RETRYABLE' AND (r.next_attempt_at IS NULL OR datetime(r.next_attempt_at)<=datetime(?)))
+                         OR (r.status='ATTEMPTED' AND datetime(r.last_attempt_at)<=datetime(?)))))
             ORDER BY datetime(COALESCE(t.executable_at, t.created_at)) ASC, t.id ASC
             LIMIT ?
             """,
-            (cutoff["canonical_started_at"], now_iso, min(250, max(1, int(limit)))),
+            (cutoff["canonical_started_at"], now_iso, bool(subscribers), now_iso, stale_attempt, min(250, max(1, int(limit)))),
         ).fetchall()
 
         for raw_row in rows:
@@ -213,12 +224,12 @@ def claim_telegram_dispatches(
                 FROM telegram_dispatch_recipients
                 WHERE dispatch_id = ?
                   AND (
-                    status IN ('PENDING', 'FAILED_RETRYABLE')
+                    (status='PENDING' OR (status='FAILED_RETRYABLE' AND (next_attempt_at IS NULL OR datetime(next_attempt_at)<=datetime(?))))
                     OR (status = 'ATTEMPTED' AND datetime(last_attempt_at) <= datetime(?))
                   )
                 ORDER BY id
                 """,
-                (dispatch["id"], stale_attempt),
+                (dispatch["id"], now_iso, stale_attempt),
             ).fetchall()
             claimed_chat_ids: list[int] = []
             for recipient in recipients:
@@ -229,11 +240,11 @@ def claim_telegram_dispatches(
                         last_attempt_at = ?, updated_at = ?
                     WHERE id = ?
                       AND (
-                        status IN ('PENDING', 'FAILED_RETRYABLE')
+                        (status='PENDING' OR (status='FAILED_RETRYABLE' AND (next_attempt_at IS NULL OR datetime(next_attempt_at)<=datetime(?))))
                         OR (status = 'ATTEMPTED' AND datetime(last_attempt_at) <= datetime(?))
                       )
                     """,
-                    (now_iso, now_iso, recipient["id"], stale_attempt),
+                    (now_iso, now_iso, recipient["id"], now_iso, stale_attempt),
                 )
                 if cursor.rowcount:
                     claimed_chat_ids.append(int(recipient["chat_id"]))
@@ -278,8 +289,11 @@ def _refresh_dispatch(connection, dispatch_id: int, timestamp: str) -> str:
     }
     total = sum(counts.values())
     sent = counts.get(RECIPIENT_SENT, 0)
+    final = sent + counts.get(RECIPIENT_FAILED_PERMANENT, 0) + counts.get(RECIPIENT_SUPPRESSED_DEDUPE, 0)
     if total and sent == total:
         status = DISPATCH_SUCCEEDED
+    elif total and final == total:
+        status = DISPATCH_PARTIAL_FINAL if sent else DISPATCH_FAILED_PERMANENT
     elif sent:
         status = DISPATCH_PARTIAL
     elif counts.get(RECIPIENT_FAILED_RETRYABLE, 0):
@@ -291,7 +305,7 @@ def _refresh_dispatch(connection, dispatch_id: int, timestamp: str) -> str:
     connection.execute(
         """
         UPDATE telegram_dispatches
-        SET status = ?, dispatched_at = CASE WHEN ? = 'SUCCEEDED' THEN COALESCE(dispatched_at, ?) ELSE dispatched_at END,
+        SET status = ?, dispatched_at = CASE WHEN ? IN ('SUCCEEDED','PARTIAL_FINAL') THEN COALESCE(dispatched_at, ?) ELSE dispatched_at END,
             updated_at = ?
         WHERE id = ?
         """,
@@ -314,7 +328,7 @@ def mark_telegram_recipient_success(
             UPDATE telegram_dispatch_recipients
             SET status = 'SENT', sent_at = COALESCE(sent_at, ?),
                 telegram_message_id = COALESCE(telegram_message_id, ?),
-                last_error = NULL, updated_at = ?
+                last_error = NULL, next_attempt_at = NULL, updated_at = ?
             WHERE dispatch_id = ? AND chat_id = ?
             """,
             (timestamp, telegram_message_id, timestamp, dispatch_id, str(int(chat_id))),
@@ -322,24 +336,83 @@ def mark_telegram_recipient_success(
         return _refresh_dispatch(connection, dispatch_id, timestamp)
 
 
+def permanent_telegram_failure_reason(error: str) -> str | None:
+    text = str(error).lower()
+    if "bot was blocked" in text or "blocked by the user" in text:
+        return "BLOCKED"
+    if "chat not found" in text:
+        return "CHAT_NOT_FOUND"
+    if "user is deactivated" in text:
+        return "DEACTIVATED"
+    if text.startswith("forbidden:") or "bot was kicked" in text:
+        return "FORBIDDEN"
+    return None
+
+
+def _quarantine_recipient(connection, chat_id: str, reason: str, timestamp: str) -> int:
+    dispatch_ids = [row[0] for row in connection.execute("""SELECT DISTINCT dispatch_id
+        FROM telegram_dispatch_recipients WHERE chat_id=? AND status NOT IN ('SENT','SUPPRESSED_DEDUPE','FAILED_PERMANENT')""", (chat_id,))]
+    connection.execute("""INSERT INTO telegram_dispatch_recipient_blocks(chat_id,reason_code,blocked_at)
+        VALUES (?,?,?) ON CONFLICT(chat_id) DO UPDATE SET
+        reason_code=excluded.reason_code,blocked_at=excluded.blocked_at,cleared_at=NULL""", (chat_id,reason,timestamp))
+    cursor = connection.execute("""UPDATE telegram_dispatch_recipients
+        SET status='FAILED_PERMANENT', next_attempt_at=NULL,
+            last_error=COALESCE(last_error,?),updated_at=?
+        WHERE chat_id=? AND status NOT IN ('SENT','SUPPRESSED_DEDUPE','FAILED_PERMANENT')""", (reason,timestamp,chat_id))
+    for dispatch_id in dispatch_ids:
+        _refresh_dispatch(connection,dispatch_id,timestamp)
+    return cursor.rowcount
+
+
 def mark_telegram_recipient_failure(
-    dispatch_id: int,
-    chat_id: int,
-    error: str,
-    *,
-    now: datetime | None = None,
+    dispatch_id: int, chat_id: int, error: str, *, now: datetime | None = None,
+    permanent_reason: str | None = None, retry_after_seconds: float = 0,
 ) -> str:
+    current = _now(now)
+    timestamp = _iso(current)
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        recipient = connection.execute("SELECT status FROM telegram_dispatch_recipients WHERE dispatch_id=? AND chat_id=?",
+                                       (dispatch_id,str(int(chat_id)))).fetchone()
+        if recipient is None or recipient["status"] == RECIPIENT_SENT:
+            return _refresh_dispatch(connection,dispatch_id,timestamp)
+        reason = permanent_reason or permanent_telegram_failure_reason(error)
+        if reason:
+            _quarantine_recipient(connection,str(int(chat_id)),reason,timestamp)
+        else:
+            next_attempt = _iso(current+timedelta(seconds=max(0,retry_after_seconds)))
+            connection.execute("""UPDATE telegram_dispatch_recipients
+                SET status='FAILED_RETRYABLE', last_error=?, next_attempt_at=?, updated_at=?
+                WHERE dispatch_id=? AND chat_id=? AND status != 'SENT'""",
+                (str(error)[:500],next_attempt,timestamp,dispatch_id,str(int(chat_id))))
+        return _refresh_dispatch(connection,dispatch_id,timestamp)
+
+
+def recipient_is_claimed(dispatch_id: int, chat_id: int) -> bool:
+    with get_connection() as connection:
+        return connection.execute("""SELECT 1 FROM telegram_dispatch_recipients r
+            WHERE r.dispatch_id=? AND r.chat_id=? AND r.status='ATTEMPTED'
+            AND NOT EXISTS (SELECT 1 FROM telegram_dispatch_recipient_blocks b
+                            WHERE b.chat_id=r.chat_id AND b.cleared_at IS NULL)""", (dispatch_id,str(int(chat_id)))).fetchone() is not None
+
+
+def clear_crypto_recipient_block(chat_id: int, *, now: datetime | None = None) -> None:
+    """Explicit re-subscription affects future dispatches; preserve old receipts."""
+    with get_connection() as connection:
+        connection.execute("UPDATE telegram_dispatch_recipient_blocks SET cleared_at=? WHERE chat_id=?", (_iso(now),str(int(chat_id))))
+
+
+def migrate_permanent_telegram_failures(*, now: datetime | None = None) -> dict:
+    """Run after the approved backup: close known permanent crypto failures only."""
     timestamp = _iso(now)
     with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE telegram_dispatch_recipients
-            SET status = 'FAILED_RETRYABLE', last_error = ?, updated_at = ?
-            WHERE dispatch_id = ? AND chat_id = ? AND status != 'SENT'
-            """,
-            (str(error)[:500], timestamp, dispatch_id, str(int(chat_id))),
-        )
-        return _refresh_dispatch(connection, dispatch_id, timestamp)
+        connection.execute("BEGIN IMMEDIATE")
+        rows = connection.execute("""SELECT chat_id,last_error FROM telegram_dispatch_recipients
+            WHERE status NOT IN ('SENT','SUPPRESSED_DEDUPE','FAILED_PERMANENT') AND last_error IS NOT NULL""").fetchall()
+        blocks = {row["chat_id"]:reason for row in rows
+                  if (reason := permanent_telegram_failure_reason(row["last_error"]))}
+        affected = sum(_quarantine_recipient(connection,chat_id,reason,timestamp) for chat_id,reason in blocks.items())
+    return {"blocked_crypto_recipients":len(blocks),"permanent_failure_rows":affected}
 
 
 def suppress_telegram_dispatch_for_dedupe(
