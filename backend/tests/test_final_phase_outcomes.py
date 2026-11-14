@@ -324,3 +324,26 @@ def test_published_fill_keeps_existing_protected_history_save_semantics(
         ).fetchone()
         assert tuple(stored) == ("TP1_HIT", 100.0)
         assert c.execute("SELECT COUNT(*) FROM trade_ideas").fetchone()[0] == 1
+
+
+def test_factual_canonical_delivery_does_not_wait_for_unused_market_context(
+    monkeypatch, tmp_path
+):
+    from bot import alerts
+    from unittest.mock import AsyncMock
+
+    configure_db(monkeypatch, tmp_path)
+    save_trade_ideas([idea()])
+    context = AsyncMock(
+        side_effect=AssertionError("Delivery must not fetch market context")
+    )
+    monkeypatch.setattr(alerts, "_btc_context", context)
+
+    async def send_message(**kw):
+        return SimpleNamespace(message_id=71, date=datetime.now(UTC))
+
+    result = asyncio.run(
+        alerts.dispatch_crypto_outbox(SimpleNamespace(send_message=send_message))
+    )
+    assert result["sent"] == 1
+    context.assert_not_awaited()

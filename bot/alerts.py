@@ -53,7 +53,6 @@ async def dispatch_crypto_outbox(bot: Bot) -> dict[str, int | str]:
     """Drain the existing canonical outbox; never scan markets or poll Forex."""
     subscribers = _crypto_subscribers()
     candidates = claim_telegram_dispatches(subscribers)
-    btc_contexts = {}
     sent = 0
     failed = 0
     skipped_by_dedup = 0
@@ -77,13 +76,7 @@ async def dispatch_crypto_outbox(bot: Bot) -> dict[str, int | str]:
                 "Canonical opportunity already exists in the legacy Telegram final-safety dedupe state.",
             )
             continue
-        if idea.exchange not in btc_contexts:
-            try:
-                btc_contexts[idea.exchange] = await asyncio.wait_for(_btc_context(idea.exchange), timeout=5)
-            except Exception:
-                logger.warning("BTC alert context unavailable exchange=%s", idea.exchange)
-                btc_contexts[idea.exchange] = None
-        message = format_trade_alert(idea, btc_context=btc_contexts[idea.exchange])
+        message = format_trade_alert(idea)
         signal_id = execution_signal_id(idea)
         entry = sum(idea.entry_zone) / 2
         save_signal(
