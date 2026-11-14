@@ -14,7 +14,7 @@ def included(path):
     if path in {"backend/app/routes/okx_asp.py", "backend/requirements.txt"}:
         return False
     return path.startswith(("backend/app/", "bot/")) or path in {
-        "scripts/replay_tracking.py", "scripts/stage1_admin.py", "docs/stage1_vps_baseline.json"}
+        "scripts/replay_tracking.py", "scripts/stage1_admin.py", "scripts/stage2_admin.py", "docs/stage1_vps_baseline.json"}
 
 
 def pack(root, ref, output):
