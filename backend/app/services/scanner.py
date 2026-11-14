@@ -9,6 +9,7 @@ from time import monotonic, time
 import pandas as pd
 
 from app.config import get_settings
+from app.services.crypto_work import run_crypto_work
 from app.models.schemas import PendingSetup, RiskSettings, TradeIdea
 from app.services.execution_signals import dispatch_trade_ideas_to_execution
 from app.services.signal_limits import cap_signals_per_scan
@@ -272,7 +273,7 @@ async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Sem
         try:
             fetch_symbol = str(market.get("exchange_symbol") or market["symbol"])
             df = await _scan_candles(market["exchange"], fetch_symbol, timeframe, PREFILTER_LIMIT, stats)
-            ok, volume, distance = prefilter_dataframe(df)
+            ok, volume, distance = await run_crypto_work(prefilter_dataframe, df)
             if not ok:
                 return None
             return Candidate(market["exchange"], market["symbol"], fetch_symbol, df, volume, distance)
@@ -299,8 +300,8 @@ async def _analyze_candidate(
                     htf_dfs.append(await _scan_candles(candidate.exchange, candidate.fetch_symbol, htf, 220, stats))
                 except Exception:
                     continue
-            analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
-            save_signal_reviews(analysis.rejected_signals)
+            analysis = await run_crypto_work(analyze_dataframe, candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
+            await run_crypto_work(save_signal_reviews, analysis.rejected_signals)
             valid = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
             for idea in valid:
                 evaluate_strategy_decision(idea)
@@ -308,6 +309,57 @@ async def _analyze_candidate(
         except Exception as exc:
             logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
             return []
+
+
+def _scan_context(candidates, timeframe):
+    from app.services.score_archive import candle_snapshot
+    snapshots = [candle_snapshot(c.candles, exchange=c.exchange, symbol=c.symbol, timeframe=timeframe) for c in candidates] if get_settings().crypto_score_archive_enabled else []
+    breadth_values, global_scores = [], []
+    for candidate in candidates:
+        close = candidate.candles["close"].astype(float)
+        if len(close) >= 80:
+            ema = close.ewm(span=200 if len(close) >= 200 else 100, adjust=False).mean()
+            breadth_values.append(float(close.iloc[-1]) > float(ema.iloc[-1]))
+        if candidate.symbol.upper() in {"BTCUSDT", "ETHUSDT"}:
+            global_scores.append(regime_score_from_dataframe(candidate.candles))
+    breadth = round(sum(bool(v) for v in breadth_values) / len(breadth_values) * 100, 1) if breadth_values else None
+    score = round(sum(global_scores) / len(global_scores), 1) if global_scores else None
+    return snapshots, breadth, score
+
+
+def _analyze_with_scan_context(candidate, timeframe, risk, htf_dfs, global_score, breadth, market, snapshots):
+    from app.services.score_archive import EXTERNAL_CONTEXT
+    from app.services.liquidity_filter import perp_volume_24h
+    token = EXTERNAL_CONTEXT.set(snapshots)
+    try:
+        df = candidate.candles
+        analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs,
+                                     global_regime_score=global_score, breadth_above_ma_pct=breadth)
+        for idea in analysis.trade_ideas:
+            idea.market_volume_24h = perp_volume_24h(market)
+        save_signal_reviews(analysis.rejected_signals)
+        valid = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+        for idea in valid:
+            evaluate_strategy_decision(idea)
+        return valid, None if valid else build_pending_setup(analysis, df)
+    finally:
+        EXTERNAL_CONTEXT.reset(token)
+
+
+def _persist_scan(ranked_all, ranked):
+    from app.services.score_archive import persist
+    from app.utils.database import get_connection
+    selected_ids = {id(idea) for idea in ranked}
+    settings = get_settings()
+    with get_connection() as connection:
+        for rank, idea in enumerate(ranked_all, 1):
+            if idea.score_evaluation is None:
+                continue
+            idea.score_evaluation["scan_selection"] = {"rank": rank, "ranking": "reported_24h_volume_desc", "volume_24h": idea.market_volume_24h, "selected_for_persistence": id(idea) in selected_ids, "strategy_decision": idea.strategy_decision, "reason": idea.v2_decision_reason, "per_scan_cap": settings.crypto_max_signals_per_scan, "per_direction_cap": settings.crypto_max_signals_per_direction, "minimum_perp_volume_24h": settings.min_perp_volume_24h}
+            persist(connection, idea.score_evaluation)
+    diagnostics = []
+    save_trade_ideas(ranked, diagnostics=diagnostics)
+    return diagnostics
 
 
 async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, force: bool = False) -> dict:
@@ -335,7 +387,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             selected_window = scan_window(current_exchange, exchange_markets, market_limit, timeframe=timeframe)
             logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
             for market in selected_window:
-                existing_trade = active_crypto_trade_for_symbol(str(market.get("symbol", "")))
+                existing_trade = await run_crypto_work(active_crypto_trade_for_symbol, str(market.get("symbol", "")))
                 if existing_trade is None:
                     scan_markets.append(market)
                     continue
@@ -354,19 +406,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore, fetch_stats) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
         candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:candidate_limit]
-        from app.services.score_archive import candle_snapshot
-        external_context_snapshots=[candle_snapshot(c.candles,exchange=c.exchange,symbol=c.symbol,timeframe=timeframe) for c in candidates] if get_settings().crypto_score_archive_enabled else []
-        breadth_values = []
-        global_scores = []
-        for candidate in candidates:
-            close = candidate.candles["close"].astype(float)
-            if len(close) >= 80:
-                ema = close.ewm(span=200 if len(close) >= 200 else 100, adjust=False).mean()
-                breadth_values.append(float(close.iloc[-1]) > float(ema.iloc[-1]))
-            if candidate.symbol.upper() in {"BTCUSDT", "ETHUSDT"}:
-                global_scores.append(regime_score_from_dataframe(candidate.candles))
-        breadth_above_ma_pct = round(sum(1 for value in breadth_values if value) / len(breadth_values) * 100, 1) if breadth_values else None
-        global_score = round(sum(global_scores) / len(global_scores), 1) if global_scores else None
+        external_context_snapshots, breadth_above_ma_pct, global_score = await run_crypto_work(_scan_context, candidates, timeframe)
         risk = _risk(timeframe)
 
         async def analyze_with_context(candidate: Candidate) -> tuple[list[TradeIdea], PendingSetup | None]:
@@ -383,25 +423,10 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                             continue
                     market_metadata = next((m for m in scan_markets if m["symbol"]==candidate.symbol and m["exchange"]==candidate.exchange), {})
                     df.attrs["market_metadata"] = market_metadata
-                    df.attrs["external_context_snapshots"] = external_context_snapshots
-                    analysis = analyze_dataframe(
-                        candidate.symbol,
-                        timeframe,
-                        candidate.exchange,
-                        df,
-                        risk,
-                        htf_dfs,
-                        global_regime_score=global_score,
-                        breadth_above_ma_pct=breadth_above_ma_pct,
+                    return await run_crypto_work(
+                        _analyze_with_scan_context, candidate, timeframe, risk, htf_dfs,
+                        global_score, breadth_above_ma_pct, market_metadata, external_context_snapshots,
                     )
-                    from app.services.liquidity_filter import perp_volume_24h
-                    for idea in analysis.trade_ideas: idea.market_volume_24h = perp_volume_24h(market_metadata)
-                    save_signal_reviews(analysis.rejected_signals)
-                    valid_ideas = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
-                    for idea in valid_ideas:
-                        evaluate_strategy_decision(idea)
-                    pending_setup = None if valid_ideas else build_pending_setup(analysis, df)
-                    return valid_ideas, pending_setup
                 except Exception as exc:
                     logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
                     return [], None
@@ -424,16 +449,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         wait_ranked = [idea for idea in ranked_all if idea.strategy_decision == "WAIT_FOR_RETEST"][:5]
         no_trade_ranked = [idea for idea in ranked_all if idea.strategy_decision == "NO_TRADE"][:3]
         ranked = [*executable_ranked, *shadow_ranked, *wait_ranked, *no_trade_ranked]
-        from app.services.score_archive import persist
-        from app.utils.database import get_connection
-        selected_ids={id(idea) for idea in ranked}
-        with get_connection() as archive_connection:
-            for scan_rank,idea in enumerate(ranked_all,1):
-                if idea.score_evaluation is None:continue
-                idea.score_evaluation["scan_selection"]={"rank":scan_rank,"ranking":"reported_24h_volume_desc","volume_24h":idea.market_volume_24h,"selected_for_persistence":id(idea) in selected_ids,"strategy_decision":idea.strategy_decision,"reason":idea.v2_decision_reason,"per_scan_cap":get_settings().crypto_max_signals_per_scan,"per_direction_cap":get_settings().crypto_max_signals_per_direction,"minimum_perp_volume_24h":get_settings().min_perp_volume_24h}
-                persist(archive_connection,idea.score_evaluation)
-        persistence_diagnostics: list[dict] = []
-        save_trade_ideas(ranked, diagnostics=persistence_diagnostics)
+        persistence_diagnostics = await run_crypto_work(_persist_scan, ranked_all, ranked)
         blocked_symbols = {
             diagnostic["symbol"]
             for diagnostic in persistence_diagnostics

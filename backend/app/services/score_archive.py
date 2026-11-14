@@ -173,9 +173,9 @@ def capture_context(
                 ),
             )
         )
-    external = (
-        df.attrs.get("external_context_snapshots") or EXTERNAL_CONTEXT.get() or []
-    )
+    # Large scan evidence belongs to task context, never pandas attrs: pandas
+    # deep-copies attrs on slices/columns, multiplying the entire scan per op.
+    external = EXTERNAL_CONTEXT.get() or []
     frames.extend(external)
     token = CONTEXT.set(
         {

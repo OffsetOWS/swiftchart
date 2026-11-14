@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 
 from app.config import get_settings
+from app.services.crypto_work import run_crypto_work
 from app.models.schemas import AnalysisResponse, RiskSettings
 from app.services.liquidity_filter import skip_low_volume_market
 from app.services.market_data import get_candles_cached, get_markets_cached
@@ -66,8 +67,8 @@ async def global_regime_score(exchange: str, timeframe: str) -> float | None:
         try:
             df = await get_candles_cached(exchange, symbol, timeframe, 260)
             if len(df) >= 80:
-                scores.append(regime_score_from_dataframe(df))
-                frames.append(candle_snapshot(df,exchange=exchange,symbol=symbol,timeframe=timeframe))
+                scores.append(await run_crypto_work(regime_score_from_dataframe, df))
+                frames.append(await run_crypto_work(candle_snapshot, df, exchange=exchange, symbol=symbol, timeframe=timeframe))
         except Exception:
             continue
     EXTERNAL_CONTEXT.set(frames)
@@ -127,8 +128,8 @@ async def analyze_market_read_only(
             except TimeoutError:
                 htf_dfs, regime_score = [], None
             df.attrs["market_metadata"] = market
-            analysis = analyze_dataframe(
-                selected_symbol,
+            analysis = await run_crypto_work(
+                analyze_dataframe, selected_symbol,
                 timeframe,
                 current_exchange,
                 df,

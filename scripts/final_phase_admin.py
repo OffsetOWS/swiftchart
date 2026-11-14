@@ -11,7 +11,14 @@ from scripts import stage2_admin as previous
 PREVIOUS_COMMIT = "f55c8dc29f4240ed21432fede75b98d4af60a23f"
 
 
+def require_soak(root, commit):
+    from scripts.crypto_soak_gate import validate_summary
+    manifest = json.loads((root / "release-manifest.json").read_text())
+    validate_summary(manifest.get("soak"), commit, manifest["files"])
+
+
 def prepare(root, previous_root, state, previous_state, commit):
+    require_soak(root, commit)
     previous.prepare(
         root,
         previous_root,

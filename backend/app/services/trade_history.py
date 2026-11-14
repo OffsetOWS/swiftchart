@@ -9,6 +9,7 @@ from typing import Iterable
 import pandas as pd
 
 from app.config import get_settings
+from app.services.crypto_work import run_crypto_work
 from app.models.schemas import SignalReview, TradeIdea
 from app.services.alert_dedupe import setup_fingerprint
 from app.services.market_data import get_candles_cached
@@ -1148,12 +1149,14 @@ async def _evaluate_rows(rows) -> dict:
             if cache_key not in candle_cache:
                 candle_cache[cache_key] = await get_candles_cached(row["exchange"], row["symbol"], row["timeframe"], limits[cache_key])
             candles = candle_cache[cache_key]
-            with get_connection() as connection:
-                delivered = first_crypto_delivery(connection, row["id"])
-            outcome = evaluate_trade(row, candles, first_delivery=delivered)
+            def evaluate():
+                with get_connection() as connection:
+                    delivered = first_crypto_delivery(connection, row["id"])
+                return delivered, evaluate_trade(row, candles, first_delivery=delivered)
+            delivered, outcome = await run_crypto_work(evaluate)
             outcome = await _refine_with_intrabar(row, outcome, delivered, candle_cache)
             from app.services.tracking_time_exit import apply_time_exit
-            outcome = apply_time_exit(row, outcome, candles.to_dict("records"))
+            outcome = await run_crypto_work(lambda: apply_time_exit(row, outcome, candles.to_dict("records")))
             outcome = await _cost_outcome(row, outcome, funding_cache)
             funding_unknown += outcome.get("pnl_r_multiple") is not None and outcome["tracking_evidence"]["costs"]["funding_r"] is None
         except Exception:
@@ -1163,13 +1166,13 @@ async def _evaluate_rows(rows) -> dict:
         checked += 1
         if outcome["status"] != row["status"] or outcome["result"] != row["result"]:
             changed += 1
-        update_outcome(row["id"], outcome)
+        await run_crypto_work(update_outcome, row["id"], outcome)
     return {"checked": checked, "updated": changed, "errors": errors, "markets_fetched": len(candle_cache),
             "funding_unknown": funding_unknown}
 
 
 
-async def check_trade_outcomes() -> dict:
+def _lifecycle_rows():
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -1183,10 +1186,10 @@ async def check_trade_outcomes() -> dict:
             ORDER BY created_at ASC
             """
         ).fetchall()
-    return await _evaluate_rows(rows)
+    return rows
 
 
-async def replay_trade_outcomes(days: int = 30) -> dict:
+def _replay_rows(days):
     cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(days)))).replace(microsecond=0).isoformat()
     with get_connection() as connection:
         rows = connection.execute(
@@ -1202,6 +1205,15 @@ async def replay_trade_outcomes(days: int = 30) -> dict:
             """,
             (cutoff,),
         ).fetchall()
+    return rows, cutoff
+
+
+async def check_trade_outcomes() -> dict:
+    return await _evaluate_rows(await run_crypto_work(_lifecycle_rows))
+
+
+async def replay_trade_outcomes(days: int = 30) -> dict:
+    rows, cutoff = await run_crypto_work(_replay_rows, days)
     result = await _evaluate_rows(rows)
     result["days"] = max(1, int(days))
     result["since"] = cutoff
@@ -1307,13 +1319,13 @@ async def _refine_with_intrabar(row: dict, outcome: dict, delivered, candle_cach
         cached = candle_cache.get(cache_key)
         if cached is None or len(cached) < needed:
             candle_cache[cache_key] = await get_candles_cached(row["exchange"], row["symbol"], INTRABAR_TIMEFRAME, limit)
-        return refine_ambiguous(
+        return await run_crypto_work(lambda: refine_ambiguous(
             row, outcome, candle_cache[cache_key].to_dict("records"),
             first_delivery=delivered or row.get("first_delivered_at"), as_of=as_of,
             expiry_bars=__import__("app.services.crypto_exit_policy", fromlist=["expiry_bars"]).expiry_bars(row),
             move_to_be=settings.trade_history_move_stop_to_entry_after_tp1,
             coarse_candles=candle_cache[(row["exchange"], row["symbol"], row["timeframe"])].to_dict("records"),
-        )
+        ))
     except Exception:
         logger.exception("Intrabar refinement failed id=%s symbol=%s", row.get("id"), row.get("symbol"))
         return outcome

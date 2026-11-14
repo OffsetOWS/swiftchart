@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
+from app.services.crypto_work import run_crypto_work
 from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
@@ -168,8 +169,8 @@ async def analyze(
                 detail=f"{base_asset or 'This asset'} is not currently available for analysis. Try BTC, ETH, SOL, BNB, or another listed Hyperliquid market.",
             )
         analysis.trade_ideas = cap_production_cohorts(analysis.trade_ideas)
-        saved_ids = save_trade_ideas(analysis.trade_ideas)
-        saved_reviews = save_signal_reviews(analysis.rejected_signals)
+        saved_ids = await run_crypto_work(save_trade_ideas, analysis.trade_ideas)
+        saved_reviews = await run_crypto_work(save_signal_reviews, analysis.rejected_signals)
         logger.info("Analysis generated %s ideas, rejected %s, and saved %s ideas/%s reviews for %s %s on %s", len(analysis.trade_ideas), len(analysis.rejected_signals), len(saved_ids), saved_reviews, symbol, timeframe, analysis.exchange)
         return analysis
     except HTTPException:
@@ -219,7 +220,7 @@ async def active_crypto_trades(
     exchange: str = Query(default="all"),
     limit: int = Query(default=50, ge=1, le=100),
 ):
-    trades = list_active_crypto_trades(exchange=exchange, limit=limit)
+    trades = await run_crypto_work(list_active_crypto_trades, exchange=exchange, limit=limit)
     return {"trades": trades, "count": len(trades), "source": "telegram-canonical"}
 
 

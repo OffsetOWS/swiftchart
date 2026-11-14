@@ -2,12 +2,12 @@
 
 import argparse, hashlib, io, json, subprocess, tarfile
 from pathlib import Path
-from scripts.stage1_pack import included as previous_included
+from scripts.crypto_soak_gate import included, fingerprint, validate
 
 RULES_HASH = "743872dd9c87c5beee95ed543751bf4870ee871b445e04eeb207c9f2e7b3d048"
 
 
-def pack(root, ref, output):
+def pack(root, ref, output, soak_report):
     def git(*args):
         return subprocess.check_output(["git", "-C", str(root), *args])
 
@@ -22,10 +22,7 @@ def pack(root, ref, output):
         info, name = raw.split(b"\t", 1)
         mode, kind, oid = info.decode().split()
         name = name.decode()
-        if not (
-            (previous_included(name) and name != "docs/stage1_vps_baseline.json")
-            or name in {"scripts/final_phase_admin.py", "scripts/final_phase_audit.py"}
-        ):
+        if not included(name):
             continue
         if kind != "blob" or mode not in {"100644", "100755"}:
             raise ValueError("Unsupported payload path")
@@ -45,6 +42,7 @@ def pack(root, ref, output):
             "dependency installation",
         ],
     }
+    manifest["soak"] = validate(json.loads(soak_report.read_text()), sha, fingerprint(manifest["files"]))
     with output.open("xb") as stream, tarfile.open(
         fileobj=stream, mode="w:gz"
     ) as archive:
@@ -62,8 +60,9 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--ref", required=True)
     p.add_argument("--output", type=Path, required=True)
+    p.add_argument("--soak-report", type=Path, required=True)
     a = p.parse_args()
-    result = pack(Path(__file__).resolve().parents[1], a.ref, a.output)
+    result = pack(Path(__file__).resolve().parents[1], a.ref, a.output, a.soak_report)
     print(
         json.dumps(
             {

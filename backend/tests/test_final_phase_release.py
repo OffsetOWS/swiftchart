@@ -43,6 +43,7 @@ def test_final_prepare_retains_previous_source_and_enables_only_reviewed_capture
         }
         for name in sorted(admin.previous.NAMES)
     ]
+    monkeypatch.setattr(admin, "require_soak", lambda *_: None)
     monkeypatch.setattr(admin.previous, "verify_release", lambda *_: None)
     monkeypatch.setattr(admin.previous, "verify_process_paths", lambda *_: None)
     monkeypatch.setattr(admin.previous, "processes", lambda _: deepcopy(apps))

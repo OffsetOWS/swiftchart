@@ -17,7 +17,7 @@ This is a candidate based on deployed Stage 2 commit `f55c8dc29f4240ed21432fede7
 
 Backend rollback stops only API/bot, archives all post-deploy writes into `before-rollback.db`, restores the integrity-checked `before.db`, and recreates the saved previous PM2 definitions at `f55c8dc29f4240ed21432fede75b98d4af60a23f`. The executor, original dirty checkout, shared environment, virtualenvs and bot-state files are not reset or replaced. Archives are never overwritten. Telegram messages cannot be unsent; preserve and reconcile receipts from the archive before any later retry.
 
-Frontend rollback returns the existing project and `swiftchart.xyz` alias to the exact deployment saved by local `prepare`. The prepared target at review was `dpl_56jDR3HyynxEUbY17UoBRCdFh7AQ`; prepare/deploy refuse unexpected alias drift. A staged/published release is never silently deployed a second time.
+Frontend rollback returns the existing project and canonical aliases to the exact deployment saved by local `prepare`. If Vercel instant rollback is unavailable because of the plan’s rollback-depth limit, first verify the aliases still point to this attempted release, then restore `swiftchart.xyz` and `swiftchart.vercel.app` with `vercel alias set "$saved_previous_url" "$alias" --scope offsetows-projects`. Verify both targets afterward. This uses the existing saved build; never create a replacement build or change plans during recovery. The prepared target at review was `dpl_56jDR3HyynxEUbY17UoBRCdFh7AQ`; prepare/deploy refuse unexpected alias drift. A staged/published release is never silently deployed a second time.
 
 ```bash
 # Local: restore frontend only if this attempted release changed/staged it.
@@ -40,12 +40,17 @@ ROLLBACK
 
 ## Local preparation — no deploy
 
+The [mandatory 15-minute offline soak](crypto_release_gate.md) is required for every future release. Run against the exact committed candidate and private production-sized database copy. Unit tests and startup health cannot replace it.
+
 Use the immutable candidate SHA in the private approval report. The evidence directory and state are private and excluded from Git. Keep the existing frontend production alias and backend source verified before approval.
 
 ```bash
 python3 scripts/check_stage1.py
 (cd frontend && npm test && SWIFTCHART_RELEASE_SHA="$release_sha" npm run build)
-python3 -m scripts.final_phase_pack --ref "$release_sha" --output "$payload"
+python3 scripts/crypto_soak.py --database "$private_frozen_db" \
+  --candles "$private_candles_dir" --output "$new_private_soak_directory"
+python3 -m scripts.final_phase_pack --ref "$release_sha" --output "$payload" \
+  --soak-report "$new_private_soak_directory/report.json"
 python3 scripts/final_phase_frontend.py prepare --commit "$release_sha" \
   --cli "$vercel_cli" --state "$frontend_state" \
   --link "/Users/doflam/Documents/New project/.vercel/project.json"
