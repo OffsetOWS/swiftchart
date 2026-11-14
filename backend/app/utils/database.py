@@ -244,6 +244,12 @@ def init_db() -> None:
         from app.services.outcome_events import ensure_schema as ensure_outcomes
         ensure_scores(connection)
         ensure_outcomes(connection)
+        # Cover the exact accepted/rejected aggregate without reading millions
+        # of wide review records or building a temporary GROUP BY tree.
+        connection.execute("""CREATE INDEX IF NOT EXISTS idx_signal_reviews_statistics
+            ON signal_reviews(
+                CASE WHEN COALESCE(accepted,0) != 0 THEN 'accepted' ELSE 'rejected' END,
+                COALESCE(base_score,0), COALESCE(adjusted_score,0))""")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_created_at ON signal_reviews(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_regime ON signal_reviews(regime_label)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_created_at ON genlayer_ai_scans(created_at)")

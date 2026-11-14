@@ -132,3 +132,34 @@ def test_history_projection_and_evidence_share_snapshot_during_worker_commit(mon
     assert row['gross_r_multiple'] == row['tracking_evidence']['booked_r'] == 1
     with database.get_connection() as c:
         assert c.execute('SELECT pnl_r_multiple FROM trade_ideas WHERE id=?', (identifier,)).fetchone()[0] == 2
+
+
+def test_stats_releases_reader_before_enrichment_and_keeps_snapshot(monkeypatch, tmp_path):
+    from app.services import trade_history as history
+    from app.services.tracking_ledger import record_correction
+    from app.utils import database
+    from test_canonical_telegram_dispatch import configure_db, idea
+    configure_db(monkeypatch, tmp_path)
+    identifier = history.save_trade_ideas([idea()])[0]
+    at = datetime.now(UTC).isoformat()
+    def evidence(value):
+        return {'category': 'resolved', 'booked_r': value, 'validated_entry_at': at, 'remaining_quantity': 0}
+    with database.get_connection() as c:
+        assert c.execute('PRAGMA journal_mode').fetchone()[0] == 'delete'
+        c.execute("UPDATE trade_ideas SET pnl_r_multiple=1,closed_at=?,status='TP2_HIT',result='WIN',strategy_decision='TRADE',entry_status='READY',outcome_tracking_mode='PRODUCTION',strategy_version=NULL,executable_at=? WHERE id=?", (at, at, identifier))
+        record_correction(c, 'CRYPTO', identifier, {}, {'pnl_r_multiple': 1}, evidence(1), at)
+        plan = c.execute("EXPLAIN QUERY PLAN SELECT CASE WHEN COALESCE(accepted,0) != 0 THEN 'accepted' ELSE 'rejected' END AS status,COUNT(*),AVG(COALESCE(base_score,0)),AVG(COALESCE(adjusted_score,0)) FROM signal_reviews GROUP BY 1").fetchall()
+        assert any('idx_signal_reviews_statistics' in row[3] for row in plan)
+    original = history._public_tracking_rows
+    def enrich_after_writer(connection, rows, *, evidence_json=None):
+        # With rollback journaling this commit would time out if stats still
+        # held its original read transaction during the slow enrichment phase.
+        with database.get_connection() as writer:
+            writer.execute('UPDATE trade_ideas SET pnl_r_multiple=2 WHERE id=?', (identifier,))
+            record_correction(writer, 'CRYPTO', identifier, {}, {'pnl_r_multiple': 2}, evidence(2), at)
+        assert connection is None
+        assert json.loads(evidence_json[identifier])['booked_r'] == 1
+        return original(connection, rows, evidence_json=evidence_json)
+    monkeypatch.setattr(history, '_public_tracking_rows', enrich_after_writer)
+    result = history.stats()
+    assert result['gross_r_total'] == 1

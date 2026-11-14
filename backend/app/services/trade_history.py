@@ -1228,7 +1228,9 @@ def stats() -> dict:
     from app.services.tracking_statistics import summarize, grouped as summarize_grouped
     with get_connection() as connection:
         connection.execute("BEGIN")
-        rows = [dict(row) for row in connection.execute("SELECT * FROM trade_ideas").fetchall()]
+        # Statistics need no long explanations or other wide presentation fields.
+        columns = "id,symbol,timeframe,exchange,direction,status,result,closed_at,tp1_hit_at,tp2_hit_at,sl_hit_at,pnl_r_multiple,candles_to_resolution,entry_zone_low,entry_zone_high,stop_loss,take_profit_1,take_profit_2,lifecycle_events,setup_grade,regime_label,trend_alignment,entry_status,strategy_decision,outcome_tracking_mode,strategy_version,opportunity_key,executable_at"
+        rows = [dict(row) for row in connection.execute("SELECT " + columns + " FROM trade_ideas").fetchall()]
         # Reviews can exceed a million rows in production; aggregate inside
         # SQLite instead of materializing their wide records in API/bot memory.
         review_rows = {row["status"]: dict(row) for row in connection.execute("""
@@ -1238,8 +1240,10 @@ def stats() -> dict:
                    AVG(COALESCE(adjusted_score,0)) AS average_adjusted_score
             FROM signal_reviews GROUP BY 1
         """).fetchall()}
-        # Read results and their latest evidence in one consistent snapshot.
-        rows = _public_tracking_rows(connection, rows)
+        # Capture raw evidence in the SAME snapshot, then release the reader
+        # before JSON decoding/cost enrichment can delay concurrent writers.
+        raw_evidence = _tracking_evidence_json(connection, rows)
+    rows = _public_tracking_rows(None, rows, evidence_json=raw_evidence)
     detected_total = len(rows)
     pending_rows = [row for row in rows if row.get("entry_status") == "WAIT_FOR_RETEST" or row.get("strategy_decision") == "WAIT_FOR_RETEST"]
     shadow_rows = [row for row in rows if row.get("outcome_tracking_mode") == "SHADOW" or row.get("strategy_decision") == "SHADOW"]
@@ -1279,21 +1283,26 @@ def stats() -> dict:
 
 
 
-def _public_tracking_rows(connection, rows):
-    """Attach the same append-only evidence and costs used by aggregate stats."""
-    from app.services.tracking_costs import cost_r, net_r
-    rows = [dict(row) for row in rows]
+def _tracking_evidence_json(connection, rows):
     tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     evidence = {}
     if rows and "tracking_corrections" in tables:
         ids = [str(row["id"]) for row in rows]
-        # Stay below SQLite's variable limit even for the complete history.
         for offset in range(0, len(ids), 900):
             batch = ids[offset:offset+900]
             records = connection.execute(f"""SELECT signal_id, evidence_json FROM tracking_corrections
                 WHERE id IN (SELECT MAX(id) FROM tracking_corrections WHERE asset='CRYPTO'
                     AND signal_id IN ({','.join('?' for _ in batch)}) GROUP BY signal_id)""", batch).fetchall()
-            evidence.update({int(r["signal_id"]): json.loads(r["evidence_json"]) for r in records})
+            evidence.update({int(r["signal_id"]): r["evidence_json"] for r in records})
+    return evidence
+
+
+def _public_tracking_rows(connection, rows, *, evidence_json=None):
+    """Attach accepted evidence; raw JSON can be captured in an earlier snapshot."""
+    from app.services.tracking_costs import cost_r, net_r
+    rows = [dict(row) for row in rows]
+    raw = _tracking_evidence_json(connection, rows) if evidence_json is None else evidence_json
+    evidence = {identifier: json.loads(body) for identifier, body in raw.items()}
     for row in rows:
         row["tracking_evidence"] = evidence.get(row["id"], {})
         costs = row["tracking_evidence"].get("costs", {})
