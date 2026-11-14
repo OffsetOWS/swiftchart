@@ -23,6 +23,7 @@ from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.scanner import trigger_top_ideas_refresh
+from app.services.signal_limits import cap_production_cohorts
 from app.services.trade_history import list_active_crypto_trades, save_signal_reviews, save_trade_ideas
 
 router = APIRouter()
@@ -166,6 +167,7 @@ async def analyze(
                 status_code=422,
                 detail=f"{base_asset or 'This asset'} is not currently available for analysis. Try BTC, ETH, SOL, BNB, or another listed Hyperliquid market.",
             )
+        analysis.trade_ideas = cap_production_cohorts(analysis.trade_ideas)
         saved_ids = save_trade_ideas(analysis.trade_ideas)
         saved_reviews = save_signal_reviews(analysis.rejected_signals)
         logger.info("Analysis generated %s ideas, rejected %s, and saved %s ideas/%s reviews for %s %s on %s", len(analysis.trade_ideas), len(analysis.rejected_signals), len(saved_ids), saved_reviews, symbol, timeframe, analysis.exchange)

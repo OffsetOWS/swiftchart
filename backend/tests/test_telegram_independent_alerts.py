@@ -103,11 +103,12 @@ def test_trade_alert_warns_when_direction_conflicts_with_bias():
     assert "BTC: Bearish" in message
 
 
-def test_manual_telegram_market_discovery_remains_available_for_diagnostics(monkeypatch):
+def test_manual_telegram_market_discovery_respects_the_liquidity_floor(monkeypatch):
     import bot.scanner as telegram_scanner
 
     async def fake_markets(exchange):
         return [
+            {"symbol": "LIQUIDUSDT", "active": True, "perpVolume24h": 250000},
             {"symbol": "LOWUSDT", "active": True, "perpVolume24h": 1},
             {"symbol": "ZEROUSDT", "active": True, "perpVolume24h": 0},
             {"symbol": "OFFUSDT", "active": False, "perpVolume24h": 1_000_000},
@@ -118,8 +119,9 @@ def test_manual_telegram_market_discovery_remains_available_for_diagnostics(monk
 
     symbols = asyncio.run(telegram_scanner._scan_symbols("hyperliquid"))
 
-    assert "LOWUSDT" in symbols
-    assert "ZEROUSDT" in symbols
+    assert "LIQUIDUSDT" in symbols
+    assert "LOWUSDT" not in symbols
+    assert "ZEROUSDT" not in symbols
     assert "OFFUSDT" not in symbols
     assert "Non-authoritative" in telegram_scanner.scan_top_ideas.__doc__
 

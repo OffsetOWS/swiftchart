@@ -6,7 +6,8 @@ import pandas as pd
 from app.config import DEFAULT_SCAN_LIST, get_settings
 from app.exchanges.factory import get_exchange
 from app.models.schemas import RiskSettings, TradeIdea
-from app.services.liquidity_filter import perp_volume_24h
+from app.services.liquidity_filter import perp_volume_24h, filter_liquid_perp_markets
+from app.services.signal_limits import cap_signals_per_scan
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.scanner import btc_regime_from_scores
 from app.strategy.market_regime import regime_score_from_dataframe
@@ -50,14 +51,15 @@ async def _scan_symbols(exchange: str) -> list[str]:
     limit = _scan_symbol_limit()
     try:
         markets = await get_markets_cached(exchange)
-        active_markets = [market for market in markets if market.get("active", True)]
+        active_markets = filter_liquid_perp_markets([market for market in markets if market.get("active", True)])
         ranked = sorted(active_markets, key=lambda market: perp_volume_24h(market) or 0, reverse=True)
         symbols = [str(market.get("symbol", "")).upper() for market in ranked if market.get("symbol")]
         if symbols:
             return list(dict.fromkeys(symbols))[:limit]
     except Exception as exc:
         logger.warning("Telegram independent market discovery failed exchange=%s error=%s", exchange, exc)
-    return DEFAULT_SCAN_LIST[:limit]
+    # No verified volume means no safe candidate; do not bypass the floor.
+    return []
 
 
 async def _get_alert_candles(exchange: str, symbol: str, timeframe: str, limit: int):
@@ -148,6 +150,7 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
         ),
         reverse=True,
     )
+    ranked = cap_signals_per_scan(ranked)
     logger.info(
         "telegram_independent_scan_completed exchange=%s timeframe=%s symbols_scanned=%s valid_ideas_found=%s rejection_reasons=%s",
         selected_exchange,

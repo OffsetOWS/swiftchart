@@ -5,8 +5,10 @@ from telegram.ext import ContextTypes
 
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.models.schemas import RiskSettings
+from app.services.signal_limits import cap_production_cohorts
+from app.services.liquidity_filter import is_liquid_perp_market
 from app.services.telegram_dispatch import clear_crypto_recipient_block
-from app.services.market_data import get_candles_cached
+from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas
 from app.strategy.trade_ideas import analyze_dataframe
 from bot.formatter import format_analysis, format_history, format_paper_trades, format_stats, format_top_ideas, help_text, strategy_text
@@ -43,6 +45,10 @@ def higher_timeframes_for(timeframe: str) -> list[str]:
 async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None):
     settings = get_settings()
     selected_exchange = exchange or settings.default_exchange
+    markets = await get_markets_cached(selected_exchange)
+    market = next((row for row in markets if str(row.get("symbol", "")).upper() == symbol.upper() and row.get("active", True)), None)
+    if market is None or not is_liquid_perp_market(market):
+        raise ValueError("This market does not meet the 24-hour liquidity minimum.")
     df = await get_candles_cached(selected_exchange, symbol.upper(), timeframe, 320)
     if len(df) < 80:
         raise ValueError("Not enough candle history for analysis.")
@@ -60,7 +66,7 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
         preferred_timeframe=timeframe,
     )
     analysis = analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
-    detected_ideas = list(analysis.trade_ideas)
+    detected_ideas = cap_production_cohorts(analysis.trade_ideas)
     save_trade_ideas(detected_ideas)
     analysis.trade_ideas = [idea for idea in detected_ideas if idea.strategy_decision == "TRADE"]
     if detected_ideas and not analysis.trade_ideas:

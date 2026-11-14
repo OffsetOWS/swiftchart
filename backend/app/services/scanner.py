@@ -11,6 +11,7 @@ import pandas as pd
 from app.config import get_settings
 from app.models.schemas import PendingSetup, RiskSettings, TradeIdea
 from app.services.execution_signals import dispatch_trade_ideas_to_execution
+from app.services.signal_limits import cap_signals_per_scan
 from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.pending_setups import build_pending_setup, pending_setup_from_trade_idea
@@ -415,9 +416,10 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             reverse=True,
         )
         # Disabled or shadow candidates must never crowd a validated strategy
-        # out of the actionable top five. Persist bounded cohorts separately so
+        # out of the bounded actionable selection. Persist bounded cohorts separately so
         # forward analytics remain useful without producing normal trade volume.
-        executable_ranked = [idea for idea in ranked_all if is_actionable_v2(idea)][:5]
+        actionable_candidates = [idea for idea in ranked_all if is_actionable_v2(idea)]
+        executable_ranked = cap_signals_per_scan(actionable_candidates)
         shadow_ranked = [idea for idea in ranked_all if idea.strategy_decision == "SHADOW"][:5]
         wait_ranked = [idea for idea in ranked_all if idea.strategy_decision == "WAIT_FOR_RETEST"][:5]
         no_trade_ranked = [idea for idea in ranked_all if idea.strategy_decision == "NO_TRADE"][:3]
@@ -455,13 +457,16 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             "pending_setups": pending_setups,
             "errors": [],
             "diagnostics": active_trade_diagnostics,
-            "message": None if len(executable_ranked) >= 5 else f"Only {len(executable_ranked)} validated executable setups found. Shadow and retest decisions remain non-actionable.",
+            "message": None if len(executable_ranked) >= get_settings().crypto_max_signals_per_scan else f"Only {len(executable_ranked)} validated executable setups found. Shadow and retest decisions remain non-actionable.",
             "scan_stats": {
                 "markets": len(markets),
                 "scan_window": len(scan_markets),
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
                 "valid_setups": len(executable_ranked),
+                "actionable_candidates_before_cap": len(actionable_candidates),
+                "signal_limit_total": get_settings().crypto_max_signals_per_scan,
+                "signal_limit_per_direction": get_settings().crypto_max_signals_per_direction,
                 "shadow_setups": len(shadow_ranked),
                 "no_trade_decisions": len(no_trade_ranked),
                 "pending_setups": len(pending_setups),
