@@ -1,6 +1,9 @@
 import { isIP } from "node:net";
 
 export function validatePublicBuildEnv(env) {
+  if (env.VERCEL_ENV === "production" && !env.SWIFTCHART_BACKEND_ORIGIN) {
+    throw new Error("Production backend origin must be configured before building assets.");
+  }
   const url = env.VITE_SUPABASE_URL || "";
   const key = env.VITE_SUPABASE_ANON_KEY || "";
   if (env.VERCEL_ENV === "production" && (!url || !key)) {

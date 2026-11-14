@@ -88,3 +88,17 @@ test("frontend deployments advance and verify the public custom domain", () => {
     },
   ]);
 });
+
+
+test("Git publication stays disabled without build-only configuration", async () => {
+  const prior=process.env.SWIFTCHART_BACKEND_ORIGIN;
+  delete process.env.SWIFTCHART_BACKEND_ORIGIN;
+  try {
+    const {config}=await import("../../../vercel.ts?without-origin");
+    assert.equal(config.git.deploymentEnabled,false);
+    assert.match(config.rewrites[0].destination,/backend-origin-required\.invalid/);
+  } finally {
+    if (prior===undefined) delete process.env.SWIFTCHART_BACKEND_ORIGIN;
+    else process.env.SWIFTCHART_BACKEND_ORIGIN=prior;
+  }
+});
