@@ -10,7 +10,7 @@ def cap_signals_per_scan(ideas: Iterable[TradeIdea]) -> list[TradeIdea]:
     settings = get_settings()
     counts: Counter[str] = Counter()
     selected = []
-    for idea in ideas:
+    for idea in rank_by_volume(ideas):
         if len(selected) >= settings.crypto_max_signals_per_scan:
             break
         direction = str(idea.direction).upper()
@@ -28,3 +28,12 @@ def cap_production_cohorts(ideas: Iterable[TradeIdea]) -> list[TradeIdea]:
     admitted = {id(idea) for idea in cap_signals_per_scan(ready)}
     ready_ids = {id(idea) for idea in ready}
     return [idea for idea in rows if id(idea) not in ready_ids or id(idea) in admitted]
+
+
+def rank_by_volume(ideas):
+    import math
+    def key(idea):
+        volume=idea.market_volume_24h
+        known=isinstance(volume,(int,float)) and math.isfinite(volume) and volume>=0
+        return (-(volume if known else 0),str(idea.exchange).lower(),str(idea.symbol).upper(),str(idea.direction).upper())
+    return sorted(ideas,key=key)

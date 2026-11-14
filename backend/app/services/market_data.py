@@ -91,7 +91,15 @@ async def _fetch_candles_with_retries(exchange: str, symbol: str, timeframe: str
         try:
             async with _candle_semaphore(exchange):
                 await _pace_candle_request(exchange)
-                return await get_exchange(exchange).get_candles(symbol, timeframe, limit)
+                from datetime import UTC, datetime
+                from app.services.tracking_rules import timeframe_duration
+                requested_at = datetime.now(UTC)
+                df = await get_exchange(exchange).get_candles(symbol, timeframe, limit)
+                step = timeframe_duration(timeframe)
+                df = df.copy()
+                df["complete"] = [(value.to_pydatetime() if hasattr(value, "to_pydatetime") else value) + step <= requested_at for value in df["timestamp"]]
+                df.attrs.update(requested_at=requested_at.isoformat(), fetched_at=datetime.now(UTC).isoformat(), timeframe=timeframe)
+                return df
         except Exception as exc:
             last_error = exc
             logger.warning(

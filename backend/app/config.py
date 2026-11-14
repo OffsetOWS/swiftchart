@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     forex_fvg_expiry_1d_candles: int = Field(default=3, ge=1, le=100)
     forex_close_entire_position_at_tp1: bool = False
 
+    crypto_score_archive_enabled: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

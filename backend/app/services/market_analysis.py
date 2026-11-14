@@ -58,14 +58,19 @@ def higher_timeframes_for(timeframe: str) -> list[str]:
 
 
 async def global_regime_score(exchange: str, timeframe: str) -> float | None:
+    from app.services.score_archive import EXTERNAL_CONTEXT,candle_snapshot
+    EXTERNAL_CONTEXT.set([])
     scores = []
+    frames=[]
     for symbol in ("BTCUSDT", "ETHUSDT"):
         try:
             df = await get_candles_cached(exchange, symbol, timeframe, 260)
             if len(df) >= 80:
                 scores.append(regime_score_from_dataframe(df))
+                frames.append(candle_snapshot(df,exchange=exchange,symbol=symbol,timeframe=timeframe))
         except Exception:
             continue
+    EXTERNAL_CONTEXT.set(frames)
     if not scores:
         return None
     return round(sum(scores) / len(scores), 1)
@@ -80,6 +85,8 @@ async def analyze_market_read_only(
     supplemental_timeout_seconds: float | None = None,
 ) -> AnalysisResponse:
     """Run SwiftChart's existing single-market analysis without persistence or delivery side effects."""
+    from app.services.score_archive import EXTERNAL_CONTEXT
+    EXTERNAL_CONTEXT.set(None)
     exchanges = scan_selected_exchanges(selected_exchange(exchange))
     last_error: object | None = None
     found_market = False
@@ -119,7 +126,8 @@ async def analyze_market_read_only(
                         htf_dfs, regime_score = await supplemental_data()
             except TimeoutError:
                 htf_dfs, regime_score = [], None
-            return analyze_dataframe(
+            df.attrs["market_metadata"] = market
+            analysis = analyze_dataframe(
                 selected_symbol,
                 timeframe,
                 current_exchange,
@@ -128,6 +136,9 @@ async def analyze_market_read_only(
                 htf_dfs,
                 global_regime_score=regime_score,
             )
+            from app.services.liquidity_filter import perp_volume_24h
+            for idea in analysis.trade_ideas: idea.market_volume_24h = perp_volume_24h(market)
+            return analysis
         except Exception as exc:
             last_error = exc
             continue

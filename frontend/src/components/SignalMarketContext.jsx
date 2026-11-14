@@ -43,17 +43,7 @@ export default function SignalMarketContext({ marketData, loading = false }) {
         <div><span>CMC Rank</span><b>{marketData.cmc_rank ? `#${marketData.cmc_rank}` : "-"}</b></div>
         <div><span>24h Change</span><b>{formatChange(marketData.price_change_24h)}</b></div>
       </div>
-      <div className="market-quality-summary">
-        <div>
-          <span>Market Quality Score</span>
-          <b>{marketData.market_quality_score}<small>/100</small></b>
-        </div>
-        <div className="market-quality-rail" aria-hidden="true">
-          <span style={{ width: `${marketData.market_quality_score}%` }} />
-        </div>
-        <strong>{marketData.quality_label}</strong>
-      </div>
-      <p>Informational context only — this score does not affect the SwiftChart trade signal.</p>
+
     </section>
   );
 }

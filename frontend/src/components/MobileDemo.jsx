@@ -1,3 +1,4 @@
+import { cryptoLifecycleStatus } from "../lib/cryptoLifecycle.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
@@ -23,6 +24,7 @@ import {
 import { useAuth } from "../lib/AuthContext.jsx";
 import {
   getCandles,
+  getTradeHistoryDetail,
   getForexCurrencyStrength,
   getForexOverview,
   getForexLimitOpportunities,
@@ -61,12 +63,6 @@ function hasSeenAppSplash() {
   }
 }
 
-function scoreTier(score) {
-  if (score >= 95) return "Elite";
-  if (score >= 90) return "High Conviction";
-  if (score >= 80) return "Strong";
-  return "Watchlist";
-}
 
 function formatTradePrice(value) {
   const numeric = Number(String(value ?? "").replace(/,/g, ""));
@@ -100,12 +96,14 @@ function normalizeIdea(idea, index) {
     direction: idea?.direction || "Wait",
     timeframe: idea?.timeframe || "-",
     score,
-    tier: scoreTier(score),
+    tier: "Setup",
+    volume24h: Number(idea?.market_volume_24h || 0),
+    trackingDeadline: idea?.tracking_deadline || null,
     entry: displayRange(entryZone),
     sl: idea?.stop_loss !== undefined ? formatTradePrice(idea.stop_loss) : "-",
     tp: idea?.take_profit_1 !== undefined ? formatTradePrice(idea.take_profit_1) : "-",
     tp2: idea?.take_profit_2 !== undefined ? formatTradePrice(idea.take_profit_2) : "-",
-    rr: idea?.risk_reward_ratio !== undefined ? `${Number(idea.risk_reward_ratio).toFixed(1)}R` : "-",
+    rr: idea?.risk_reward_ratio !== undefined && idea?.risk_reward_ratio !== null ? `${Number(idea.risk_reward_ratio).toFixed(1)}R` : "-",
     confidence: idea?.confidence_score !== undefined ? `${Math.round(Number(idea.confidence_score))}%` : `${score}%`,
     regime: idea?.regime_label || idea?.market_regime || "Awaiting market classification",
     thesis: idea?.reason || "This setup passed SwiftChart's live confirmation checks.",
@@ -145,9 +143,8 @@ function normalizePendingSetup(setup, index) {
   };
 }
 
-function normalizeActiveCryptoTrade(trade, index) {
-  const lifecycleStatus = trade.lifecycle_status
-    || (trade.status === "tp_hit" ? "TP1_HIT_TP2_RUNNING" : trade.status === "sl_hit" ? "STOPPED" : trade.result === "win" ? "TP2_HIT" : "OPEN");
+function normalizeActiveCryptoTrade(trade, index = 0) {
+  const lifecycleStatus = cryptoLifecycleStatus({ ...trade, lifecycle_status: trade.status });
   return {
     ...normalizeIdea({
       symbol: trade.symbol,
@@ -166,9 +163,15 @@ function normalizeActiveCryptoTrade(trade, index) {
       reason: trade.reason,
       invalid_condition: trade.invalidation,
       signal_candle_time: trade.signal_candle_time,
+      opportunity_key: trade.opportunity_key,
+      history_trade_id: trade.id,
       created_at: trade.created_at,
+      tracking_deadline: trade.tracking_deadline,
+      market_volume_24h: trade.market_volume_24h,
     }, index),
     id: `active-crypto-${trade.id}`,
+    status: lifecycleStatus,
+    activatedEntryPrice: trade.entry_triggered_at ? (Number(trade.entry_zone_low)+Number(trade.entry_zone_high))/2 : null,
     isActiveTrade: true,
     lifecycleStatus: trade.status || "OPEN",
   };
@@ -283,6 +286,7 @@ function normalizeForexSignal(signal, index = 0) {
 }
 
 function normalizeSavedTrade(trade) {
+  const lifecycleStatus = cryptoLifecycleStatus(trade);
   const isForex = String(trade.exchange || "").toLowerCase() === MARKET_TYPES.forex;
   const resultR = trade.result_r ?? trade.pnl;
   const lifecycleLabel = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
@@ -319,6 +323,8 @@ function normalizeSavedTrade(trade) {
       take_profit_1: trade.take_profit_1,
       take_profit_2: trade.take_profit_2,
       risk_reward_ratio: trade.risk_reward,
+      tracking_deadline: trade.tracking_deadline,
+      market_volume_24h: trade.market_volume_24h,
       setup_score: trade.setup_score ?? trade.confidence,
       confidence_score: trade.confidence ?? trade.setup_score,
       market_regime: trade.market_regime || trade.market_bias,
@@ -345,19 +351,6 @@ function tokenSymbol(symbol) {
   return normalizeCryptoSymbol(symbol);
 }
 
-function ScoreRing({ score }) {
-  const normalizedScore = Math.min(100, Math.max(0, Number(score) || 0));
-  const tone = normalizedScore >= 90 ? "elite" : normalizedScore > 75 ? "pro" : "watch";
-  return (
-    <span
-      className={`graphite-score-ring ${tone}`}
-      style={{ "--score-angle": `${normalizedScore * 3.6}deg` }}
-      aria-label={`${Math.round(normalizedScore)} confidence score`}
-    >
-      <strong>{Math.round(normalizedScore)}</strong>
-    </span>
-  );
-}
 
 function Direction({ direction }) {
   const side = /short|sell/i.test(direction) ? "short" : "long";
@@ -461,8 +454,8 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forex
       <section className="graphite-hero-card">
         <div className="graphite-hero-copy">
           <span>Market Summary</span>
-          <h1>{best ? best.score : "--"}</h1>
-          <p>{best ? `${best.symbol} is the strongest ranked setup right now.` : "SwiftChart is tracking the live crypto market."}</p>
+          <h1>{best ? best.symbol : "Market overview"}</h1>
+          <p>{best ? `${best.symbol} is listed by 24-hour volume.` : "SwiftChart is tracking the live crypto market."}</p>
           <span className={`graphite-bias-pill ${bullish === null ? "" : bullish ? "bullish" : "bearish"}`}>
             {bullish === null ? <Target size={15} /> : bullish ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
             {bullish === null ? "Waiting for confirmation" : bullish ? "Bullish momentum" : "Bearish momentum"}
@@ -571,7 +564,7 @@ function MarketSignalRow({ signal, onSelect }) {
         <small>{signal.timeframe.toUpperCase()} · {marketRowStatus(signal)}</small>
       </div>
       <span className="market-pair-quality">
-        <strong>{signal.score}</strong>
+        <strong>{marketRowStatus(signal)}</strong>
         <small>{signal.rr}</small>
       </span>
     </button>
@@ -743,7 +736,6 @@ function ScanScreen({
   const [scanState, setScanState] = useState("idle");
   const [coinQuery, setCoinQuery] = useState("");
   const [appliedCoinQuery, setAppliedCoinQuery] = useState("");
-  const [scoreBand, setScoreBand] = useState("all");
   const [timeframe, setTimeframe] = useState("all");
   const [forexTimeframe, setForexTimeframe] = useState("1H");
   const [forexCooldown, setForexCooldown] = useState(0);
@@ -751,15 +743,13 @@ function ScanScreen({
   const [exchange, setExchange] = useState(() => tradingPreferences.preferredExchange);
   const visibleSignals = useMemo(() => {
     const query = tokenSymbol(appliedCoinQuery);
-    const [minimumScore, maximumScore] = scoreBand === "all" ? [0, 100] : scoreBand.split("-").map(Number);
     return signals.filter((signal) => {
       if (query && !tokenSymbol(signal.symbol).includes(query)) return false;
-      if (signal.score < minimumScore || signal.score > maximumScore) return false;
       if (timeframe !== "all" && signal.timeframe.toLowerCase() !== timeframe) return false;
       if (exchange !== "all" && signal.exchange && signal.exchange !== exchange) return false;
       return true;
     });
-  }, [appliedCoinQuery, exchange, scoreBand, signals, timeframe]);
+  }, [appliedCoinQuery, exchange, signals, timeframe]);
 
   async function startScan() {
     setAppliedCoinQuery("");
@@ -965,16 +955,6 @@ function ScanScreen({
 
       <div className="graphite-filters" aria-label="Scan filters">
         <label>
-          <span className="sr-only">Score range</span>
-          <select value={scoreBand} onChange={(event) => setScoreBand(event.target.value)} aria-label="Score range">
-            <option value="all">All Scores</option>
-            <option value="65-75">65-75</option>
-            <option value="75-90">75-90</option>
-            <option value="90-100">90-100</option>
-          </select>
-          <ChevronDown size={14} aria-hidden="true" />
-        </label>
-        <label>
           <span className="sr-only">Timeframe</span>
           <select value={timeframe} onChange={(event) => setTimeframe(event.target.value)} aria-label="Timeframe">
             <option value="all">All Timeframes</option>
@@ -1123,7 +1103,7 @@ function reasoningSentences(signal, { isForex }) {
       .replace(/;\s*session=(.+)$/i, " during the $1"))
     .filter((value) => value.length > 10)
     .filter((value) => !/^[A-Z]{6}\s+qualified independently on\s+\w+$/i.test(value))
-    .filter((value) => !/^(market regime|confidence adjustment|backend invalidation|entry is|targets? (?:are|is))/i.test(value));
+    .filter((value) => !/(score|grade|confidence|profit|win rate|performance|streak)/i.test(value) && !/^(market regime|backend invalidation|entry is|targets? (?:are|is))/i.test(value));
 }
 
 function tradeReasoning(signal, { isForex }) {
@@ -1137,7 +1117,7 @@ function tradeReasoning(signal, { isForex }) {
     : isForex
       ? `The ${signal.session || "active"} session passed SwiftChart's execution checks.`
       : `The stop remains beyond structural invalidation.`;
-  return `${symbol} is ranked as a ${direction} setup on ${timeframe} because ${primary}. ${supporting}`;
+  return `${symbol} is a ${direction} setup on ${timeframe} because ${primary}. ${supporting}`;
 }
 
 function detailRecency(signal) {
@@ -1170,9 +1150,8 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
           <div>
             <span>{isForex ? "Forex Trade Analysis" : "Trade Analysis"}</span>
             <strong>{isForex ? signal.pair : signal.symbol}</strong>
-            <p>{isForex ? "Session-qualified setup" : signal.score >= 80 ? "High-conviction setup" : "Qualified setup"} · {detailRecency(signal)}</p>
+            <p>{isForex ? "Session-qualified setup" : "Setup detail"} · {detailRecency(signal)}</p>
           </div>
-          <ScoreRing score={signal.score} />
         </header>
 
         <div className="graphite-trade-meta">
@@ -1181,16 +1160,12 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
           <StatTile label="R/R" value={signal.rr} tone="reward" />
         </div>
 
-        {signal.isHistory ? (
-          <section className={`graphite-history-result ${Number(signal.historyResultR) < 0 ? "loss" : Number(signal.historyResultR) > 0 ? "profit" : ""}`}>
-            <div>
-              <span>Trade result</span>
-              <strong>{signal.historyResult || "Tracking"}</strong>
-            </div>
-            <em>{signal.historyResultR === null || signal.historyResultR === undefined ? "Tracking" : `${Number(signal.historyResultR) >= 0 ? "+" : ""}${Number(signal.historyResultR).toFixed(1)}R`}</em>
-          </section>
-        ) : null}
 
+        {!isForex ? <section className="graphite-reasoning">
+          <span>48-hour tracking exit</span>
+          <p>The trade closes after its 48-hour tracking window if neither the stop-loss nor the final target has been hit.</p>
+          {signal.trackingDeadline || signal.rawIdea?.tracking_deadline ? <p>Tracking close: {new Date(signal.trackingDeadline || signal.rawIdea.tracking_deadline).toLocaleString(undefined, { timeZone: "UTC" })} UTC</p> : <p>The window starts at the first tracking candle after signal creation.</p>}
+        </section> : null}
         <ExecutionLadder signal={signal} />
 
         <section className="graphite-reasoning">
@@ -1226,9 +1201,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
     const lifecycleStatus = String(trade.lifecycle_status || "").toUpperCase();
     const resultR = trade.result_r ?? trade.pnl;
     const state = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
-    const displayResult = resultR === null || resultR === undefined
-      ? lifecycleStatus === "TP1_HIT" ? "TP1 Hit" : ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(lifecycleStatus) ? state : "Tracking"
-      : `${Number(resultR) >= 0 ? "+" : ""}${Number(resultR).toFixed(1)}R`;
+    const displayResult = state;
     return {
       symbol: trade.symbol,
       direction: trade.direction || "Trade",
@@ -1247,17 +1220,9 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
   const rows = savedRows
     .filter((item) => (marketFilter === "all" ? true : item.market === marketFilter))
     .filter((item) => statusFilter === "all" || item.filterStatus.includes(statusFilter) || item.result.toLowerCase().includes(statusFilter));
-  const totalR = rows.reduce((sum, item) => {
-    const value = Number.parseFloat(item.r);
-    return Number.isFinite(value) ? sum + value : sum;
-  }, 0);
   return (
     <div className="graphite-screen">
-      <section className="graphite-history-hero">
-        <span>{market === MARKET_TYPES.forex ? "Forex Total R" : "Total R"}</span>
-        <strong>{`${totalR >= 0 ? "+" : ""}${totalR.toFixed(1)}R`}</strong>
-        <p>{rows.length} tracked ideas · market filter active</p>
-      </section>
+      <section className="graphite-history-hero"><span>Saved signals</span><p>Entry, target, stop and tracking status.</p></section>
 
       <div className="graphite-filter-row">
         {["all", MARKET_TYPES.crypto, MARKET_TYPES.forex].map((option) => <button key={option} type="button" className={marketFilter === option ? "active" : ""} onClick={() => setMarketFilter(option)}>{option}</button>)}
@@ -1278,7 +1243,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
         ) : null}
         {rows.map((item) => (
           <button type="button" className="market-pair-row history" key={item.id || `${item.symbol}-${item.date}`} onClick={() => onSelect?.(item.trade)}>
-            <i className={item.r.startsWith("-") || /short|sell/i.test(item.direction) ? "short" : "long"} aria-hidden="true" />
+            <i className={/short|sell/i.test(item.direction) ? "short" : "long"} aria-hidden="true" />
             <div className="market-pair-copy">
               <div>
                 <strong>{item.symbol}</strong>
@@ -1286,10 +1251,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
               </div>
               <small>{item.timeframe.toUpperCase()} · {item.date} · {item.state}</small>
             </div>
-            <span className={`market-pair-quality ${item.r.startsWith("-") ? "loss" : item.r === "Tracking" ? "" : "profit"}`}>
-              <strong>{item.r}</strong>
-              <small>{item.score} score</small>
-            </span>
+            <span className="market-pair-quality"><strong>{item.state}</strong></span>
           </button>
         ))}
       </section>
@@ -1418,11 +1380,11 @@ export default function MobileDemo({
     const pending = pendingSetups.map(normalizePendingSetup);
     const unique = new Map();
     [...active, ...confirmed, ...pending].forEach((signal) => {
-      const key = `${signal.symbol}|${signal.timeframe}|${String(signal.direction).toLowerCase()}`;
+      const key = signal.rawIdea?.opportunity_key || signal.rawIdea?.signal_fingerprint || `${signal.symbol}|${signal.timeframe}|${String(signal.direction).toLowerCase()}|${signal.rawIdea?.signal_candle_time || ""}`;
       if (!unique.has(key)) unique.set(key, signal);
     });
     return [...unique.values()]
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0))
       .slice(0, 50)
       .map((signal, index) => ({ ...signal, rank: index + 1 }));
   }, [activeCryptoTrades, pendingSetups, topIdeas]);
@@ -1433,7 +1395,7 @@ export default function MobileDemo({
       if (settings.defaultSorting === "newest") {
         return new Date(b.rawIdea?.generated_at || b.rawIdea?.created_at || 0) - new Date(a.rawIdea?.generated_at || a.rawIdea?.created_at || 0);
       }
-      return b.score - a.score;
+      return Number(b.volume24h || 0) - Number(a.volume24h || 0);
     });
   }, [preferences.trading, signals]);
   const activeSignals = useMemo(
@@ -1506,6 +1468,13 @@ export default function MobileDemo({
           setSelectedSignal(normalizeSavedTrade(freshTrade));
           return;
         }
+        if (selectedSignal.rawIdea?.history_trade_id) {
+          const fresh = await getTradeHistoryDetail(selectedSignal.rawIdea.history_trade_id);
+          if (cancelled) return;
+          setSelectedSignal((current) => current?.id === selectedSignal.id
+            ? { ...normalizeActiveCryptoTrade(fresh), latestPrice: current.latestPrice, latestPriceAt: current.latestPriceAt }
+            : current);
+        }
         const candles = await getCandles({
           exchange: selectedSignal.exchange || "hyperliquid",
           symbol: selectedSignal.symbol,
@@ -1531,6 +1500,7 @@ export default function MobileDemo({
     auth.user?.id,
     selectedSignal?.exchange,
     selectedSignal?.historyTradeId,
+    selectedSignal?.rawIdea?.history_trade_id,
     selectedSignal?.market,
     selectedSignal?.symbol,
     selectedSignal?.timeframe,
@@ -1761,7 +1731,7 @@ export default function MobileDemo({
         setForexSignals((current) => {
           const merged = new Map(current.map((signal) => [signal.id, signal]));
           persisted.forEach((signal) => merged.set(signal.id, signal));
-          return [...merged.values()].sort((a, b) => b.score - a.score);
+          return [...merged.values()].sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
         });
       }
       return result;

@@ -65,7 +65,10 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
         max_open_trades=settings.default_max_open_trades,
         preferred_timeframe=timeframe,
     )
+    df.attrs["market_metadata"] = market
     analysis = analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
+    from app.services.liquidity_filter import perp_volume_24h
+    for idea in analysis.trade_ideas: idea.market_volume_24h = perp_volume_24h(market)
     detected_ideas = cap_production_cohorts(analysis.trade_ideas)
     save_trade_ideas(detected_ideas)
     analysis.trade_ideas = [idea for idea in detected_ideas if idea.strategy_decision == "TRADE"]

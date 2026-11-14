@@ -135,6 +135,10 @@ class TradeIdea(BaseModel):
     confidence_score: float
     invalid_condition: str
     warning: str = "Not financial advice. Manage risk."
+    score_evaluation: dict | None = Field(default=None, exclude=True)
+    market_volume_24h: float | None = None
+    history_created_at: datetime | None = None
+    tracking_deadline: datetime | None = None
     rank_score: float = 0
     position_size_units: float | None = None
     risk_amount: float | None = None
@@ -273,6 +277,7 @@ class MarketRegimeSnapshot(BaseModel):
 
 
 class SignalReview(BaseModel):
+    score_evaluation: dict | None = Field(default=None, exclude=True)
     symbol: str
     timeframe: str
     exchange: str
@@ -367,6 +372,8 @@ class PaperTrade(PaperTradeCreate):
 
 
 class TradeHistoryRecord(BaseModel):
+    tracking_deadline: datetime | None = None
+    market_volume_24h: float | None = None
     gross_r_multiple: float | None = None
     fee_r_multiple: float | None = None
     funding_r_multiple: float | None = None

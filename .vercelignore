@@ -1,0 +1,11 @@
+# Upload only the frontend; the backend is released to the VPS.
+/*
+!frontend
+!vercel.ts
+frontend/node_modules
+frontend/node_modules/**
+frontend/dist
+frontend/dist/**
+frontend/.env*
+frontend/.vercel
+frontend/.vercel/**

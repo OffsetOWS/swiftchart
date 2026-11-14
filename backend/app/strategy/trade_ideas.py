@@ -162,6 +162,7 @@ def _signal_quality_control(
             "status": "READY",
             "reasons": [],
             "adjustment": 0.0,
+            "archive_details": {"branch":"INSUFFICIENT_INPUT", "penalty":0.0,"cap":None},
         }
 
     close = df["close"].astype(float)
@@ -293,6 +294,7 @@ def _signal_quality_control(
         "status": status,
         "reasons": reasons,
         "adjustment": round(adjusted - score, 1),
+        "archive_details": {"penalty":penalty,"cap":cap,"uncapped":score-penalty,"floor":0.0,"extension_atr":extension_atr,"rsi":rsi,"vwap":vwap,"ema20":ema20,"equilibrium":equilibrium,"momentum_decay":bool(momentum_decay),"far_from_equilibrium":bool(far_from_equilibrium),"rsi_exhausted":bool(rsi_exhausted),"trap_sweep":bool(trap_sweep)},
     }
 
 
@@ -633,8 +635,11 @@ def _build_idea(
     bullish_sweep: LiquiditySweep | None,
     bearish_sweep: LiquiditySweep | None,
 ) -> tuple[TradeIdea | None, SignalReview | None]:
+    from app.services.score_archive import make_evidence
     entry = (entry_low + entry_high) / 2
     rr = _rr(entry, stop, tp2, direction)
+    rr_unrounded=max(0.0,(tp2-entry if direction=="Long" else entry-tp2)/abs(entry-stop)) if entry!=stop else 0.0
+    score_inputs = dict(rr_unrounded=rr_unrounded, rr_rounding="Python round(raw_rr,2) before scoring; unchanged", regime=regime, direction=direction, zone=zone.model_dump(mode="json"), sweep=sweep.model_dump(mode="json") if sweep else None, htf_bias=htf_bias, rr=rr, vol_ok=vol_ok, mom_ok=mom_ok, distance_from_mid=distance_from_mid, entry_low=entry_low, entry_high=entry_high, stop=stop, tp1=tp1, tp2=tp2, atr=average_true_range(df), bullish_sweep=bullish_sweep.model_dump(mode="json") if bullish_sweep else None, bearish_sweep=bearish_sweep.model_dump(mode="json") if bearish_sweep else None)
     if rr < settings.min_rr:
         rejected_reason = f"Signal rejected because risk/reward {rr:.2f} is below minimum {settings.min_rr:.2f}."
         _log_signal_review(
@@ -650,6 +655,7 @@ def _build_idea(
             confidence_adjustment=0,
         )
         return None, SignalReview(
+            score_evaluation=make_evidence(symbol=symbol,timeframe=timeframe,exchange=exchange,direction=direction,df=df,risk=settings,inputs=score_inputs,regime=market_regime_data),
             symbol=symbol,
             timeframe=timeframe,
             exchange=exchange,
@@ -688,6 +694,7 @@ def _build_idea(
         market_regime=market_regime_data,
     )
     adjusted_score, confidence_adjustment, regime_note = _regime_adjustment(direction, score, market_regime_data, confirmations)
+    regime_adjusted_score = adjusted_score
     trend_alignment = _regime_alignment(direction, market_regime_data)
     rejected_reason = regime_note if regime_note and "rejected" in regime_note.lower() else None
     quality = _signal_quality_control(
@@ -715,6 +722,10 @@ def _build_idea(
             rejected_reason = "Signal rejected because setup score is below 65 after exhaustion quality control. " + " ".join(quality_reasons)
         else:
             rejected_reason = "Signal rejected because setup score is below 65 after regime adjustment."
+    score_evaluation = make_evidence(symbol=symbol,timeframe=timeframe,exchange=exchange,direction=direction,df=df,risk=settings,inputs=score_inputs,parts=parts,base=score,regime_adjusted=regime_adjusted_score,quality=quality,final=round(adjusted_score,1),regime=market_regime_data,confirmations=confirmations)
+    if score_evaluation is not None:
+        score_evaluation["final_grade"]=_grade(adjusted_score)
+        score_evaluation["gate_results"]={"accepted":rejected_reason is None,"reason":rejected_reason,"internal_pass_floor":MIN_SETUP_SCORE,"unrounded_final":adjusted_score,"entry_status":entry_status}
     if rejected_reason:
         _log_signal_review(
             symbol=symbol,
@@ -729,6 +740,7 @@ def _build_idea(
             confidence_adjustment=confidence_adjustment,
         )
         return None, SignalReview(
+            score_evaluation=score_evaluation,
             symbol=symbol,
             timeframe=timeframe,
             exchange=exchange,
@@ -757,6 +769,7 @@ def _build_idea(
     signal_candle_time = df["timestamp"].iloc[-1]
     setup_family = setup_family_from_regime(regime)
     idea = TradeIdea(
+        score_evaluation=score_evaluation,
         symbol=symbol,
         timeframe=timeframe,
         exchange=exchange,
@@ -810,6 +823,7 @@ def _build_idea(
         signal_candle_close=float(df["close"].iloc[-1]),
     )
     review = SignalReview(
+            score_evaluation=score_evaluation,
         symbol=symbol,
         timeframe=timeframe,
         exchange=exchange,
@@ -1269,10 +1283,10 @@ def build_trade_ideas(
         if unconfirmed and unconfirmed.confirmation_status != "confirmed":
             return [], "Unconfirmed sweep — no trade yet.", signal_reviews
         return [], "NO TRADE: setup score is below 65 or risk/reward is not good enough.", signal_reviews
-    return sorted(ideas, key=lambda idea: idea.rank_score, reverse=True), None, signal_reviews
+    return ideas, None, signal_reviews
 
 
-def analyze_dataframe(
+def _analyze_dataframe_impl(
     symbol: str,
     timeframe: str,
     exchange: str,
@@ -1319,3 +1333,14 @@ def analyze_dataframe(
         market_regime_data=market_regime_data,
         rejected_signals=[review for review in signal_reviews if not review.accepted],
     )
+
+
+def analyze_dataframe(symbol, timeframe, exchange, df, settings, htf_dfs=None, global_regime_score=None, breadth_above_ma_pct=None):
+    from app.services.score_archive import capture_context
+    with capture_context(symbol, timeframe, exchange, df, settings, htf_dfs, global_regime_score, breadth_above_ma_pct):
+        result = _analyze_dataframe_impl(symbol, timeframe, exchange, df, settings, htf_dfs, global_regime_score, breadth_above_ma_pct)
+        from app.services.score_archive import make_evidence
+        for review in result.rejected_signals:
+            if review.score_evaluation is None:
+                review.score_evaluation=make_evidence(symbol=symbol,timeframe=timeframe,exchange=exchange,direction=review.direction,df=df,risk=settings,inputs={"not_computed_reason":review.reason})
+        return result

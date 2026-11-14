@@ -56,16 +56,11 @@ def test_trade_alert_formatter_preserves_intentional_public_alert_fields():
 
     message = format_trade_alert(trade_idea)
 
-    assert message == (
-        "🔴 LDO/USDT · 4H · SHORT\n"
-        "Score: 77/100 (Valid) · HTF bearish aligned\n\n"
-        "Entry: 0.34201 – 0.34512\n"
-        "Stop: 0.352031 (-2.5%)\n"
-        "TP1: 0.328189 (+4.5%) · 1.8R\n"
-        "TP2: 0.315749 (+8.1%) · 3.3R\n\n"
-        "Why: Market structure favors trend-continuation pullbacks.\n"
-        "BTC: Unavailable"
-    )
+    assert "LDO/USDT · 4H · SHORT" in message
+    for field in ("Entry: 0.34201", "Stop Loss: 0.352031", "TP1: 0.328189", "TP2 (final target): 0.315749", "48-hour", "Tracking close:"):
+        assert field in message
+    assert "Score:" not in message and "77/100" not in message
+    assert "%" not in message and "3.3R" not in message
     removed_fields = [
         "Source:",
         "Market Regime:",
@@ -99,8 +94,9 @@ def test_trade_alert_warns_when_direction_conflicts_with_bias():
         {"regime": "bearish", "score_4h": -55, "score_1d": -30, "score": -42.5},
     )
 
-    assert "HTF bearish opposed" in message
-    assert "BTC: Bearish" in message
+    assert "ARB/USDT" in message and "LONG" in message
+    assert "48-hour" in message
+    assert "score" not in message.lower() and "-42.5" not in message
 
 
 def test_manual_telegram_market_discovery_respects_the_liquidity_floor(monkeypatch):

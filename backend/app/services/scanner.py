@@ -354,6 +354,8 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore, fetch_stats) for market in scan_markets])
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
         candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:candidate_limit]
+        from app.services.score_archive import candle_snapshot
+        external_context_snapshots=[candle_snapshot(c.candles,exchange=c.exchange,symbol=c.symbol,timeframe=timeframe) for c in candidates] if get_settings().crypto_score_archive_enabled else []
         breadth_values = []
         global_scores = []
         for candidate in candidates:
@@ -379,6 +381,9 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                             htf_dfs.append(await _scan_candles(candidate.exchange, candidate.fetch_symbol, htf, 220, fetch_stats))
                         except Exception:
                             continue
+                    market_metadata = next((m for m in scan_markets if m["symbol"]==candidate.symbol and m["exchange"]==candidate.exchange), {})
+                    df.attrs["market_metadata"] = market_metadata
+                    df.attrs["external_context_snapshots"] = external_context_snapshots
                     analysis = analyze_dataframe(
                         candidate.symbol,
                         timeframe,
@@ -389,6 +394,8 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                         global_regime_score=global_score,
                         breadth_above_ma_pct=breadth_above_ma_pct,
                     )
+                    from app.services.liquidity_filter import perp_volume_24h
+                    for idea in analysis.trade_ideas: idea.market_volume_24h = perp_volume_24h(market_metadata)
                     save_signal_reviews(analysis.rejected_signals)
                     valid_ideas = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
                     for idea in valid_ideas:
@@ -403,18 +410,11 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         ideas = [idea for group, _ in analyzed for idea in group]
         pending_setups = sorted(
             [pending for _, pending in analyzed if pending is not None],
-            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
+            key=lambda pending: next((float(m.get("perpVolume24h") or m.get("volume_24h") or 0) for m in scan_markets if m.get("symbol")==pending.symbol and m.get("exchange")==pending.exchange),0),
             reverse=True,
         )[:20]
-        ranked_all = sorted(
-            ideas,
-            key=lambda idea: (
-                idea.setup_score or idea.confidence_score,
-                idea.risk_reward_ratio,
-                idea.rank_score,
-            ),
-            reverse=True,
-        )
+        from app.services.signal_limits import rank_by_volume
+        ranked_all = rank_by_volume(ideas)
         # Disabled or shadow candidates must never crowd a validated strategy
         # out of the bounded actionable selection. Persist bounded cohorts separately so
         # forward analytics remain useful without producing normal trade volume.
@@ -424,6 +424,14 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         wait_ranked = [idea for idea in ranked_all if idea.strategy_decision == "WAIT_FOR_RETEST"][:5]
         no_trade_ranked = [idea for idea in ranked_all if idea.strategy_decision == "NO_TRADE"][:3]
         ranked = [*executable_ranked, *shadow_ranked, *wait_ranked, *no_trade_ranked]
+        from app.services.score_archive import persist
+        from app.utils.database import get_connection
+        selected_ids={id(idea) for idea in ranked}
+        with get_connection() as archive_connection:
+            for scan_rank,idea in enumerate(ranked_all,1):
+                if idea.score_evaluation is None:continue
+                idea.score_evaluation["scan_selection"]={"rank":scan_rank,"ranking":"reported_24h_volume_desc","volume_24h":idea.market_volume_24h,"selected_for_persistence":id(idea) in selected_ids,"strategy_decision":idea.strategy_decision,"reason":idea.v2_decision_reason,"per_scan_cap":get_settings().crypto_max_signals_per_scan,"per_direction_cap":get_settings().crypto_max_signals_per_direction,"minimum_perp_volume_24h":get_settings().min_perp_volume_24h}
+                persist(archive_connection,idea.score_evaluation)
         persistence_diagnostics: list[dict] = []
         save_trade_ideas(ranked, diagnostics=persistence_diagnostics)
         blocked_symbols = {
@@ -445,7 +453,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         ]
         pending_setups = sorted(
             [*pending_setups, *retest_pending],
-            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
+            key=lambda pending: next((float(m.get("perpVolume24h") or m.get("volume_24h") or 0) for m in scan_markets if m.get("symbol")==pending.symbol and m.get("exchange")==pending.exchange),0),
             reverse=True,
         )[:20]
         await dispatch_trade_ideas_to_execution(executable_ranked)

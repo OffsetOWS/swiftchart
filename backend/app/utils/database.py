@@ -240,6 +240,10 @@ def init_db() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_lifecycle ON trade_ideas(lifecycle_status)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_trade_ideas_v2_strategy ON trade_ideas(setup_family, strategy_version, edge_status, strategy_decision)")
         _ensure_telegram_dispatch_schema(connection)
+        from app.services.score_archive import ensure_schema as ensure_scores
+        from app.services.outcome_events import ensure_schema as ensure_outcomes
+        ensure_scores(connection)
+        ensure_outcomes(connection)
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_created_at ON signal_reviews(created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_signal_reviews_regime ON signal_reviews(regime_label)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_genlayer_ai_scans_created_at ON genlayer_ai_scans(created_at)")

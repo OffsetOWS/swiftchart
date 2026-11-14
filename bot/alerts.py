@@ -133,6 +133,7 @@ async def dispatch_crypto_outbox(bot: Bot) -> dict[str, int | str]:
         if final_status in (DISPATCH_SUCCEEDED, DISPATCH_PARTIAL_FINAL):
             mark_dedupe_sent(idea, namespace="telegram")
 
+    outcome_summary = await dispatch_crypto_outcomes(bot)
     logger.info(
         (
             "telegram_canonical_dispatch_complete subscribers=%s opportunities=%s recipients_pending=%s "
@@ -146,6 +147,7 @@ async def dispatch_crypto_outbox(bot: Bot) -> dict[str, int | str]:
         skipped_by_dedup,
     )
     return {
+        "outcome_events": outcome_summary,
         "status": "ok",
         "source": "canonical_persisted_v2_opportunities",
         "subscribers": len(subscribers),
@@ -157,6 +159,30 @@ async def dispatch_crypto_outbox(bot: Bot) -> dict[str, int | str]:
         "failed": failed,
         "skipped_by_dedup": skipped_by_dedup,
     }
+
+
+async def dispatch_crypto_outcomes(bot):
+    from app.services.outcome_events import claim,recipient_claimed,finish
+    from bot.formatter import format_outcome_event
+    from telegram.error import RetryAfter,BadRequest
+    result={"sent":0,"failed":0}
+    for item in claim():
+        if not recipient_claimed(item["recipient_id"]):continue
+        try:
+            response=await bot.send_message(chat_id=int(item["chat_id"]),text=format_outcome_event(item),reply_to_message_id=item["reply_to_message_id"],allow_sending_without_reply=False)
+            finish(item["recipient_id"],message_id=response.message_id,sent_at=getattr(response,"date",None),response_reply_message_id=getattr(getattr(response,"reply_to_message",None),"message_id",None));result["sent"]+=1
+        except RetryAfter as exc:
+            delay=exc.retry_after.total_seconds() if hasattr(exc.retry_after,"total_seconds") else float(exc.retry_after)
+            finish(item["recipient_id"],failure="RATE_LIMIT",retry_after=delay);result["failed"]+=1
+        except Forbidden:
+            finish(item["recipient_id"],failure="FORBIDDEN");result["failed"]+=1
+        except BadRequest as exc:
+            reason=permanent_telegram_failure_reason(str(exc)) or ("REPLY_NOT_FOUND" if "reply" in str(exc).lower() else "REJECTED")
+            finish(item["recipient_id"],failure=reason);result["failed"]+=1
+        except Exception:
+            finish(item["recipient_id"],failure="DELIVERY_UNCERTAIN");result["failed"]+=1
+            logger.warning("Outcome delivery uncertain event_id=%s",item["id"])
+    return result
 
 
 async def run_alert_scan(bot: Bot) -> dict:

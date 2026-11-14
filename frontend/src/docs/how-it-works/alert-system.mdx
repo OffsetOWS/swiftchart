@@ -1,15 +1,13 @@
 # Alert System
 
-The alert system sends SwiftChart signals to Telegram when a setup clears the strategy threshold.
-
 ## Alert quality
 
-Alerts are meant to be selective. The scanner waits for clean setups rather than posting every small candle reaction.
+Eligible crypto setups retain their original entry, stop, targets and explicit tracking deadline.
 
 ## Telegram flow
 
-Users can subscribe to alerts and receive concise signal summaries with direction, entry, stop, targets, confidence, and invalidation.
+Settled TP1, TP2, stop-loss and timed-close events reply to the original alert for recipients who received it. Messages state the event and price. Ambiguous or unresolved events wait for settlement.
 
-## Future controls
+## Tracking exit
 
-Planned controls include watchlists, subscription tiers, per-timeframe alerts, and quiet hours.
+The trade closes after its 48-hour tracking window if neither the stop nor final target has been reached. The original alert and signal detail show the exact UTC close time.

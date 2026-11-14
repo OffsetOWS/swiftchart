@@ -112,6 +112,7 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
     rejection_reasons: dict[str, int] = {}
     symbols_scanned = 0
     symbols = await _scan_symbols(selected_exchange)
+    market_metadata = {str(m.get("symbol", "")).upper():m for m in await get_markets_cached(selected_exchange)}
     btc_context = await _btc_context(selected_exchange)
 
     logger.info(
@@ -128,7 +129,11 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
             if len(df) < 80:
                 rejection_reasons["insufficient candles"] = rejection_reasons.get("insufficient candles", 0) + 1
                 continue
+            df.attrs["market_metadata"] = market_metadata.get(symbol,{})
             analysis = analyze_dataframe(symbol, timeframe, selected_exchange, df, risk)
+            for idea in analysis.trade_ideas: idea.market_volume_24h = perp_volume_24h(market_metadata.get(symbol,{}))
+            from app.services.trade_history import save_signal_reviews
+            save_signal_reviews(analysis.rejected_signals)
             ideas.extend(analysis.trade_ideas)
             for review in analysis.rejected_signals:
                 reason = review.reason or "rejected by setup/QC"
@@ -141,15 +146,8 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
             rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
             logger.warning("Telegram independent scan failed symbol=%s exchange=%s timeframe=%s error=%s", symbol, selected_exchange, timeframe, exc)
 
-    ranked = sorted(
-        ideas,
-        key=lambda idea: (
-            idea.setup_score or idea.confidence_score,
-            idea.risk_reward_ratio,
-            idea.rank_score,
-        ),
-        reverse=True,
-    )
+    from app.services.signal_limits import rank_by_volume
+    ranked = rank_by_volume(ideas)
     ranked = cap_signals_per_scan(ranked)
     logger.info(
         "telegram_independent_scan_completed exchange=%s timeframe=%s symbols_scanned=%s valid_ideas_found=%s rejection_reasons=%s",

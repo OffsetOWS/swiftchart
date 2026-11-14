@@ -462,6 +462,8 @@ def _update_opportunity(
             existing["id"],
         ),
     )
+    from app.services.score_archive import link
+    link(connection, idea, int(existing["id"]))
     return int(existing["id"])
 
 
@@ -479,7 +481,13 @@ def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | No
         # gap between scanner preflight and persistence across service workers.
         connection.execute("BEGIN IMMEDIATE")
         for idea in ideas:
+            initial_ids = len(ids)
+            connection.execute("SAVEPOINT score_opportunity")
             try:
+                from app.services.score_archive import persist
+                if get_settings().crypto_score_archive_enabled and idea.score_evaluation is None:
+                    raise ValueError("New crypto opportunity has no decision-time score evidence")
+                persist(connection, idea.score_evaluation)
                 family, opportunity_key = _prepare_opportunity_identity(idea)
                 existing = None
                 if opportunity_key:
@@ -513,7 +521,16 @@ def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | No
                         continue
 
                 if existing is not None:
-                    if _is_protected_history(existing):
+                    public_claimed = connection.execute("""SELECT 1 FROM telegram_dispatch_recipients r JOIN telegram_dispatches d ON d.id=r.dispatch_id WHERE d.trade_idea_id=? AND (r.attempt_count>0 OR r.status='SENT') LIMIT 1""",(existing["id"],)).fetchone()
+                    protected_history = _is_protected_history(existing)
+                    if protected_history or public_claimed:
+                        from app.services.score_archive import link
+                        link(connection, idea, existing["id"], make_current=False)
+                        if public_claimed and not protected_history:
+                            idea.entry_zone=(existing["entry_zone_low"],existing["entry_zone_high"])
+                            idea.stop_loss=existing["stop_loss"];idea.take_profit_1=existing["take_profit_1"];idea.take_profit_2=existing["take_profit_2"]
+                            _adopt_existing_identity(idea,existing)
+                            ids.append(existing["id"])
                         logger.info(
                             "opportunity_skipped reason=protected_history opportunity_key=%s id=%s status=%s result=%s",
                             opportunity_key,
@@ -528,6 +545,8 @@ def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | No
                             idea.strategy_decision = "WAIT_FOR_RETEST"
                             idea.outcome_tracking_mode = "NONE"
                         _adopt_existing_identity(idea, existing)
+                        from app.services.score_archive import link
+                        link(connection,idea,existing["id"],make_current=False)
                         logger.info(
                             "opportunity_skipped reason=same_candle_is_not_retest opportunity_key=%s id=%s",
                             opportunity_key,
@@ -714,6 +733,8 @@ def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | No
                         json.dumps(idea.reversal_confirmations),
                     ),
                 )
+                from app.services.score_archive import link
+                link(connection, idea, trade_id)
                 ids.append(trade_id)
                 logger.info(
                     "opportunity_new opportunity_key=%s id=%s symbol=%s timeframe=%s exchange=%s direction=%s setup_family=%s entry_status=%s",
@@ -727,7 +748,11 @@ def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | No
                     idea.entry_status,
                 )
             except Exception:
+                connection.execute("ROLLBACK TO score_opportunity")
+                del ids[initial_ids:]
                 logger.exception("Failed to save trade idea symbol=%s timeframe=%s exchange=%s", idea.symbol, idea.timeframe, idea.exchange)
+            finally:
+                connection.execute("RELEASE score_opportunity")
     return ids
 
 
@@ -736,7 +761,9 @@ def save_signal_reviews(reviews: Iterable[SignalReview]) -> int:
     with get_connection() as connection:
         for review in reviews:
             try:
-                connection.execute(
+                from app.services.score_archive import persist
+                evaluation_id = persist(connection, review.score_evaluation)
+                cursor = connection.execute(
                     """
                     INSERT INTO signal_reviews (
                         symbol, timeframe, exchange, direction, accepted, reason,
@@ -761,6 +788,7 @@ def save_signal_reviews(reviews: Iterable[SignalReview]) -> int:
                         json.dumps(review.reversal_confirmations),
                     ),
                 )
+                if evaluation_id: connection.execute("UPDATE signal_reviews SET score_evaluation_id=? WHERE id=?", (evaluation_id,cursor.lastrowid))
                 count += 1
             except Exception:
                 logger.exception("Failed to save signal review symbol=%s timeframe=%s exchange=%s", review.symbol, review.timeframe, review.exchange)
@@ -772,6 +800,9 @@ def row_to_dict(row) -> dict:
     for key in ("created_at", "expires_at", "outcome_checked_at", "entry_triggered_at", "tp1_hit_at", "tp2_hit_at", "sl_hit_at", "expired_at", "closed_at", "signal_candle_time", "retest_confirmed_at", "executable_at", "strict_trigger_candle_time"):
         if data.get(key) and isinstance(data[key], str):
             data[key] = _parse_dt(data[key])
+    if data.get("created_at") and data.get("exchange") != "forex":
+        from app.services.crypto_exit_policy import deadline
+        data["tracking_deadline"] = deadline(data["created_at"], data["timeframe"])
     return data
 
 
@@ -935,7 +966,7 @@ def evaluate_trade(row: dict, candles: pd.DataFrame, *, expiry_bars: int | None 
         row, records,
         first_delivery=first_delivery or row.get("first_delivered_at"),
         as_of=as_of or datetime.now(UTC),
-        expiry_bars=expiry_bars or settings.trade_history_expiry_bars,
+        expiry_bars=expiry_bars or __import__("app.services.crypto_exit_policy", fromlist=["expiry_bars"]).expiry_bars(row),
         move_to_be=settings.trade_history_move_stop_to_entry_after_tp1
         if move_stop_to_entry_after_tp1 is None else move_stop_to_entry_after_tp1,
     )
@@ -970,8 +1001,13 @@ def update_outcome(trade_id: int, outcome: dict) -> None:
             lifecycle_status = before.get("lifecycle_status") or "active"
         else:
             lifecycle_status = "active"
-        record_correction(connection, "CRYPTO", trade_id, before, outcome,
+        from app.services.outcome_events import hold_conflicting_published_fills, enqueue
+        if hold_conflicting_published_fills(connection, trade_id, outcome):
+            logger.error("Published canonical outcome conflict held trade_id=%s", trade_id)
+            return
+        correction_id = record_correction(connection, "CRYPTO", trade_id, before, outcome,
                           outcome.get("tracking_evidence", {}), outcome["outcome_checked_at"])
+        enqueue(connection, trade_id, outcome, correction_id)
         connection.execute(
             """
             UPDATE trade_ideas
@@ -1049,13 +1085,12 @@ def list_active_crypto_trades(exchange: str | None = None, limit: int = 50) -> l
     selected_exchange = str(exchange or "all").lower()
     clauses = [
         "t.result = 'OPEN'",
-        "t.lifecycle_status = 'active'",
+        "t.lifecycle_status IN ('active','tp1_hit')",
         f"t.status IN ({','.join('?' for _ in ACTIVE_TRADE_STATUSES)})",
-        "(t.expires_at IS NULL OR datetime(t.expires_at) > datetime(?))",
         "t.exchange != 'forex'",
         "EXISTS (SELECT 1 FROM telegram_dispatch_recipients r WHERE r.dispatch_id = d.id AND r.status = 'SENT')",
     ]
-    values: list = [*ACTIVE_TRADE_STATUSES, _now_iso()]
+    values: list = [*ACTIVE_TRADE_STATUSES]
     if selected_exchange != "all":
         clauses.append("t.exchange = ?")
         values.append(selected_exchange)
@@ -1067,7 +1102,7 @@ def list_active_crypto_trades(exchange: str | None = None, limit: int = 50) -> l
             FROM trade_ideas t
             JOIN telegram_dispatches d ON d.trade_idea_id = t.id
             WHERE {' AND '.join(clauses)}
-            ORDER BY t.setup_score DESC, datetime(COALESCE(t.executable_at, t.created_at)) DESC, t.id DESC
+            ORDER BY COALESCE(t.market_volume_24h,0) DESC, datetime(COALESCE(t.executable_at, t.created_at)) DESC, t.id DESC
             LIMIT ?
             """,
             [*values, row_limit],
@@ -1275,7 +1310,7 @@ async def _refine_with_intrabar(row: dict, outcome: dict, delivered, candle_cach
         return refine_ambiguous(
             row, outcome, candle_cache[cache_key].to_dict("records"),
             first_delivery=delivered or row.get("first_delivered_at"), as_of=as_of,
-            expiry_bars=settings.trade_history_expiry_bars,
+            expiry_bars=__import__("app.services.crypto_exit_policy", fromlist=["expiry_bars"]).expiry_bars(row),
             move_to_be=settings.trade_history_move_stop_to_entry_after_tp1,
             coarse_candles=candle_cache[(row["exchange"], row["symbol"], row["timeframe"])].to_dict("records"),
         )

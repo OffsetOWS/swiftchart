@@ -58,14 +58,12 @@ const SUPPORT_SECTIONS = [
   ["support-bug", "Report a Bug", "Send a structured technical report", Bug],
   ["support-feature", "Request a Feature", "Tell us what SwiftChart should solve", Sparkles],
   ["support-telegram", "Telegram Community", "Open the configured SwiftChart Telegram", Send],
-  ["support-docs", "Documentation", "Learn scores, setups, and scanning", BookOpen],
+  ["support-docs", "Documentation", "Learn signal levels and scanning", BookOpen],
   ["support-legal", "Legal and Risk Information", "Trading disclaimer and policies", FileText],
 ];
 
 const FAQS = [
   ["Getting Started", "How do I find a setup?", "Open Scan, scan the market or a coin, then tap a ranked result to review its execution levels and reasoning."],
-  ["Scan Scores", "What does the setup score mean?", "The score ranks structure, momentum, liquidity, confirmation, and risk/reward into a 65-100 quality signal."],
-  ["High Conviction", "What is High Conviction?", "Scores of 90 or above are labeled High Conviction. It is a quality classification, not a profit guarantee."],
   ["Trade Bias", "What does Long or Short mean?", "Long expects price strength; Short expects price weakness. Always review the stop and invalidation before acting."],
   ["Entry, Stop Loss, TP1 and TP2", "How do execution levels work?", "Entry is the decision zone, Stop Loss defines invalidation, and TP1/TP2 are staged profit objectives."],
   ["Crypto and Forex", "Can I switch markets?", "Use the Crypto/Forex switch on Home. The selected market carries into Scan, History, and Account."],
@@ -76,8 +74,6 @@ const FAQS = [
 
 const DOCUMENTATION = [
   ["How SwiftChart works", "SwiftChart filters market data, ranks valid structures, and presents the strongest setups with execution context."],
-  ["Scan scores", "Scores combine trend structure, momentum, liquidity, confirmations, freshness, and risk/reward. Higher is stronger, never guaranteed."],
-  ["High Conviction", "A score of 90-100 indicates unusually strong alignment across SwiftChart's quality checks."],
   ["Market bias and regime", "Bias describes directional pressure. Regime describes whether conditions are trending, ranging, or selective."],
   ["Long and Short", "Long setups look for upside continuation or reversal. Short setups look for downside continuation or rejection."],
   ["Risk-to-reward", "Potential reward divided by planned risk. It describes the setup profile, not its probability of winning."],
@@ -293,7 +289,7 @@ function NotificationSettings({ preferences, updateSection, onBack }) {
   }
 
   const groups = [
-    ["Trade Alerts", [["highConviction", "High Conviction Setups"], ["tp1", "TP1 Hit Alerts"], ["tp2", "TP2 Hit Alerts"], ["stopLoss", "Stop Loss Alerts"], ["nearEntry", "Price Near Entry Alerts"], ["tradeOpened", "Trade Opened"], ["tradeClosed", "Trade Closed"]]],
+    ["Trade Alerts", [["highConviction", "New Setups"], ["tp1", "TP1 Hit Alerts"], ["tp2", "TP2 Hit Alerts"], ["stopLoss", "Stop Loss Alerts"], ["nearEntry", "Price Near Entry Alerts"], ["tradeOpened", "Trade Opened"], ["tradeClosed", "Trade Closed"]]],
     ["Market Alerts", [["marketBias", "Market Bias Changes"], ["sessions", "Market Session Alerts"], ["dailySummary", "Daily Market Summary"]]],
     ["App Alerts", [["systemNotices", "System and Account Notices"]]],
     ["Delivery Preferences", [["sound", "Sound"], ["vibration", "Vibration"]]],
@@ -321,7 +317,6 @@ function NotificationSettings({ preferences, updateSection, onBack }) {
 function TradingSettings({ preferences, updateSection, resetSection, onBack }) {
   const settings = preferences.trading;
   const [confirmReset, setConfirmReset] = useState(false);
-  const minimum = settings.minimumScore;
   return (
     <div className="graphite-screen settings-screen">
       <PageHeader title="Trading Preferences" onBack={onBack} />
@@ -332,12 +327,11 @@ function TradingSettings({ preferences, updateSection, resetSection, onBack }) {
         <Segment value={settings.defaultTimeframe} options={[["1h", "1H"], ["4h", "4H"], ["1d", "1D"]]} onChange={(value) => updateSection("trading", { defaultTimeframe: value })} label="Default timeframe" />
       </SettingsGroup>
       <SettingsGroup title="Scan Defaults">
-        <label className="settings-range">Minimum scan score <strong>{minimum}</strong><input type="range" min="0" max="100" value={minimum} onChange={(event) => updateSection("trading", { minimumScore: Number(event.target.value) })} /></label>
         <label className="settings-select">Preferred exchange<select value={settings.preferredExchange} onChange={(event) => updateSection("trading", { preferredExchange: event.target.value })}><option value="all">All Exchanges</option><option value="hyperliquid">Hyperliquid</option><option value="variational">Variational</option></select><ChevronDown size={15} /></label>
-        <label className="settings-select">Default sorting<select value={settings.defaultSorting} onChange={(event) => updateSection("trading", { defaultSorting: event.target.value })}><option value="highest_score">Highest Score</option><option value="newest">Newest</option><option value="highest_rr">Highest R:R</option></select><ChevronDown size={15} /></label>
+        <label className="settings-select">Default sorting<select value={settings.defaultSorting} onChange={(event) => updateSection("trading", { defaultSorting: event.target.value })}><option value="highest_volume">Highest 24h volume</option><option value="newest">Newest</option><option value="highest_rr">Highest R:R</option></select><ChevronDown size={15} /></label>
       </SettingsGroup>
       <SettingsGroup title="Result Display">
-        {[["hideLowConviction", "Hide Low Conviction Setups"], ["showOnlyOpen", "Show Only Open Setups"], ["prioritizeHighConviction", "Prioritize High Conviction"], ["rememberFilters", "Remember Last Used Filters"]].map(([key, label]) => (
+        {[["showOnlyOpen", "Show Only Open Setups"], ["rememberFilters", "Remember Last Used Filters"]].map(([key, label]) => (
           <SettingsRow key={key} title={label} trailing={<Switch label={label} checked={settings[key]} onChange={(value) => updateSection("trading", { [key]: value })} />} />
         ))}
       </SettingsGroup>

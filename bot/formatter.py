@@ -39,7 +39,7 @@ def public_reason_summary(reason: str | None, max_sentences: int | None = None) 
         sentence = part.strip().rstrip(".")
         if not sentence:
             continue
-        if any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
+        if any(word in sentence.lower() for word in ("score", "grade", "confidence", "profit", "win rate", "performance", "streak", "expectancy")) or any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
             continue
         cleaned_parts.append(sentence)
         if max_sentences is not None and len(cleaned_parts) >= max_sentences:
@@ -92,20 +92,7 @@ def direction_conflicts_bias(direction: str | None, bias: str | None) -> bool:
 
 
 def btc_context_line(btc_context: dict | None) -> str:
-    if not btc_context:
-        return "BTC Context: -"
-    regime = btc_context.get("regime") or "-"
-    score_4h = btc_context.get("score_4h")
-    score_1d = btc_context.get("score_1d")
-    score = btc_context.get("score")
-    parts = [str(regime).title()]
-    if score is not None:
-        parts.append(f"score {fmt(score)}")
-    if score_4h is not None:
-        parts.append(f"4H {fmt(score_4h)}")
-    if score_1d is not None:
-        parts.append(f"1D {fmt(score_1d)}")
-    return f"BTC Context: {' | '.join(parts)}"
+    return "BTC Context: " + (str(btc_context.get("regime") or "Unavailable").title() if btc_context else "Unavailable")
 
 
 def regime_line(idea: TradeIdea | None, analysis: AnalysisResponse | None = None) -> str:
@@ -158,28 +145,22 @@ def format_analysis(analysis: AnalysisResponse) -> str:
     if idea is None:
         trade_block = (
             "Signal: No Trade\n"
-            "Setup Score: -\n"
-            "Grade: No Trade\n"
             "Entry: -\n"
             "Stop Loss: -\n"
             "TP1: -\n"
             "TP2: -\n"
             "R:R: -\n"
-            "Confidence: -"
         )
         reason = analysis.no_trade_reason or analysis.warning or "Price is mid-range or the setup is unclear."
         invalid = "Wait for a clean range edge, sweep reclaim, or confirmed breakout."
     else:
         trade_block = (
             f"Signal: {signal_label(idea)}\n"
-            f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
-            f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"Stop Loss: {fmt(idea.stop_loss)}\n"
             f"TP1: {fmt(idea.take_profit_1)}\n"
             f"TP2: {fmt(idea.take_profit_2)}\n"
             f"R:R: {fmt(idea.risk_reward_ratio)}\n"
-            f"Confidence: {fmt(idea.confidence_score)}%"
         )
         reason = idea.reason
         invalid = idea.invalid_condition
@@ -210,10 +191,9 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
         lines.append(
             "\n"
             f"{index}. {idea.symbol} — {idea.direction}\n"
-            f"Score: {fmt(idea.setup_score or idea.confidence_score)}/100 | Grade: {idea.setup_grade or 'Valid Setup'}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"SL: {fmt(idea.stop_loss)} | TP1: {fmt(idea.take_profit_1)} | TP2: {fmt(idea.take_profit_2)}\n"
-            f"R:R: {fmt(idea.risk_reward_ratio)} | Confidence: {fmt(idea.confidence_score)}%\n"
+            f"R:R: {fmt(idea.risk_reward_ratio)}\n"
             f"Reason: {public_reason_summary(idea.reason)}"
         )
     lines.append(f"\n{RISK_WARNING}")
@@ -230,41 +210,23 @@ def alert_symbol(symbol: str) -> str:
 
 
 def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -> str:
-    direction = idea.direction.upper()
-    is_long = direction == "LONG"
-    marker = "🟢" if is_long else "🔴"
-    entry = sum(idea.entry_zone) / 2
-    risk = abs(entry - idea.stop_loss)
-    side = 1 if is_long else -1
-
-    def move(price: float) -> str:
-        return f"{side * (price - entry) / entry * 100:+.1f}%" if entry > 0 else "N/A"
-
-    def target(price: float) -> str:
-        multiple = f"{side * (price - entry) / risk:.1f}R" if risk > 0 else "N/A"
-        return f"{fmt(price)} ({move(price)}) · {multiple}"
-
-    bias = idea.higher_timeframe_bias.removeprefix("HTF_").lower()
-    aligned = (is_long and bias == "bullish") or (not is_long and bias == "bearish")
-    htf = f"HTF {bias}" + (" aligned" if aligned else " opposed" if bias != "neutral" else "")
-    grade = (idea.setup_grade or "Valid Setup").removesuffix(" Setup")
-    score = idea.setup_score if idea.setup_score is not None else idea.confidence_score
-    reason = public_reason_summary(idea.reason).split(". ", 1)[0]
-    if reason != "-" and not reason.endswith("."):
-        reason += "."
-    if isinstance(btc_context, dict):
-        btc_context = {"bullish": "Bullish", "bearish": "Bearish", "ranging": "Neutral"}.get(btc_context.get("regime"))
-    btc = btc_context if btc_context in {"Bullish", "Neutral", "Bearish"} else "Unavailable"
+    from datetime import UTC,datetime
+    from app.services.crypto_exit_policy import deadline
+    when=idea.tracking_deadline or deadline(idea.history_created_at or datetime.now(UTC),idea.timeframe)
     return (
-        f"{marker} {alert_symbol(idea.symbol)} · {idea.timeframe.upper()} · {direction}\n"
-        f"Score: {fmt(score)}/100 ({grade}) · {htf}\n\n"
-        f"Entry: {fmt(idea.entry_zone[0])} – {fmt(idea.entry_zone[1])}\n"
-        f"Stop: {fmt(idea.stop_loss)} ({move(idea.stop_loss)})\n"
-        f"TP1: {target(idea.take_profit_1)}\n"
-        f"TP2: {target(idea.take_profit_2)}\n\n"
-        f"Why: {reason}\n"
-        f"BTC: {btc}"
+        f"{alert_symbol(idea.symbol)} · {idea.timeframe.upper()} · {idea.direction.upper()}\n\n"
+        f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
+        f"TP1: {fmt(idea.take_profit_1)}\nTP2 (final target): {fmt(idea.take_profit_2)}\n\n"
+        "The trade closes after its 48-hour tracking window if neither the stop-loss nor the final target has been hit.\n"
+        f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
     )
+
+
+def format_outcome_event(event: dict) -> str:
+    from decimal import Decimal
+    labels={"TP1":"TP1 hit — partial taken (50%).","TP2":"TP2 hit — final target reached.","STOP_LOSS":"Stop-loss hit.","TIME_EXIT":"48-hour tracking window ended — trade closed."}
+    price=format(Decimal(str(event["price"])),"f").rstrip("0").rstrip(".") if "." in str(event["price"]) else str(event["price"])
+    return f"{alert_symbol(event['symbol'])} · {event['direction']}\n{labels[event['event_kind']]}\nPrice: {price}"
 
 
 def format_forex_alert(signal: dict) -> str:
@@ -273,7 +235,6 @@ def format_forex_alert(signal: dict) -> str:
         "Market: FOREX\n"
         f"Pair: {signal.get('pair', '-')}\n"
         f"Direction: {signal.get('direction', '-')}\n"
-        f"Score: {fmt(signal.get('score'))} / {signal.get('grade', '-')}\n"
         f"Session: {signal.get('session', '-')}\n"
         f"Bias: {signal.get('pre_session_bias', '-')}\n"
         f"Entry: {fmt(signal.get('entry'))}\n"
@@ -298,7 +259,6 @@ def format_history(records: list[dict]) -> str:
             "\n"
             f"{record['symbol']} — {record['timeframe'].upper()} — {record['direction']} ({record.get('exchange', '-')})\n"
             f"Status: {record['status']}\n"
-            f"Setup Score: {fmt(record.get('setup_score'))}/100\n"
             f"TP/SL: TP1 {fmt(record['take_profit_1'])} | TP2 {fmt(record['take_profit_2'])} | SL {fmt(record['stop_loss'])}"
         )
     lines.append(f"\n{RISK_WARNING}")
@@ -335,7 +295,7 @@ def format_paper_trades(records: list[dict], *, open_only: bool = False) -> str:
 def strategy_text() -> str:
     return (
         "SwiftChart Strategy\n\n"
-        "SwiftChart classifies market regime first, scores support/resistance zones, confirms liquidity sweeps, "
+        "SwiftChart classifies market regime first, identifies support/resistance zones, confirms liquidity sweeps, "
         "checks higher-timeframe bias, and rejects unclear or mid-range setups.\n\n"
         "Simple version:\n"
         "Buy near support, sell near resistance, avoid the middle, and wait for liquidity sweeps.\n"

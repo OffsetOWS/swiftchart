@@ -73,6 +73,9 @@ def _idea_from_row(row: dict) -> TradeIdea:
         direction="Long" if str(row["direction"]).upper() == "LONG" else "Short",
         market_regime=row.get("market_regime"),
         higher_timeframe_bias=row.get("higher_timeframe_bias") or "HTF_NEUTRAL",
+        history_created_at=_parse_dt(row.get("created_at")),
+        tracking_deadline=__import__("app.services.crypto_exit_policy", fromlist=["deadline"]).deadline(row["created_at"],row["timeframe"]),
+        market_volume_24h=row.get("market_volume_24h"),
         setup_score=row.get("setup_score"),
         setup_grade=row.get("setup_grade"),
         entry_zone=(float(row["entry_zone_low"]), float(row["entry_zone_high"])),
@@ -192,6 +195,7 @@ def claim_telegram_dispatches(
                     now_iso,
                 ),
             )
+            connection.execute("UPDATE telegram_dispatches SET score_evaluation_id=COALESCE(score_evaluation_id,?) WHERE trade_idea_id=?", (row.get("score_evaluation_id"),row["id"]))
             dispatch = dict(
                 connection.execute(
                     "SELECT * FROM telegram_dispatches WHERE trade_idea_id = ?",
@@ -361,6 +365,9 @@ def _quarantine_recipient(connection, chat_id: str, reason: str, timestamp: str)
         WHERE chat_id=? AND status NOT IN ('SENT','SUPPRESSED_DEDUPE','FAILED_PERMANENT')""", (reason,timestamp,chat_id))
     for dispatch_id in dispatch_ids:
         _refresh_dispatch(connection,dispatch_id,timestamp)
+    connection.execute("""UPDATE telegram_dispatch_event_recipients SET status='FAILED_PERMANENT',failure_code=?
+      WHERE original_recipient_id IN (SELECT id FROM telegram_dispatch_recipients WHERE chat_id=?)
+      AND status IN ('PENDING','FAILED_RETRYABLE','ATTEMPTED')""", (reason,chat_id))
     return cursor.rowcount
 
 
