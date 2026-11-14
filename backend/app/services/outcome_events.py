@@ -289,7 +289,7 @@ def finish(
     with get_connection() as c:
         if message_id is not None:
             c.execute(
-                "UPDATE telegram_dispatch_event_recipients SET status='SENT',telegram_message_id=COALESCE(telegram_message_id,?),sent_at=COALESCE(sent_at,?),response_reply_message_id=COALESCE(response_reply_message_id,?),failure_code=CASE WHEN ? IS NOT NULL AND ?!=reply_to_message_id THEN 'REPLY_MISMATCH' ELSE NULL END WHERE id=? AND status IN ('ATTEMPTED','DELIVERY_UNCERTAIN')",
+                "UPDATE telegram_dispatch_event_recipients SET status='SENT',telegram_message_id=COALESCE(telegram_message_id,?),sent_at=COALESCE(sent_at,?),response_reply_message_id=COALESCE(response_reply_message_id,?),failure_code=CASE WHEN ? IS NOT NULL AND ?!=reply_to_message_id THEN 'REPLY_MISMATCH' ELSE NULL END WHERE id=? AND attempt_count>0 AND status IN ('ATTEMPTED','DELIVERY_UNCERTAIN','FAILED_PERMANENT')",
                 (
                     message_id,
                     (sent_at or datetime.now(UTC)).isoformat(),

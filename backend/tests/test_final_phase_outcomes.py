@@ -347,3 +347,36 @@ def test_factual_canonical_delivery_does_not_wait_for_unused_market_context(
     )
     assert result["sent"] == 1
     context.assert_not_awaited()
+
+
+def test_late_confirmed_send_is_recorded_even_if_another_worker_quarantines_chat(
+    monkeypatch, tmp_path
+):
+    identifier, row, candles, outcome = setup(monkeypatch, tmp_path, "TP1")
+    update_outcome(identifier, outcome)
+    item = next(x for x in events.claim() if int(x["chat_id"]) == 101)
+    with database.get_connection() as c:
+        dispatch._quarantine_recipient(
+            c, "101", "FORBIDDEN", datetime.now(UTC).isoformat()
+        )
+    events.finish(
+        item["recipient_id"],
+        message_id=909,
+        response_reply_message_id=item["reply_to_message_id"],
+    )
+    with database.get_connection() as c:
+        receipt = c.execute(
+            "SELECT status,telegram_message_id FROM telegram_dispatch_event_recipients WHERE id=?",
+            (item["recipient_id"],),
+        ).fetchone()
+        assert tuple(receipt) == ("SENT", 909)
+        assert (
+            c.execute(
+                "SELECT cleared_at FROM telegram_dispatch_recipient_blocks WHERE chat_id='101'"
+            ).fetchone()[0]
+            is None
+        )
+    assert not any(
+        int(x["chat_id"]) == 101
+        for x in events.claim(now=datetime.now(UTC) + timedelta(minutes=10))
+    )
