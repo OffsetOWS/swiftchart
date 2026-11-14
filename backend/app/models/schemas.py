@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.utils.opportunities import SetupFamily
+
 
 Direction = Literal["Long", "Short"]
 TradeHistoryStatus = Literal[
@@ -19,8 +21,12 @@ TradeHistoryStatus = Literal[
     "BREAK_EVEN",
     "PARTIAL_WIN",
     "PARTIAL_LOSS",
+    "UNRESOLVED",
+    "EXPIRED_POSITION",
+    "EXPIRED_RUNNER",
+    "TIME_EXIT",
 ]
-TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN"]
+TradeHistoryResult = Literal["WIN", "PARTIAL_WIN", "PARTIAL_LOSS", "LOSS", "NO_ENTRY", "BREAK_EVEN", "AMBIGUOUS", "OPEN", "UNRESOLVED"]
 MarketCondition = Literal[
     "RANGE_BOUND",
     "TRENDING_UP",
@@ -63,6 +69,10 @@ PendingSetupStatus = Literal[
 GenLayerDecision = Literal["APPROVE", "REJECT", "WAIT", "REDUCE_SIZE"]
 GenLayerRiskLevel = Literal["Low", "Medium", "High"]
 GenLayerPaperExecutionStatus = Literal["NOT_EXECUTED", "PAPER_EXECUTED"]
+StrategyEdgeStatus = Literal["VALIDATED", "EXPERIMENTAL", "UNVALIDATED", "DISABLED"]
+StrategyDecision = Literal["TRADE", "SHADOW", "NO_TRADE", "WAIT_FOR_RETEST"]
+EntryQualityStatus = Literal["PASS", "WAIT_FOR_RETEST", "REJECTED", "UNKNOWN"]
+OutcomeTrackingMode = Literal["PRODUCTION", "SHADOW", "NONE"]
 
 
 class Candle(BaseModel):
@@ -146,6 +156,29 @@ class TradeIdea(BaseModel):
     entry_status: EntryStatus = "READY"
     downgraded_reasons: list[str] = Field(default_factory=list)
     signal_candle_time: datetime | None = None
+    setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    v2_decision_reason: str | None = None
+    regime_confidence: float | None = None
+    entry_quality_status: EntryQualityStatus | None = None
+    entry_quality_score: float | None = None
+    entry_quality_reason: str | None = None
+    outcome_tracking_mode: OutcomeTrackingMode | None = None
+    v2_evaluated_at: datetime | None = None
+    opportunity_key: str | None = None
+    retest_confirmed_at: datetime | None = None
+    executable_at: datetime | None = None
+    signal_candle_high: float | None = None
+    signal_candle_low: float | None = None
+    signal_candle_close: float | None = None
+    production_rule_accepted: bool | None = None
+    strict_trend_short_eligible: bool | None = None
+    strict_trigger_type: str | None = None
+    strict_confirmation_type: str | None = None
+    strict_trigger_candle_time: datetime | None = None
+    strict_trigger_candle_completed: bool | None = None
 
 
 class PendingSetup(BaseModel):
@@ -167,6 +200,12 @@ class PendingSetup(BaseModel):
     timeframe: str
     exchange: str
     created_at: datetime
+    setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    opportunity_key: str | None = None
+    signal_candle_time: datetime | None = None
 
 
 class GenLayerSignalPayload(BaseModel):
@@ -293,6 +332,12 @@ class PaperTradeCreate(BaseModel):
 
 
 class PaperTrade(PaperTradeCreate):
+    gross_r_multiple: float | None = None
+    fee_r_multiple: float | None = None
+    funding_r_multiple: float | None = None
+    net_r_multiple: float | None = None
+    cost_basis: str | None = None
+    cost_status: str = "UNKNOWN"
     id: int
     user_id: str | None = None
     status: Literal["taken", "open", "tp_hit", "sl_hit", "closed"] = "taken"
@@ -322,6 +367,12 @@ class PaperTrade(PaperTradeCreate):
 
 
 class TradeHistoryRecord(BaseModel):
+    gross_r_multiple: float | None = None
+    fee_r_multiple: float | None = None
+    funding_r_multiple: float | None = None
+    net_r_multiple: float | None = None
+    cost_basis: str | None = None
+    cost_status: str = "UNKNOWN"
     id: int
     symbol: str
     timeframe: str
@@ -360,10 +411,35 @@ class TradeHistoryRecord(BaseModel):
     reversal_confirmations: str | None = None
     regime_explanation: str | None = None
     signal_candle_time: datetime | None = None
+    entry_status: EntryStatus | None = None
+    setup_family: SetupFamily | None = None
+    strategy_version: str | None = None
+    edge_status: StrategyEdgeStatus | None = None
+    strategy_decision: StrategyDecision | None = None
+    v2_decision_reason: str | None = None
+    regime_confidence: float | None = None
+    entry_quality_status: EntryQualityStatus | None = None
+    entry_quality_score: float | None = None
+    entry_quality_reason: str | None = None
+    outcome_tracking_mode: OutcomeTrackingMode | None = None
+    v2_evaluated_at: datetime | None = None
+    opportunity_key: str | None = None
+    retest_confirmed_at: datetime | None = None
+    executable_at: datetime | None = None
+    production_rule_accepted: bool | None = None
+    strict_trend_short_eligible: bool | None = None
+    strict_trigger_type: str | None = None
+    strict_confirmation_type: str | None = None
+    strict_trigger_candle_time: datetime | None = None
+    strict_trigger_candle_completed: bool | None = None
 
 
 class TradeStats(BaseModel):
     total_ideas: int
+    detected_ideas: int = 0
+    pending_retest_count: int = 0
+    executable_ideas: int = 0
+    completed_opportunities: int = 0
     entry_triggered_count: int
     win_count: int
     loss_count: int
@@ -375,7 +451,7 @@ class TradeStats(BaseModel):
     win_rate: float
     average_r_multiple: float
     average_candles_to_resolution: float
-    expectancy_per_trade: float
+    expectancy_per_trade: float | None
     tp1_then_sl_count: int = 0
     tp1_then_tp2_count: int = 0
     tp1_then_expiry_count: int = 0
@@ -390,6 +466,23 @@ class TradeStats(BaseModel):
     counter_trend_performance: list[dict] = Field(default_factory=list)
     expectancy_by_regime: list[dict] = Field(default_factory=list)
     expectancy_by_setup_type: list[dict] = Field(default_factory=list)
+    full_win_count: int = 0
+    partial_win_count: int = 0
+    time_exit_win_count: int = 0
+    resolved_entered_count: int = 0
+    entered_unresolved_count: int = 0
+    legacy_unreplayed_count: int = 0
+    expectancy_sample_count: int = 0
+    expectancy_basis: str = "completed entered trades with known modeled costs"
+    unresolved_count: int = 0
+    cost_bps_per_side: float = 0
+    costed_trade_count: int = 0
+    gross_r_total: float = 0
+    net_r_total: float | None = None
+    average_net_r_multiple: float | None = None
+    funding_unknown_count: int = 0
+    funding_r_total: float = 0
+    cost_basis: str = "modeled fees and historical funding rates valued at entry notional"
 
 
 class TradeHistoryPage(BaseModel):

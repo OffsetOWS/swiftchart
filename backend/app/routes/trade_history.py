@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import TradeHistoryPage, TradeHistoryRecord, TradeIdea, TradeStats
+from app.services.strategy_experiments import strict_trend_short_shadow_report
+from app.services.strategy_v2_analytics import strategy_edge_registry_report, strategy_v2_performance_report
 from app.services.trade_history import check_trade_outcomes, get_trade_history, query_trade_history, replay_trade_outcomes, save_trade_ideas, stats
 
 router = APIRouter()
@@ -64,3 +66,18 @@ async def trade_history_replay(days: int = Query(default=30, ge=1, le=365)):
 @router.get("/trade-stats", response_model=TradeStats)
 async def trade_stats():
     return stats()
+
+
+@router.get("/trade-stats/experiments/strict-trend-short")
+async def strict_trend_short_experiment():
+    return strict_trend_short_shadow_report()
+
+
+@router.get("/trade-stats/v2/edge-registry")
+async def v2_edge_registry():
+    return strategy_edge_registry_report()
+
+
+@router.get("/trade-stats/v2/strategy-performance")
+async def v2_strategy_performance():
+    return strategy_v2_performance_report()

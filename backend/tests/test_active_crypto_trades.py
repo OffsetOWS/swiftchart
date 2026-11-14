@@ -7,6 +7,8 @@ from app.models.schemas import TradeIdea
 from app.services.trade_history import list_active_crypto_trades, save_trade_ideas
 from app.utils import database
 from app.utils.database import get_connection
+from app.strategy.decision_engine import evaluate_strategy_decision
+from app.services.telegram_dispatch import claim_telegram_dispatches, mark_telegram_recipient_success
 
 
 @pytest.fixture
@@ -22,11 +24,12 @@ def active_trade_db(monkeypatch, tmp_path):
 
 
 def crypto_idea(symbol: str = "ZECUSDT") -> TradeIdea:
-    return TradeIdea(
+    idea = TradeIdea(
         symbol=symbol,
         timeframe="4h",
         exchange="hyperliquid",
         direction="Short",
+        market_regime="TRENDING_DOWN",
         entry_zone=(509.6, 514.65),
         stop_loss=517.67,
         take_profit_1=498.6,
@@ -39,10 +42,16 @@ def crypto_idea(symbol: str = "ZECUSDT") -> TradeIdea:
         rank_score=82,
         signal_candle_time=datetime.now(UTC),
     )
+    evaluate_strategy_decision(idea)
+    return idea
 
 
 def test_active_crypto_feed_returns_unresolved_telegram_trade(active_trade_db):
     ids = save_trade_ideas([crypto_idea()])
+    assert list_active_crypto_trades() == []  # Persistence is not delivery.
+    candidates = claim_telegram_dispatches({101})
+    assert len(candidates) == 1
+    mark_telegram_recipient_success(candidates[0].dispatch_id, 101, telegram_message_id=7)
 
     trades = list_active_crypto_trades()
 

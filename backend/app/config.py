@@ -21,7 +21,10 @@ class Settings(BaseSettings):
     default_risk_per_trade: float = Field(default=1.0, ge=0.01, le=20)
     default_min_rr: float = Field(default=2.0, ge=0.1)
     default_max_open_trades: int = Field(default=3, ge=1)
-    min_perp_volume_24h: float = Field(default=100_000, ge=0)
+    min_perp_volume_24h: float = Field(default=250_000, ge=0)
+    crypto_telegram_dispatch_interval_seconds: int = Field(default=30, ge=5, le=120)
+    crypto_max_signals_per_scan: int = Field(default=3, ge=1, le=50)
+    crypto_max_signals_per_direction: int = Field(default=2, ge=1, le=50)
     hyperliquid_candle_fetch_attempts: int = Field(default=3, ge=1, le=5)
     hyperliquid_candle_fetch_backoff_seconds: float = Field(default=0.7, ge=0)
     hyperliquid_candle_request_delay_seconds: float = Field(default=0.8, ge=0)
@@ -32,6 +35,11 @@ class Settings(BaseSettings):
     signal_max_entry_deviation_percent: float = Field(default=1.5, ge=0)
     trade_history_expiry_bars: int = Field(default=12, ge=1)
     trade_history_move_stop_to_entry_after_tp1: bool = False
+    tracking_cost_bps_per_side: float = Field(default=5.0, ge=0, le=100)
+    allow_no_trade_range_softening: bool = False
+    crypto_lifecycle_enabled: bool = True
+    crypto_lifecycle_interval_seconds: int = Field(default=120, ge=30)
+    crypto_lifecycle_startup_delay_seconds: int = Field(default=10, ge=0, le=300)
     execution_autotrade_enabled: bool = False
     execution_signal_webhook_url: str = ""
     execution_webhook_secret: str = ""

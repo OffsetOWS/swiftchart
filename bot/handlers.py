@@ -5,13 +5,17 @@ from telegram.ext import ContextTypes
 
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.models.schemas import RiskSettings
-from app.services.market_data import get_candles_cached
-from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas, stats
+from app.services.signal_limits import cap_production_cohorts
+from app.services.liquidity_filter import is_liquid_perp_market
+from app.services.telegram_dispatch import clear_crypto_recipient_block
+from app.services.market_data import get_candles_cached, get_markets_cached
+from app.services.trade_history import check_trade_outcomes, list_trade_history, save_trade_ideas
 from app.strategy.trade_ideas import analyze_dataframe
-from bot.formatter import format_analysis, format_history, format_stats, format_top_ideas, help_text, strategy_text
+from bot.formatter import format_analysis, format_history, format_paper_trades, format_stats, format_top_ideas, help_text, strategy_text
 from bot.keyboards import command_keyboard, main_menu_keyboard
+from bot.paper_trading import create_paper_trade, list_open_paper_trades, list_paper_trades, supabase_enabled
 from bot.scanner import scan_top_ideas
-from bot.storage import add_subscriber, get_subscribers, remove_subscriber
+from bot.storage import add_subscriber, get_latest_signal, get_signal, get_subscribers, remove_subscriber
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,10 @@ def higher_timeframes_for(timeframe: str) -> list[str]:
 async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None):
     settings = get_settings()
     selected_exchange = exchange or settings.default_exchange
+    markets = await get_markets_cached(selected_exchange)
+    market = next((row for row in markets if str(row.get("symbol", "")).upper() == symbol.upper() and row.get("active", True)), None)
+    if market is None or not is_liquid_perp_market(market):
+        raise ValueError("This market does not meet the 24-hour liquidity minimum.")
     df = await get_candles_cached(selected_exchange, symbol.upper(), timeframe, 320)
     if len(df) < 80:
         raise ValueError("Not enough candle history for analysis.")
@@ -58,7 +66,11 @@ async def run_analysis(symbol: str, timeframe: str, exchange: str | None = None)
         preferred_timeframe=timeframe,
     )
     analysis = analyze_dataframe(symbol.upper(), timeframe, selected_exchange, df, risk, htf_dfs)
-    save_trade_ideas(analysis.trade_ideas)
+    detected_ideas = cap_production_cohorts(analysis.trade_ideas)
+    save_trade_ideas(detected_ideas)
+    analysis.trade_ideas = [idea for idea in detected_ideas if idea.strategy_decision == "TRADE"]
+    if detected_ideas and not analysis.trade_ideas:
+        analysis.no_trade_reason = detected_ideas[0].v2_decision_reason or "The selected strategy is not actionable under V2."
     return analysis
 
 
@@ -66,7 +78,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = (
         "Welcome to SwiftChart Bot.\n\n"
         "SwiftChart helps traders detect support, resistance, liquidity sweeps, range conditions, "
-        "and high-probability crypto trade ideas.\n\n"
+        "and structured crypto trade ideas.\n\n"
         "Choose an option below or type /help."
     )
     await update.effective_message.reply_text(
@@ -115,10 +127,11 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     add_subscriber(chat_id)
+    clear_crypto_recipient_block(chat_id)
     await update.effective_message.reply_text(
         "Alerts enabled.\n\n"
         "SwiftChart will notify this chat when a new valid setup appears. "
-        "Only READY 1H, 2H, 3H, 4H, and 6H setups scoring 75/100 or higher are eligible.\n\n"
+        "Only confirmed setups meeting the liquidity and signal limits are eligible.\n\n"
         "Use /unsubscribe to stop alerts.\n\n"
         "Not financial advice. Manage your risk."
     )
@@ -135,7 +148,7 @@ async def alerts_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     enabled = update.effective_chat.id in subscribers
     await update.effective_message.reply_text(
         f"Alert status: {'enabled' if enabled else 'disabled'}\n"
-        f"Subscribers: {len(subscribers)}\n\n"
+        "\n"
         "Use /subscribe to receive setup alerts or /unsubscribe to stop them."
     )
 
@@ -146,14 +159,14 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_message.reply_text(format_stats(stats()))
+    await update.effective_message.reply_text(format_stats({}))
 
 
 async def check_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     status = await update.effective_message.reply_text("Checking saved trade outcomes...")
     try:
-        result = await check_trade_outcomes()
-        await status.edit_text(f"Trade outcome check complete.\nChecked: {result['checked']}\nUpdated: {result['updated']}")
+        await check_trade_outcomes()
+        await status.edit_text("Trade outcome check complete.")
     except Exception as exc:
         logger.exception("Trade outcome check failed")
         await status.edit_text(f"Could not check trades: {exc}")
@@ -167,16 +180,78 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_message.reply_text(help_text(), reply_markup=command_keyboard())
 
 
+async def my_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not supabase_enabled():
+        await update.effective_message.reply_text("Paper trading is temporarily unavailable.")
+        return
+    try:
+        records = await list_paper_trades(update.effective_user.id)
+        await update.effective_message.reply_text(format_paper_trades(records))
+    except Exception:
+        logger.exception("Could not list Telegram paper trades")
+        await update.effective_message.reply_text("Could not load your paper trades right now.")
+
+
+async def open_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not supabase_enabled():
+        await update.effective_message.reply_text("Paper trading is temporarily unavailable.")
+        return
+    try:
+        records = await list_open_paper_trades(update.effective_user.id)
+        await update.effective_message.reply_text(format_paper_trades(records, open_only=True))
+    except Exception:
+        logger.exception("Could not list open Telegram paper trades")
+        await update.effective_message.reply_text("Could not load your open paper trades right now.")
+
+
+async def signal_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = getattr(context, "args", None) or []
+    selector = args[0] if args else None
+    signal = get_latest_signal(selector)
+    if not signal:
+        if selector:
+            await update.effective_message.reply_text(
+                f"No stored signal analysis found for {selector}.\n"
+                "Use /analysis for the latest signal, or /analysis BTCUSDT for a pair."
+            )
+        else:
+            await update.effective_message.reply_text("No stored signal analysis yet. Wait for the next trade alert.")
+        return
+    await update.effective_message.reply_text(
+        f"{signal['analysis']}\n\nSignal ID: {signal['signal_id']}\n\nNot financial advice. Manage your risk."
+    )
+
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    if query.data == "analyze_help":
+    data = query.data or ""
+    if data.startswith("paper:"):
+        signal = get_signal(data.removeprefix("paper:"))
+        if not signal:
+            await query.message.reply_text("This signal has expired. Wait for the next alert.")
+            return
+        if not supabase_enabled():
+            await query.message.reply_text("Paper trading is temporarily unavailable.")
+            return
+        try:
+            trade, already_exists = await create_paper_trade(query.from_user.id, signal)
+            prefix = "Already paper trading" if already_exists else "Paper trade opened"
+            await query.message.reply_text(
+                f"🧪 {prefix}: {trade['pair']} {str(trade['side']).upper()}\n"
+                f"Entry {trade['entry']} | SL {trade['stop_loss']} | TP1 {trade['tp1']} | TP2 {trade['tp2']}\n\n"
+                "Simulated only. No real order was placed."
+            )
+        except Exception:
+            logger.exception("Could not create Telegram paper trade")
+            await query.message.reply_text("Could not open that paper trade right now.")
+    elif data == "analyze_help":
         await query.message.reply_text("Type /analyze SOLUSDT 4h to analyze a coin.")
-    elif query.data == "top":
+    elif data == "top":
         await top(update, context)
-    elif query.data == "subscribe":
+    elif data == "subscribe":
         await subscribe(update, context)
-    elif query.data == "strategy":
+    elif data == "strategy":
         await query.message.reply_text(strategy_text())
-    elif query.data == "help":
+    elif data == "help":
         await query.message.reply_text(help_text(), reply_markup=command_keyboard())

@@ -18,11 +18,15 @@ from app.forex.models import (
     ForexSignalList,
     ForexSignalPlan,
     ForexScanRunResult,
+    ForexChartCandle,
     TakeTradePreparation,
     TakeTradeRequest,
+    ForexPairChartResponse,
 )
-from app.forex.config import enabled_forex_timeframes, normalize_forex_timeframe
+from app.forex.config import SUPPORTED_FOREX_PAIRS, enabled_forex_timeframes, normalize_forex_timeframe
+from app.forex.currency_strength import get_currency_strength_snapshot, normalize_strength_horizon
 from app.forex.market_data import get_forex_market_data_service
+from app.forex.pair_analysis import build_pair_chart_analysis, pair_chart_higher_timeframe
 from app.forex.news import forex_news_risk
 from app.forex.scanner import forex_pair_infos, scan_forex
 from app.forex.sessions import forex_session_state
@@ -92,9 +96,65 @@ async def forex_pairs():
     return {"market_type": "forex", "pairs": forex_pair_infos()}
 
 
+@router.get("/forex/pairs/{symbol}/chart", response_model=ForexPairChartResponse)
+async def forex_pair_chart(
+    symbol: str,
+    timeframe: str = Query(default="1H"),
+    limit: int = Query(default=240, ge=60, le=500),
+):
+    normalized_symbol = "".join(character for character in symbol.upper() if character.isalnum())
+    pair = SUPPORTED_FOREX_PAIRS.get(normalized_symbol)
+    if pair is None:
+        raise HTTPException(status_code=404, detail="Unsupported Forex pair.")
+    try:
+        normalized_timeframe = normalize_forex_timeframe(timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if normalized_timeframe not in {"1H", "4H", "1D"}:
+        raise HTTPException(status_code=422, detail="Chart timeframe must be 1H, 4H, or 1D.")
+
+    higher_timeframe = pair_chart_higher_timeframe(normalized_timeframe)
+    service = get_forex_market_data_service()
+    try:
+        frame = await service.completed_candles(pair, normalized_timeframe, limit=limit)
+        higher = await service.completed_candles(
+            pair, higher_timeframe, limit=min(limit, 240)
+        ) if higher_timeframe else None
+        analysis = build_pair_chart_analysis(pair, normalized_timeframe, frame, higher)
+        if not frame.empty:
+            live = await service.live_candle(
+                pair,
+                normalized_timeframe,
+                completed_through=frame.iloc[-1]["timestamp"],
+            )
+            if live:
+                previous_close = analysis.current_price
+                analysis.candles = analysis.candles[-max(0, limit - 1):]
+                analysis.candles.append(ForexChartCandle(**live, complete=False))
+                analysis.current_price = live["close"]
+                analysis.change_percentage = round(
+                    (live["close"] - previous_close) / previous_close * 100, 3
+                ) if previous_close else 0
+                analysis.updated_at = datetime.now(UTC)
+        return analysis
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Forex chart data is temporarily unavailable.") from exc
+
+
 @router.get("/forex/sessions")
 async def forex_sessions():
     return forex_session_state()
+
+
+@router.get("/forex/currency-strength")
+async def forex_currency_strength(horizon: str = Query(default="24H")):
+    try:
+        selected_horizon = normalize_strength_horizon(horizon)
+        return await get_currency_strength_snapshot(selected_horizon)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/forex/overview", response_model=ForexOverview)

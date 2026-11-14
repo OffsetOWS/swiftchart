@@ -217,6 +217,7 @@ class ForexScanRunResult(BaseModel):
     trigger_source: Literal["scheduled", "manual"] = "scheduled"
     result_status: Literal[
         "TRADE_FOUND",
+        "ACTIVE_SIGNAL_REUSED",
         "WAIT_FOR_RETEST",
         "NO_TRADE",
         "MARKET_CLOSED",
@@ -269,6 +270,7 @@ class TakeTradePreparation(BaseModel):
 
 class ForexPairInfo(BaseModel):
     pair: str
+    display_name: str = ""
     pip_size: float
     sessions: list[str]
     max_spread_pips: float
@@ -285,3 +287,73 @@ class ForexOverview(BaseModel):
     news_risk_warning: str
     top_setups: list[ForexSignalPlan] = Field(default_factory=list)
     message: str | None = None
+
+
+class ForexChartCandle(BaseModel):
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0
+    complete: bool = True
+
+
+class ForexChartZone(BaseModel):
+    id: str
+    zone_id: str
+    symbol: str
+    timeframe: str
+    side: Literal["DEMAND", "SUPPLY"]
+    low: float
+    high: float
+    origin_low: float
+    origin_high: float
+    created_at: datetime
+    strength: float = Field(ge=0, le=100)
+    state: Literal[
+        "FRESH", "ACTIVE", "TOUCHED", "SWEPT", "RECLAIMED", "CONFIRMED",
+        "WEAKENED", "BROKEN", "ROLE_REVERSED", "INVALIDATED", "EXPIRED",
+        "RETESTING",
+    ]
+    touch_count: int = 0
+    successful_reactions: int = 0
+    failed_reactions: int = 0
+    role_reversed_from: str | None = None
+    rank: Literal["PRIMARY", "SECONDARY"] = "PRIMARY"
+    last_touch_at: datetime | None = None
+    last_exit_at: datetime | None = None
+    state_changed_at: datetime | None = None
+    history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ForexChartLevels(BaseModel):
+    confirmation: float | None = None
+    retest: float | None = None
+    invalidation: float | None = None
+    target_1: float | None = None
+    target_2: float | None = None
+
+
+class ForexPairChartResponse(BaseModel):
+    symbol: str
+    display_name: str
+    timeframe: Literal["1H", "4H", "1D"]
+    bias: Literal["BULLISH", "BEARISH", "NEUTRAL"]
+    bias_confidence: float = Field(ge=0, le=1)
+    bias_changed_at: datetime | None = None
+    bias_reason: str
+    htf_context: Literal["BULLISH", "BEARISH", "NEUTRAL", "UNAVAILABLE"]
+    regime: str
+    decision: Literal[
+        "LONG", "SHORT", "WAIT", "WAIT_FOR_RETEST", "WAIT_FOR_REJECTION", "NO_TRADE"
+    ]
+    current_price: float
+    change_percentage: float
+    buy_zones: list[ForexChartZone] = Field(default_factory=list)
+    sell_zones: list[ForexChartZone] = Field(default_factory=list)
+    levels: ForexChartLevels
+    stability: dict[str, float | int] = Field(default_factory=dict)
+    summary: str
+    candles: list[ForexChartCandle]
+    updated_at: datetime

@@ -11,11 +11,19 @@ import pandas as pd
 from app.config import get_settings
 from app.models.schemas import PendingSetup, RiskSettings, TradeIdea
 from app.services.execution_signals import dispatch_trade_ideas_to_execution
+from app.services.signal_limits import cap_signals_per_scan
 from app.services.liquidity_filter import filter_liquid_perp_markets
 from app.services.market_data import get_candles_cached, get_markets_cached
-from app.services.pending_setups import build_pending_setup
-from app.services.trade_history import save_signal_reviews, save_trade_ideas
+from app.services.pending_setups import build_pending_setup, pending_setup_from_trade_idea
+from app.services.trade_history import (
+    active_crypto_trade_for_symbol,
+    active_trade_skip_diagnostic,
+    canonical_crypto_symbol,
+    save_signal_reviews,
+    save_trade_ideas,
+)
 from app.strategy.market_regime import regime_score_from_dataframe
+from app.strategy.decision_engine import evaluate_strategy_decision, is_actionable_v2
 from app.strategy.support_resistance import average_true_range
 from app.strategy.trade_ideas import MIN_SETUP_SCORE, analyze_dataframe
 
@@ -216,6 +224,49 @@ async def _scan_candles(exchange: str, symbol: str, timeframe: str, limit: int, 
         raise
 
 
+def btc_regime_from_scores(score_4h: float | None, score_1d: float | None) -> dict:
+    scores = [score for score in (score_4h, score_1d) if score is not None]
+    if not scores:
+        regime = "ranging"
+        average = 0.0
+    else:
+        average = round(sum(scores) / len(scores), 1)
+        if average <= -25 or any(score <= -55 for score in scores):
+            regime = "bearish"
+        elif average >= 25 or any(score >= 55 for score in scores):
+            regime = "bullish"
+        else:
+            regime = "ranging"
+    return {"regime": regime, "score_4h": score_4h, "score_1d": score_1d, "score": average}
+
+
+async def btc_market_context(exchange: str, stats: ScanFetchStats | None = None) -> dict:
+    selected_exchange = "hyperliquid" if normalize_exchange(exchange) == "all" else normalize_exchange(exchange)
+    local_stats = stats or ScanFetchStats()
+    score_4h: float | None = None
+    score_1d: float | None = None
+    try:
+        btc_4h = await _scan_candles(selected_exchange, "BTCUSDT", "4h", 220, local_stats)
+        score_4h = regime_score_from_dataframe(btc_4h)
+    except Exception as exc:
+        logger.info("BTC 4H context unavailable exchange=%s error=%s", selected_exchange, exc)
+    try:
+        btc_1d = await _scan_candles(selected_exchange, "BTCUSDT", "1d", 220, local_stats)
+        score_1d = regime_score_from_dataframe(btc_1d)
+    except Exception as exc:
+        logger.info("BTC 1D context unavailable exchange=%s error=%s", selected_exchange, exc)
+    context = btc_regime_from_scores(score_4h, score_1d)
+    logger.info(
+        "BTC market context exchange=%s regime=%s score_4h=%s score_1d=%s score=%s",
+        selected_exchange,
+        context["regime"],
+        context["score_4h"],
+        context["score_1d"],
+        context["score"],
+    )
+    return context
+
+
 async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Semaphore, stats: ScanFetchStats) -> Candidate | None:
     async with semaphore:
         try:
@@ -230,7 +281,13 @@ async def _prefilter_market(market: dict, timeframe: str, semaphore: asyncio.Sem
             return None
 
 
-async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSettings, semaphore: asyncio.Semaphore, stats: ScanFetchStats) -> list[TradeIdea]:
+async def _analyze_candidate(
+    candidate: Candidate,
+    timeframe: str,
+    risk: RiskSettings,
+    semaphore: asyncio.Semaphore,
+    stats: ScanFetchStats,
+) -> list[TradeIdea]:
     async with semaphore:
         try:
             df = candidate.candles
@@ -244,7 +301,10 @@ async def _analyze_candidate(candidate: Candidate, timeframe: str, risk: RiskSet
                     continue
             analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs)
             save_signal_reviews(analysis.rejected_signals)
-            return [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+            valid = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+            for idea in valid:
+                evaluate_strategy_decision(idea)
+            return valid
         except Exception as exc:
             logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)
             return []
@@ -269,11 +329,26 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         candidate_limit = max_candidates_for_timeframe(timeframe)
         markets = await discover_all_scan_markets(selected_exchange)
         scan_markets = []
+        active_trade_diagnostics: list[dict] = []
         for current_exchange in selected_exchanges(selected_exchange):
             exchange_markets = [market for market in markets if market["exchange"] == current_exchange]
             selected_window = scan_window(current_exchange, exchange_markets, market_limit, timeframe=timeframe)
             logger.info("%s markets selected for scan: %s", current_exchange.title(), len(selected_window))
-            scan_markets.extend(selected_window)
+            for market in selected_window:
+                existing_trade = active_crypto_trade_for_symbol(str(market.get("symbol", "")))
+                if existing_trade is None:
+                    scan_markets.append(market)
+                    continue
+                diagnostic = active_trade_skip_diagnostic(str(market.get("symbol", "")), existing_trade)
+                active_trade_diagnostics.append(diagnostic)
+                logger.info(
+                    "crypto_scan_decision=%s symbol=%s existing_trade_id=%s existing_signal_id=%s reason=%s",
+                    diagnostic["decision"],
+                    diagnostic["symbol"],
+                    diagnostic["existing_trade_id"],
+                    diagnostic["existing_signal_id"],
+                    diagnostic["reason"],
+                )
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         fetch_stats = ScanFetchStats()
         candidates_raw = await asyncio.gather(*[_prefilter_market(market, timeframe, semaphore, fetch_stats) for market in scan_markets])
@@ -316,6 +391,8 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     )
                     save_signal_reviews(analysis.rejected_signals)
                     valid_ideas = [idea for idea in analysis.trade_ideas if (idea.setup_score or idea.confidence_score) >= MIN_SETUP_SCORE]
+                    for idea in valid_ideas:
+                        evaluate_strategy_decision(idea)
                     pending_setup = None if valid_ideas else build_pending_setup(analysis, df)
                     return valid_ideas, pending_setup
                 except Exception as exc:
@@ -329,7 +406,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
             key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
             reverse=True,
         )[:20]
-        ranked = sorted(
+        ranked_all = sorted(
             ideas,
             key=lambda idea: (
                 idea.setup_score or idea.confidence_score,
@@ -337,24 +414,63 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                 idea.rank_score,
             ),
             reverse=True,
-        )[:5]
-        save_trade_ideas(ranked)
-        await dispatch_trade_ideas_to_execution(ranked)
+        )
+        # Disabled or shadow candidates must never crowd a validated strategy
+        # out of the bounded actionable selection. Persist bounded cohorts separately so
+        # forward analytics remain useful without producing normal trade volume.
+        actionable_candidates = [idea for idea in ranked_all if is_actionable_v2(idea)]
+        executable_ranked = cap_signals_per_scan(actionable_candidates)
+        shadow_ranked = [idea for idea in ranked_all if idea.strategy_decision == "SHADOW"][:5]
+        wait_ranked = [idea for idea in ranked_all if idea.strategy_decision == "WAIT_FOR_RETEST"][:5]
+        no_trade_ranked = [idea for idea in ranked_all if idea.strategy_decision == "NO_TRADE"][:3]
+        ranked = [*executable_ranked, *shadow_ranked, *wait_ranked, *no_trade_ranked]
+        persistence_diagnostics: list[dict] = []
+        save_trade_ideas(ranked, diagnostics=persistence_diagnostics)
+        blocked_symbols = {
+            diagnostic["symbol"]
+            for diagnostic in persistence_diagnostics
+            if diagnostic.get("symbol")
+        }
+        if blocked_symbols:
+            executable_ranked = [
+                idea
+                for idea in executable_ranked
+                if canonical_crypto_symbol(idea.symbol) not in blocked_symbols
+            ]
+        active_trade_diagnostics.extend(persistence_diagnostics)
+        retest_pending = [
+            pending_setup_from_trade_idea(idea)
+            for idea in wait_ranked
+            if idea.entry_status == "WAIT_FOR_RETEST" and idea.strategy_decision == "WAIT_FOR_RETEST"
+        ]
+        pending_setups = sorted(
+            [*pending_setups, *retest_pending],
+            key=lambda pending: (pending.score_preview, pending.estimated_rr or 0),
+            reverse=True,
+        )[:20]
+        await dispatch_trade_ideas_to_execution(executable_ranked)
         duration = round(monotonic() - started, 2)
         result = {
             "timeframe": timeframe,
             "exchange": selected_exchange,
-            "ideas": ranked,
+            "ideas": executable_ranked,
             "pending_setups": pending_setups,
             "errors": [],
-            "message": None if len(ranked) >= 5 else f"Only {len(ranked)} valid setups found. Other coins are currently no-trade.",
+            "diagnostics": active_trade_diagnostics,
+            "message": None if len(executable_ranked) >= get_settings().crypto_max_signals_per_scan else f"Only {len(executable_ranked)} validated executable setups found. Shadow and retest decisions remain non-actionable.",
             "scan_stats": {
                 "markets": len(markets),
                 "scan_window": len(scan_markets),
                 "filtered": len(candidates),
                 "analyzed": len(candidates),
-                "valid_setups": len(ranked),
+                "valid_setups": len(executable_ranked),
+                "actionable_candidates_before_cap": len(actionable_candidates),
+                "signal_limit_total": get_settings().crypto_max_signals_per_scan,
+                "signal_limit_per_direction": get_settings().crypto_max_signals_per_direction,
+                "shadow_setups": len(shadow_ranked),
+                "no_trade_decisions": len(no_trade_ranked),
                 "pending_setups": len(pending_setups),
+                "active_trade_skips": len(active_trade_diagnostics),
                 "successful_candle_fetches": fetch_stats.successful_candle_fetches,
                 "failed_candle_fetches": fetch_stats.failed_candle_fetches,
                 "failed_symbols": fetch_stats.failed_symbols or [],
@@ -365,7 +481,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     current_exchange: {
                         "markets": len([market for market in markets if market["exchange"] == current_exchange]),
                         "scan_window": len([market for market in scan_markets if market["exchange"] == current_exchange]),
-                        "valid_setups": len([idea for idea in ranked if idea.exchange == current_exchange]),
+                        "valid_setups": len([idea for idea in executable_ranked if idea.exchange == current_exchange]),
                     }
                     for current_exchange in selected_exchanges(selected_exchange)
                 },

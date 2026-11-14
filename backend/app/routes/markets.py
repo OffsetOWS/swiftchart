@@ -1,54 +1,35 @@
-from fastapi import APIRouter, HTTPException, Query
+import asyncio
+from datetime import UTC
 import logging
+
+from fastapi import APIRouter, HTTPException, Query
 
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
 from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
 from app.services.liquidity_filter import skip_low_volume_market
+from app.services.market_analysis import (
+    MarketAnalysisUnavailable,
+    analyze_market_read_only,
+    base_asset_symbol as _base_asset_symbol,
+    global_regime_score,
+    higher_timeframes_for,
+    market_for_symbol as _market_for_symbol,
+    selected_exchange as _selected_exchange,
+    symbol_for_exchange as _symbol_for_exchange,
+)
 from app.services.market_data import get_candles_cached, get_markets_cached
 from app.services.scanner import cached_top_ideas
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.services.scanner import trigger_top_ideas_refresh
+from app.services.signal_limits import cap_production_cohorts
 from app.services.trade_history import list_active_crypto_trades, save_signal_reviews, save_trade_ideas
-from app.strategy.market_regime import regime_score_from_dataframe
-from app.strategy.trade_ideas import analyze_dataframe
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-QUOTE_SUFFIXES = ("USDT", "USDC", "SUSD", "USD", "PERP")
-
-
-def _selected_exchange(exchange: str | None) -> str:
-    normalized = (exchange or get_settings().default_exchange).lower()
-    return normalized
-
-
-def _base_asset_symbol(symbol: str) -> str:
-    normalized = "".join(character for character in str(symbol or "").upper() if character.isalnum())
-    for suffix in QUOTE_SUFFIXES:
-        if normalized.endswith(suffix) and len(normalized) > len(suffix):
-            return normalized[: -len(suffix)]
-    return normalized
-
-
-def _symbol_for_exchange(exchange: str, symbol: str) -> str:
-    base_asset = _base_asset_symbol(symbol)
-    if exchange.lower() == "hyperliquid":
-        return f"{base_asset}USDT"
-    return str(symbol or "").strip().upper()
-
-
 async def _safe_candles(exchange: str, symbol: str, timeframe: str, limit: int):
     return await get_candles_cached(exchange, symbol, timeframe, limit)
-
-
-async def _market_for_symbol(exchange: str, symbol: str) -> dict | None:
-    normalized_symbol = _symbol_for_exchange(exchange, symbol)
-    for market in await get_markets_cached(exchange):
-        if str(market.get("symbol", "")).upper() == normalized_symbol:
-            return market
-    return None
 
 
 async def _skip_low_volume_symbol(exchange: str, symbol: str) -> bool:
@@ -71,27 +52,38 @@ def _unique_display_ideas(ideas: list) -> list:
     return unique
 
 
-def higher_timeframes_for(timeframe: str) -> list[str]:
-    normalized = timeframe.lower()
-    if normalized in {"30m", "1h"}:
-        return ["4h", "1d"]
-    if normalized in {"2h", "4h", "6h", "8h", "12h"}:
-        return ["1d"]
-    return []
+def _tp1_hit_after_signal(idea, candles) -> bool:
+    if candles is None or candles.empty or idea.signal_candle_time is None:
+        return False
+    signal_time = idea.signal_candle_time
+    if signal_time.tzinfo is None:
+        signal_time = signal_time.replace(tzinfo=UTC)
+    relevant = candles[candles["timestamp"] >= signal_time]
+    if relevant.empty:
+        return False
+    target = float(idea.take_profit_1)
+    if str(idea.direction).lower() == "long":
+        return float(relevant["high"].max()) >= target
+    return float(relevant["low"].min()) <= target
 
 
-async def global_regime_score(exchange: str, timeframe: str) -> float | None:
-    scores = []
-    for symbol in ("BTCUSDT", "ETHUSDT"):
+async def _exclude_tp1_hits(ideas: list) -> tuple[list, int]:
+    async def is_still_active(idea) -> bool:
         try:
-            df = await get_candles_cached(exchange, symbol, timeframe, 260)
-            if len(df) >= 80:
-                scores.append(regime_score_from_dataframe(df))
+            candles = await get_candles_cached(idea.exchange, idea.symbol, idea.timeframe, 3)
+            return not _tp1_hit_after_signal(idea, candles)
         except Exception:
-            continue
-    if not scores:
-        return None
-    return round(sum(scores) / len(scores), 1)
+            logger.exception(
+                "Could not check TP1 lifecycle for %s %s on %s",
+                idea.symbol,
+                idea.timeframe,
+                idea.exchange,
+            )
+            return True
+
+    active_flags = await asyncio.gather(*(is_still_active(idea) for idea in ideas))
+    active = [idea for idea, keep in zip(ideas, active_flags) if keep]
+    return active, len(ideas) - len(active)
 
 
 @router.get("/markets", response_model=list[Market])
@@ -154,58 +146,28 @@ async def analyze(
         preferred_timeframe=timeframe,
     )
     try:
-        exchanges = scan_selected_exchanges(_selected_exchange(exchange))
-        last_error = None
-        analysis = None
-        found_market = False
-        for selected_exchange in exchanges:
-            selected_symbol = _symbol_for_exchange(selected_exchange, symbol)
-            try:
-                market = await _market_for_symbol(selected_exchange, selected_symbol)
-                if market is None:
-                    last_error = f"{selected_symbol} is not listed on {selected_exchange}."
-                    continue
-                found_market = True
-                if skip_low_volume_market(market):
-                    last_error = "Perp 24h volume is below the scanner liquidity minimum."
-                    continue
-                df = await get_candles_cached(selected_exchange, selected_symbol, timeframe, 320)
-                if len(df) < 80:
-                    last_error = "Not enough candle history for analysis."
-                    continue
-                htf_dfs = []
-                for htf in higher_timeframes_for(timeframe):
-                    try:
-                        htf_dfs.append(await get_candles_cached(selected_exchange, selected_symbol, htf, 240))
-                    except Exception:
-                        continue
-                analysis = analyze_dataframe(
-                    selected_symbol,
-                    timeframe,
-                    selected_exchange,
-                    df,
-                    risk,
-                    htf_dfs,
-                    global_regime_score=await global_regime_score(selected_exchange, timeframe),
-                )
-                break
-            except Exception as exc:
-                last_error = exc
-                continue
-        if analysis is None:
-            if not found_market:
+        try:
+            analysis = await analyze_market_read_only(
+                exchange=exchange,
+                symbol=symbol,
+                timeframe=timeframe,
+                risk=risk,
+            )
+        except MarketAnalysisUnavailable as unavailable:
+            if not unavailable.found_market:
                 base_asset = _base_asset_symbol(symbol)
                 raise HTTPException(
                     status_code=422,
                     detail=f"{base_asset or 'This asset'} is not currently available for analysis. Try BTC, ETH, SOL, BNB, or another listed Hyperliquid market.",
                 )
-            if isinstance(last_error, MarketDataUnavailable):
-                raise HTTPException(status_code=503, detail=str(last_error))
+            if isinstance(unavailable.last_error, MarketDataUnavailable):
+                raise HTTPException(status_code=503, detail=str(unavailable.last_error))
             base_asset = _base_asset_symbol(symbol)
             raise HTTPException(
                 status_code=422,
                 detail=f"{base_asset or 'This asset'} is not currently available for analysis. Try BTC, ETH, SOL, BNB, or another listed Hyperliquid market.",
             )
+        analysis.trade_ideas = cap_production_cohorts(analysis.trade_ideas)
         saved_ids = save_trade_ideas(analysis.trade_ideas)
         saved_reviews = save_signal_reviews(analysis.rejected_signals)
         logger.info("Analysis generated %s ideas, rejected %s, and saved %s ideas/%s reviews for %s %s on %s", len(analysis.trade_ideas), len(analysis.rejected_signals), len(saved_ids), saved_reviews, symbol, timeframe, analysis.exchange)
@@ -228,6 +190,7 @@ async def top_ideas(
     selected_exchange = _selected_exchange(exchange)
     result = await cached_top_ideas(selected_exchange, timeframe)
     ideas = _unique_display_ideas(result.get("ideas", []))
+    ideas, tp1_removed = await _exclude_tp1_hits(ideas)
     pending_setups = result.get("pending_setups", [])
     if symbols:
         selected_symbols = {item.strip().upper() for item in symbols.split(",") if item.strip()}
@@ -237,16 +200,8 @@ async def top_ideas(
         **result,
         "ideas": ideas,
         "pending_setups": pending_setups,
+        "tp1_removed": tp1_removed,
     }
-
-
-@router.get("/active-crypto-trades")
-async def active_crypto_trades(
-    exchange: str = Query(default="all"),
-    limit: int = Query(default=50, ge=1, le=100),
-):
-    trades = list_active_crypto_trades(exchange=exchange, limit=limit)
-    return {"trades": trades, "count": len(trades), "source": "telegram-canonical"}
 
 
 @router.post("/top-ideas/refresh")
@@ -257,6 +212,15 @@ async def refresh_top_ideas(
     if timeframe.lower() not in SUPPORTED_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Unsupported timeframe. Use one of: {', '.join(SUPPORTED_TIMEFRAMES)}")
     return trigger_top_ideas_refresh(_selected_exchange(exchange), timeframe)
+
+
+@router.get("/active-crypto-trades")
+async def active_crypto_trades(
+    exchange: str = Query(default="all"),
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    trades = list_active_crypto_trades(exchange=exchange, limit=limit)
+    return {"trades": trades, "count": len(trades), "source": "telegram-canonical"}
 
 
 @router.get("/top-ideas/refresh")
