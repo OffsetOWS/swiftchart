@@ -30,7 +30,7 @@ def fmt_zone(zone: tuple[float, float] | None) -> str:
     return f"{fmt(zone[0])} — {fmt(zone[1])}"
 
 
-def public_reason_summary(reason: str | None) -> str:
+def public_reason_summary(reason: str | None, max_sentences: int | None = None) -> str:
     if not reason:
         return "-"
 
@@ -39,9 +39,11 @@ def public_reason_summary(reason: str | None) -> str:
         sentence = part.strip().rstrip(".")
         if not sentence:
             continue
-        if any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
+        if any(word in sentence.lower() for word in ("score", "grade", "confidence", "profit", "win rate", "performance", "streak", "expectancy")) or any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
             continue
         cleaned_parts.append(sentence)
+        if max_sentences is not None and len(cleaned_parts) >= max_sentences:
+            break
 
     return ". ".join(cleaned_parts) + "." if cleaned_parts else "-"
 
@@ -77,6 +79,20 @@ def alert_strength_label(timeframe: str) -> str:
     if normalized in {"4h", "6h"}:
         return "Strong Setup"
     return "Valid Setup"
+
+
+def direction_conflicts_bias(direction: str | None, bias: str | None) -> bool:
+    normalized_direction = str(direction or "").lower()
+    normalized_bias = str(bias or "").lower()
+    if normalized_direction == "long":
+        return "short bias" in normalized_bias or "bearish transition" in normalized_bias
+    if normalized_direction == "short":
+        return "long bias" in normalized_bias or "bullish transition" in normalized_bias
+    return False
+
+
+def btc_context_line(btc_context: dict | None) -> str:
+    return "BTC Context: " + (str(btc_context.get("regime") or "Unavailable").title() if btc_context else "Unavailable")
 
 
 def regime_line(idea: TradeIdea | None, analysis: AnalysisResponse | None = None) -> str:
@@ -129,28 +145,22 @@ def format_analysis(analysis: AnalysisResponse) -> str:
     if idea is None:
         trade_block = (
             "Signal: No Trade\n"
-            "Setup Score: -\n"
-            "Grade: No Trade\n"
             "Entry: -\n"
             "Stop Loss: -\n"
             "TP1: -\n"
             "TP2: -\n"
             "R:R: -\n"
-            "Confidence: -"
         )
-        reason = analysis.warning or "Price is mid-range or the setup is unclear."
+        reason = analysis.no_trade_reason or analysis.warning or "Price is mid-range or the setup is unclear."
         invalid = "Wait for a clean range edge, sweep reclaim, or confirmed breakout."
     else:
         trade_block = (
             f"Signal: {signal_label(idea)}\n"
-            f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
-            f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"Stop Loss: {fmt(idea.stop_loss)}\n"
             f"TP1: {fmt(idea.take_profit_1)}\n"
             f"TP2: {fmt(idea.take_profit_2)}\n"
             f"R:R: {fmt(idea.risk_reward_ratio)}\n"
-            f"Confidence: {fmt(idea.confidence_score)}%"
         )
         reason = idea.reason
         invalid = idea.invalid_condition
@@ -181,30 +191,61 @@ def format_top_ideas(ideas: list[TradeIdea], timeframe: str, exchange: str) -> s
         lines.append(
             "\n"
             f"{index}. {idea.symbol} — {idea.direction}\n"
-            f"Score: {fmt(idea.setup_score or idea.confidence_score)}/100 | Grade: {idea.setup_grade or 'Valid Setup'}\n"
             f"Entry: {fmt_zone(idea.entry_zone)}\n"
             f"SL: {fmt(idea.stop_loss)} | TP1: {fmt(idea.take_profit_1)} | TP2: {fmt(idea.take_profit_2)}\n"
-            f"R:R: {fmt(idea.risk_reward_ratio)} | Confidence: {fmt(idea.confidence_score)}%\n"
+            f"R:R: {fmt(idea.risk_reward_ratio)}\n"
             f"Reason: {public_reason_summary(idea.reason)}"
         )
     lines.append(f"\n{RISK_WARNING}")
     return "\n".join(lines)
 
 
-def format_trade_alert(idea: TradeIdea) -> str:
+def alert_symbol(symbol: str) -> str:
+    pair = symbol.upper().split(":", 1)[0]
+    if "/" not in pair:
+        for quote in ("USDT", "USDC", "USD"):
+            if pair.endswith(quote) and len(pair) > len(quote):
+                return f"{pair[:-len(quote)]}/{quote}"
+    return pair
+
+
+def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -> str:
+    from datetime import UTC,datetime
+    from app.services.crypto_exit_policy import deadline
+    when=idea.tracking_deadline or deadline(idea.history_created_at or datetime.now(UTC),idea.timeframe)
     return (
-        f"SwiftChart Trade Alert: {idea.symbol} — {idea.timeframe.upper()}\n\n"
-        f"Signal: Potential {idea.direction}\n"
-        f"Strength: {alert_strength_label(idea.timeframe)}\n"
-        f"Setup Score: {fmt(idea.setup_score or idea.confidence_score)}/100\n"
-        f"Grade: {idea.setup_grade or 'Valid Setup'}\n"
-        "\n"
-        f"Entry: {fmt_zone(idea.entry_zone)}\n"
-        f"Stop Loss: {fmt(idea.stop_loss)}\n"
-        f"TP1: {fmt(idea.take_profit_1)}\n"
-        f"TP2: {fmt(idea.take_profit_2)}\n"
-        f"R:R: {fmt(idea.risk_reward_ratio)}\n\n"
-        f"Reason:\n{public_reason_summary(idea.reason)}"
+        f"{alert_symbol(idea.symbol)} · {idea.timeframe.upper()} · {idea.direction.upper()}\n\n"
+        f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
+        f"TP1: {fmt(idea.take_profit_1)}\nTP2 (final target): {fmt(idea.take_profit_2)}\n\n"
+        "The trade closes after its 48-hour tracking window if neither the stop-loss nor the final target has been hit.\n"
+        f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
+    )
+
+
+def format_outcome_event(event: dict) -> str:
+    from decimal import Decimal
+    labels={"TP1":"TP1 hit — partial taken (50%).","TP2":"TP2 hit — final target reached.","STOP_LOSS":"Stop-loss hit.","TIME_EXIT":"48-hour tracking window ended — trade closed."}
+    price=format(Decimal(str(event["price"])),"f").rstrip("0").rstrip(".") if "." in str(event["price"]) else str(event["price"])
+    return f"{alert_symbol(event['symbol'])} · {event['direction']}\n{labels[event['event_kind']]}\nPrice: {price}"
+
+
+def format_forex_alert(signal: dict) -> str:
+    return (
+        "SwiftChart Forex Signal\n\n"
+        "Market: FOREX\n"
+        f"Pair: {signal.get('pair', '-')}\n"
+        f"Direction: {signal.get('direction', '-')}\n"
+        f"Session: {signal.get('session', '-')}\n"
+        f"Bias: {signal.get('pre_session_bias', '-')}\n"
+        f"Entry: {fmt(signal.get('entry'))}\n"
+        f"Stop Loss: {fmt(signal.get('stopLoss'))}\n"
+        f"TP1: {fmt(signal.get('tp1'))}\n"
+        f"TP2: {fmt(signal.get('tp2'))}\n"
+        f"R:R: {fmt(signal.get('rr'))}\n"
+        f"News Risk: {str(signal.get('newsRisk', '-')).title()}\n"
+        f"Spread: {str(signal.get('spreadStatus', '-')).title()}\n"
+        f"Reason: {signal.get('reason', '-')}\n\n"
+        f"{RISK_WARNING}"
     )
 
 
@@ -214,37 +255,47 @@ def format_history(records: list[dict]) -> str:
 
     lines = ["SwiftChart History — Latest 5"]
     for record in records[:5]:
-        r_multiple = record.get("pnl_r_multiple")
         lines.append(
             "\n"
             f"{record['symbol']} — {record['timeframe'].upper()} — {record['direction']} ({record.get('exchange', '-')})\n"
-            f"Status: {record['status']} | Result: {record['result']}\n"
-            f"Setup Score: {fmt(record.get('setup_score'))}/100\n"
-            f"TP/SL: TP1 {fmt(record['take_profit_1'])} | TP2 {fmt(record['take_profit_2'])} | SL {fmt(record['stop_loss'])}\n"
-            f"R Multiple: {fmt(r_multiple)}"
+            f"Status: {record['status']}\n"
+            f"TP/SL: TP1 {fmt(record['take_profit_1'])} | TP2 {fmt(record['take_profit_2'])} | SL {fmt(record['stop_loss'])}"
         )
     lines.append(f"\n{RISK_WARNING}")
     return "\n".join(lines)
 
 
-def format_stats(data: dict) -> str:
-    return (
-        "SwiftChart Performance Stats\n\n"
-        f"Total setups: {data['total_ideas']}\n"
-        f"Win rate: {fmt(data['win_rate'])}%\n"
-        f"TP hit rate: {fmt(data['tp_hit_rate'])}%\n"
-        f"SL hit rate: {fmt(data['sl_hit_rate'])}%\n"
-        f"Average R: {fmt(data['average_r_multiple'])}\n"
-        f"Open setups: {data['open_count']}\n"
-        f"Ambiguous: {data['ambiguous_count']}\n\n"
-        f"{RISK_WARNING}"
-    )
+
+def format_stats(_data: dict) -> str:
+    """Keep legacy command/button entry points inert without fetching metrics."""
+    return "Performance statistics are unavailable."
+
+
+def format_paper_trades(records: list[dict], *, open_only: bool = False) -> str:
+    title = "SwiftChart Open Paper Trades" if open_only else "SwiftChart Paper Trades"
+    if not records:
+        empty = "No open paper trades." if open_only else "No paper trades yet. Tap 🧪 Paper Trade on a signal to start one."
+        return f"{title}\n\n{empty}"
+
+    lines = [title]
+    for record in records:
+        lines.append(
+            "\n"
+            f"{record.get('pair', '-')} — {str(record.get('side', '-')).upper()}\n"
+            f"Entry: {fmt(record.get('entry'))} | SL: {fmt(record.get('stop_loss'))}\n"
+            f"TP1: {fmt(record.get('tp1'))} | TP2: {fmt(record.get('tp2'))}\n"
+            f"Status: {record.get('status', '-')}\n"
+            f"Opened: {record.get('opened_at') or '-'}\n"
+            f"Closed: {record.get('closed_at') or '-'}"
+        )
+    lines.append("\nSimulated trades only. No real orders are placed.")
+    return "\n".join(lines)
 
 
 def strategy_text() -> str:
     return (
         "SwiftChart Strategy\n\n"
-        "SwiftChart classifies market regime first, scores support/resistance zones, confirms liquidity sweeps, "
+        "SwiftChart classifies market regime first, identifies support/resistance zones, confirms liquidity sweeps, "
         "checks higher-timeframe bias, and rejects unclear or mid-range setups.\n\n"
         "Simple version:\n"
         "Buy near support, sell near resistance, avoid the middle, and wait for liquidity sweeps.\n"
@@ -262,6 +313,9 @@ def help_text() -> str:
         "/subscribe — Get Telegram alerts when valid setups appear\n"
         "/unsubscribe — Stop Telegram alerts\n"
         "/history — Show latest saved trade ideas and outcomes\n"
+        "/analysis [pair or signal ID] — View latest or selected signal analysis\n"
+        "/mytrades — Show your Telegram paper trades\n"
+        "/open — Show your open paper trades\n"
         "/checktrades — Manually update saved outcomes\n"
         "/strategy — Explain the strategy\n"
         "/help — Show commands\n\n"

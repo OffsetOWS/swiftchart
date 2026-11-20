@@ -4,9 +4,11 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from app.models.schemas import AnalysisResponse, Direction, PendingSetup, PendingSetupStatus, Zone
+from app.models.schemas import AnalysisResponse, Direction, PendingSetup, PendingSetupStatus, TradeIdea, Zone
+from app.strategy.edge_registry import lookup_strategy_edge, strategy_version_for_family
 from app.strategy.market_structure import momentum_confirmation, range_position, volume_confirmation
 from app.strategy.support_resistance import average_true_range, nearest_range
+from app.utils.opportunities import setup_family_from_regime
 
 
 EDGE_LONG_MAX = 0.35
@@ -212,6 +214,17 @@ def build_pending_setup(analysis: AnalysisResponse, df: pd.DataFrame) -> Pending
     direction = _direction_from_context(regime_type, position, bullish_hints, bearish_hints)
     if direction is None:
         return None
+    family = setup_family_from_regime(regime_type)
+    strategy_version = strategy_version_for_family(family)
+    edge = lookup_strategy_edge(
+        strategy_family=family,
+        strategy_version=strategy_version,
+        regime=regime_type,
+        direction=direction,
+        timeframe=analysis.timeframe,
+    )
+    if edge is None or edge.status in {"DISABLED", "UNVALIDATED"}:
+        return None
     hints = bullish_hints if direction == "Long" else bearish_hints
     if not hints:
         return None
@@ -254,4 +267,36 @@ def build_pending_setup(analysis: AnalysisResponse, df: pd.DataFrame) -> Pending
         timeframe=analysis.timeframe,
         exchange=analysis.exchange,
         created_at=datetime.now(UTC),
+        setup_family=family,
+        strategy_version=strategy_version,
+        edge_status=edge.status,
+        strategy_decision="WAIT_FOR_RETEST",
+    )
+
+
+def pending_setup_from_trade_idea(idea: TradeIdea) -> PendingSetup:
+    """Expose a persisted WAIT_FOR_RETEST idea as a non-actionable watch item."""
+    entry_mid = sum(idea.entry_zone) / 2
+    return PendingSetup(
+        symbol=idea.symbol,
+        direction=idea.direction,
+        regime=idea.regime_label or str(idea.market_regime or "Pending retest"),
+        status="WAITING_FOR_RETEST",
+        reason=idea.reason,
+        price=round(float(idea.signal_candle_close or entry_mid), 8),
+        entry_zone=idea.entry_zone,
+        invalidation_level=idea.stop_loss,
+        trigger_hints=["setup detected; retest not yet confirmed"],
+        confirmation_needed=["Later candle touches the original entry zone", "Directional confirmation close", "Setup quality returns READY"],
+        estimated_rr=idea.risk_reward_ratio,
+        score_preview=float(idea.setup_score or idea.confidence_score),
+        timeframe=idea.timeframe,
+        exchange=idea.exchange,
+        created_at=datetime.now(UTC),
+        setup_family=idea.setup_family,
+        strategy_version=idea.strategy_version,
+        edge_status=idea.edge_status,
+        strategy_decision=idea.strategy_decision,
+        opportunity_key=idea.opportunity_key,
+        signal_candle_time=idea.signal_candle_time,
     )

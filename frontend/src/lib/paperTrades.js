@@ -44,7 +44,7 @@ function normalizeTrade(row) {
     source_signal_id: row.source_signal_id || notes.source_signal_id || null,
     entry_price: row.entry_price,
     take_profit: row.take_profit_1,
-    risk_reward: notes.risk_reward ?? null,
+    risk_reward: row.risk_reward ?? notes.risk_reward ?? null,
     confidence: notes.confidence ?? notes.setup_score ?? null,
     market_bias: row.market_bias ?? row.market_regime ?? notes.market_bias ?? null,
     market_regime: row.market_regime ?? notes.market_regime ?? row.market_bias ?? null,

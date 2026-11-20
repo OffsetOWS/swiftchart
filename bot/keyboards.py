@@ -21,7 +21,15 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def command_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [["/top", "/history"], ["/checktrades", "/subscribe"], ["/strategy", "/help"], ["/analyze SOLUSDT 4h"]],
+        [["/top", "/analysis"], ["/open", "/mytrades"], ["/subscribe", "/strategy"], ["/help", "/analyze SOLUSDT 4h"]],
         resize_keyboard=True,
         input_field_placeholder="/analyze SOLUSDT 4h",
+    )
+
+
+def trade_alert_keyboard(signal_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🧪 Paper Trade", callback_data=f"paper:{signal_id}")],
+        ]
     )

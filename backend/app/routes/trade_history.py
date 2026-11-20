@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query
+from app.services.crypto_work import run_crypto_work
 
 from app.models.schemas import TradeHistoryPage, TradeHistoryRecord, TradeIdea, TradeStats
+from app.services.strategy_experiments import strict_trend_short_shadow_report
+from app.services.strategy_v2_analytics import strategy_edge_registry_report, strategy_v2_performance_report
 from app.services.trade_history import check_trade_outcomes, get_trade_history, query_trade_history, replay_trade_outcomes, save_trade_ideas, stats
 
 router = APIRouter()
@@ -20,7 +23,7 @@ async def trade_history(
     limit: int = Query(default=20, ge=1, le=250),
     sort: str = Query(default="desc", pattern="^(asc|desc)$"),
 ):
-    return query_trade_history(
+    return await run_crypto_work(query_trade_history,
         {
             "symbol": symbol,
             "timeframe": timeframe,
@@ -39,13 +42,13 @@ async def trade_history(
 
 @router.post("/trade-history")
 async def trade_history_save(idea: TradeIdea):
-    ids = save_trade_ideas([idea])
+    ids = await run_crypto_work(save_trade_ideas, [idea])
     return {"saved": len(ids), "ids": ids}
 
 
 @router.get("/trade-history/{trade_id}", response_model=TradeHistoryRecord)
 async def trade_history_detail(trade_id: int):
-    record = get_trade_history(trade_id)
+    record = await run_crypto_work(get_trade_history, trade_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Trade idea not found.")
     return record
@@ -63,4 +66,19 @@ async def trade_history_replay(days: int = Query(default=30, ge=1, le=365)):
 
 @router.get("/trade-stats", response_model=TradeStats)
 async def trade_stats():
-    return stats()
+    return await run_crypto_work(stats)
+
+
+@router.get("/trade-stats/experiments/strict-trend-short")
+async def strict_trend_short_experiment():
+    return await run_crypto_work(strict_trend_short_shadow_report)
+
+
+@router.get("/trade-stats/v2/edge-registry")
+async def v2_edge_registry():
+    return await run_crypto_work(strategy_edge_registry_report)
+
+
+@router.get("/trade-stats/v2/strategy-performance")
+async def v2_strategy_performance():
+    return await run_crypto_work(strategy_v2_performance_report)

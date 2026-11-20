@@ -12,7 +12,7 @@ import httpx
 
 from app.config import get_settings
 from app.models.schemas import TradeIdea
-from app.services.alert_dedupe import mark_alert_sent, should_skip_alert
+from app.services.alert_dedupe import mark_alert_sent, opportunity_dedupe_key, should_skip_alert
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ _sent_signal_ids: set[str] = set()
 
 def execution_signal_id(idea: TradeIdea) -> str:
     entry = sum(idea.entry_zone) / 2
-    raw = "|".join(
+    raw = opportunity_dedupe_key(idea) or "|".join(
         [
             idea.exchange.lower(),
             idea.symbol.upper(),
@@ -51,6 +51,10 @@ def trade_idea_to_execution_signal(idea: TradeIdea) -> dict:
         "move_maturity": idea.move_maturity,
         "exhaustion_risk": idea.exhaustion_risk,
         "entry_status": idea.entry_status,
+        "strategy_family": idea.setup_family,
+        "strategy_version": idea.strategy_version,
+        "edge_status": idea.edge_status,
+        "strategy_decision": idea.strategy_decision,
         "downgraded_reasons": idea.downgraded_reasons,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -75,6 +79,17 @@ async def dispatch_trade_ideas_to_execution(ideas: list[TradeIdea]) -> None:
 
     async with httpx.AsyncClient(timeout=20) as client:
         for idea in ideas:
+            if idea.strategy_version is not None and idea.strategy_decision != "TRADE":
+                logger.info(
+                    "V2 execution signal skipped symbol=%s timeframe=%s strategy=%s:%s decision=%s edge_status=%s",
+                    idea.symbol,
+                    idea.timeframe,
+                    idea.setup_family,
+                    idea.strategy_version,
+                    idea.strategy_decision,
+                    idea.edge_status,
+                )
+                continue
             if should_skip_alert(idea, namespace="execution"):
                 continue
             if idea.entry_status != "READY":

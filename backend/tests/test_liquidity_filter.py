@@ -21,4 +21,15 @@ def test_filter_liquid_perp_markets_excludes_low_volume_symbols(caplog):
     ]
 
     assert filter_liquid_perp_markets(markets, min_volume=100000) == [markets[0]]
-    assert "Skipping THINUSDT: perp volume below $100k" in caplog.text
+    assert "Skipping THINUSDT: perp volume below $100,000" in caplog.text
+
+
+def test_invalid_or_infinite_volume_is_not_admitted():
+    for value in [float("nan"),float("inf"),-1,None]:
+        assert not is_liquid_perp_market({"perpVolume24h":value},min_volume=250000)
+
+
+def test_raised_floor_includes_boundary_and_excludes_unknown_volume():
+    assert is_liquid_perp_market({"perpVolume24h":250000},min_volume=250000)
+    assert not is_liquid_perp_market({"perpVolume24h":249999.99},min_volume=250000)
+    assert not is_liquid_perp_market({},min_volume=250000)

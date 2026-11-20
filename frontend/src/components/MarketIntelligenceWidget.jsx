@@ -27,7 +27,7 @@ function AssetTable({ assets, showChange, onAnalyzeAsset }) {
         >
           <div className="market-asset-identity">
             <InstrumentLogo symbol={asset.symbol} marketType={asset.marketType || asset.market} size={30} />
-            <b>{asset.symbol}<small>{showChange ? formatChange(asset.price_change_24h) : asset.market_quality_score ? `${asset.market_quality_score}/100` : ""}</small></b>
+            <b>{asset.symbol}<small>{showChange ? formatChange(asset.price_change_24h) : ""}</small></b>
           </div>
           <span>{formatCompactUsd(asset.market_cap)}</span>
           <span>{formatCompactUsd(asset.volume_24h)}</span>

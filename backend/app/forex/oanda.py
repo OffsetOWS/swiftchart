@@ -42,7 +42,9 @@ OANDA_INSTRUMENTS = {
     "USDCHF": "USD_CHF",
     "EURGBP": "EUR_GBP",
     "EURJPY": "EUR_JPY",
+    "EURCHF": "EUR_CHF",
     "GBPJPY": "GBP_JPY",
+    "GBPCHF": "GBP_CHF",
     "XAUUSD": "XAU_USD",
     "CADJPY": "CAD_JPY",
     "EURCAD": "EUR_CAD",
@@ -50,6 +52,16 @@ OANDA_INSTRUMENTS = {
     "AUDCAD": "AUD_CAD",
     "NZDCAD": "NZD_CAD",
     "CADCHF": "CAD_CHF",
+    "EURAUD": "EUR_AUD",
+    "EURNZD": "EUR_NZD",
+    "GBPAUD": "GBP_AUD",
+    "GBPNZD": "GBP_NZD",
+    "AUDJPY": "AUD_JPY",
+    "AUDCHF": "AUD_CHF",
+    "AUDNZD": "AUD_NZD",
+    "NZDJPY": "NZD_JPY",
+    "NZDCHF": "NZD_CHF",
+    "CHFJPY": "CHF_JPY",
     "DXY": "USDOLLAR_USD",
     "WTI": "WTICO_USD",
 }
@@ -215,6 +227,8 @@ class OandaForexProvider(ForexDataProvider):
         pair: ForexPairConfig,
         timeframe: str,
         limit: int = 240,
+        *,
+        include_incomplete: bool = False,
     ) -> pd.DataFrame:
         try:
             granularity = OANDA_GRANULARITIES[timeframe]
@@ -233,15 +247,15 @@ class OandaForexProvider(ForexDataProvider):
         )
         rows: list[dict[str, Any]] = []
         for candle in payload.get("candles") or []:
-            if candle.get("complete") is False:
+            complete = candle.get("complete") is not False
+            if not complete and not include_incomplete:
                 continue
             midpoint = candle.get("mid") or {}
             try:
                 timestamp = datetime.fromisoformat(
                     str(candle["time"]).replace("Z", "+00:00")
                 )
-                rows.append(
-                    {
+                row = {
                         "timestamp": timestamp.astimezone(UTC),
                         "open": float(midpoint["o"]),
                         "high": float(midpoint["h"]),
@@ -249,7 +263,9 @@ class OandaForexProvider(ForexDataProvider):
                         "close": float(midpoint["c"]),
                         "volume": float(candle.get("volume") or 0),
                     }
-                )
+                if include_incomplete:
+                    row["complete"] = complete
+                rows.append(row)
             except (KeyError, TypeError, ValueError) as exc:
                 logger.debug(
                     "Skipped malformed OANDA candle pair=%s error=%s",

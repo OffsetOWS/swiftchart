@@ -18,9 +18,9 @@ const navLinks = [
 ];
 
 const signals = [
-  { symbol: "BTCUSDT", direction: "Short", detail: "Bearish structure active", score: "82%" },
-  { symbol: "ETHUSDT", direction: "Wait", detail: "Reclaim not confirmed", score: "64%" },
-  { symbol: "SOLUSDT", direction: "Long", detail: "Reversal watch only", score: "71%" },
+  { symbol: "BTCUSDT", direction: "Short", detail: "Bearish structure active" },
+  { symbol: "ETHUSDT", direction: "Wait", detail: "Reclaim not confirmed" },
+  { symbol: "SOLUSDT", direction: "Long", detail: "Reversal watch only" },
 ];
 
 export default function LaunchFlow() {
@@ -127,7 +127,7 @@ export default function LaunchFlow() {
                   <span>{signal.symbol}</span>
                   <b>{signal.direction}</b>
                   <small>{signal.detail}</small>
-                  <em>{signal.score}</em>
+                  <em>{signal.direction}</em>
                 </div>
               ))}
             </div>

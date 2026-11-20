@@ -106,4 +106,6 @@ class HyperliquidClient(ExchangeClient):
         df.loc[:, "timestamp"] = df["timestamp"].apply(lambda value: datetime.fromtimestamp(value / 1000, tz=timezone.utc))
         for column in ["open", "high", "low", "close", "volume"]:
             df.loc[:, column] = pd.to_numeric(df[column], errors="coerce")
-        return df[["timestamp", "open", "high", "low", "close", "volume"]].dropna()
+        result = df[["timestamp", "open", "high", "low", "close", "volume"]].dropna()
+        result.attrs["source_snapshot"] = {"provider": "hyperliquid", "request": payload, "candles": rows}
+        return result

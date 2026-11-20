@@ -1,4 +1,5 @@
 function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -52,13 +53,17 @@ export function executionLadderState(signal) {
   let tone = "neutral";
   if (status === "TP1_HIT" || status === "TP1_HIT_TP2_RUNNING") {
     label = status === "TP1_HIT_TP2_RUNNING" ? "TP1 reached · TP2 running" : "TP1 reached · position closed";
-    tone = "profit";
+    tone = "active";
   } else if (status === "TP2_HIT") {
     label = "TP2 reached";
-    tone = "profit";
+    tone = "active";
   } else if (status === "STOPPED") {
     label = "Stop loss hit";
-    tone = "loss";
+    tone = "active";
+  } else if (status === "TIME_EXIT") {
+    label = "48-hour window ended · position closed";
+  } else if (status === "UNRESOLVED" || status === "AMBIGUOUS") {
+    label = "Awaiting tracker settlement";
   } else if (status === "EXPIRED") {
     label = "Signal expired";
     tone = "disabled";
@@ -75,11 +80,11 @@ export function executionLadderState(signal) {
       const neutralBand = Math.max(Math.abs((entryHigh ?? entry) - (entryLow ?? entry)), Math.abs(entry) * 0.0001);
       if (Math.abs(favorableDistance) <= neutralBand) label = "Near entry";
       else if (favorableDistance > 0) {
-        label = "In profit";
-        tone = "profit";
+        label = "Position active";
+        tone = "active";
       } else {
-        label = "In loss";
-        tone = "loss";
+        label = "Position active";
+        tone = "active";
       }
     }
   }
@@ -97,7 +102,7 @@ export function executionLadderState(signal) {
   const stopDistanceFromPrice = storedPrice === null || stop === null
     ? null
     : Math.abs(stop - storedPrice);
-  const terminal = ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(status);
+  const terminal = ["TP2_HIT", "STOPPED", "TIME_EXIT", "UNRESOLVED", "AMBIGUOUS", "EXPIRED", "CANCELLED"].includes(status);
   const targetLabel = status === "TP1_HIT_TP2_RUNNING" ? "TP2" : "TP1";
   const nearestLevel = terminal || targetDistanceFromPrice === null || stopDistanceFromPrice === null
     ? null

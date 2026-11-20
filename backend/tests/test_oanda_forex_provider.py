@@ -263,7 +263,7 @@ class StubProvider(ForexDataProvider):
         self.error = error
         self.calls = 0
 
-    async def candles(self, pair, timeframe: str, limit: int = 240):
+    async def candles(self, pair, timeframe: str, limit: int = 240, *, include_incomplete: bool = False):
         self.calls += 1
         if self.error:
             raise self.error

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from app.models.schemas import TradeIdea
+from app.utils.opportunities import canonical_opportunity_key, setup_family_from_regime
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,19 @@ def setup_fingerprint(idea: TradeIdea) -> str:
     return _setup_shape_fingerprint(idea)
 
 
+def opportunity_dedupe_key(idea: TradeIdea) -> str | None:
+    family = idea.setup_family or setup_family_from_regime(str(idea.market_regime or idea.regime_type or ""))
+    return idea.opportunity_key or canonical_opportunity_key(
+        exchange=idea.exchange,
+        symbol=idea.symbol,
+        timeframe=idea.timeframe,
+        direction=idea.direction,
+        setup_family=family,
+        strategy_version=idea.strategy_version,
+        signal_candle_time=idea.signal_candle_time,
+    )
+
+
 def telegram_alert_cooldown_hours() -> float:
     return max(0.0, float(os.getenv("TELEGRAM_ALERT_COOLDOWN_HOURS", "12")))
 
@@ -172,6 +186,7 @@ def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: dateti
     bucket = _namespace(data, namespace)
     key = _symbol_direction_key(idea)
     dedup_key = alert_dedupe_key(idea)
+    opportunity_key = opportunity_dedupe_key(idea)
     record = bucket["keys"].get(key)
     current_time = now or datetime.now(UTC)
     cooldown = timedelta(minutes=alert_cooldown_minutes(idea.timeframe, namespace=namespace))
@@ -180,17 +195,20 @@ def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: dateti
         last_alert_time = _parse_dt(record.get("last_alert_time"))
         legacy_key = _legacy_setup_shape_fingerprint(idea)
         record_fingerprint = str(record.get("fingerprint") or "")
+        same_opportunity = bool(opportunity_key and record.get("opportunity_key") == opportunity_key)
         same_setup = (
             record.get("dedup_key") == dedup_key
             or record.get("fingerprint") == dedup_key
             or record.get("shape_fingerprint") == dedup_key
             or record.get("shape_fingerprint") == legacy_key
             or record_fingerprint.startswith(f"{legacy_key}|")
+            or same_opportunity
         )
         cooldown_active = bool(last_alert_time and cooldown.total_seconds() > 0 and current_time - last_alert_time < cooldown)
         previous_closed = str(record.get("status", "active")).upper() in {"CLOSED", "INVALIDATED", "TP_HIT", "SL_HIT"}
 
-        if same_setup and not previous_closed and cooldown_active:
+        canonical_lifetime_block = same_opportunity and namespace in {"telegram", "execution"}
+        if same_setup and not previous_closed and (cooldown_active or canonical_lifetime_block):
             _log_skip(idea, record, current_time, cooldown)
             return True
 
@@ -199,7 +217,33 @@ def should_skip_alert(idea: TradeIdea, *, namespace: str = "alerts", now: dateti
         _log_skip(idea, record, current_time, cooldown)
         return True
 
+    opportunity_time = _parse_dt(bucket.setdefault("opportunities", {}).get(opportunity_key)) if opportunity_key else None
+    opportunity_lifetime_block = bool(opportunity_time and namespace in {"telegram", "execution"})
+    if opportunity_time and (opportunity_lifetime_block or (cooldown.total_seconds() > 0 and current_time - opportunity_time < cooldown)):
+        _log_skip(idea, record, current_time, cooldown)
+        return True
+
     return False
+
+
+def should_skip_canonical_alert(idea: TradeIdea, *, namespace: str = "telegram") -> bool:
+    """Final compatibility guard that only considers canonical opportunity identity.
+
+    Canonical Telegram dispatch must not inherit the legacy price/cooldown rules because
+    those rules can suppress a new signal candle or treat a price update as a new alert.
+    """
+    opportunity_key = opportunity_dedupe_key(idea)
+    if not opportunity_key:
+        return False
+    data = _load()
+    bucket = _namespace(data, namespace)
+    if opportunity_key in bucket.setdefault("opportunities", {}):
+        return True
+    return any(
+        record.get("opportunity_key") == opportunity_key
+        for record in bucket.get("keys", {}).values()
+        if isinstance(record, dict)
+    )
 
 
 def mark_alert_sent(idea: TradeIdea, *, namespace: str = "alerts", status: str = "active", now: datetime | None = None) -> None:
@@ -207,6 +251,7 @@ def mark_alert_sent(idea: TradeIdea, *, namespace: str = "alerts", status: str =
     bucket = _namespace(data, namespace)
     key = _symbol_direction_key(idea)
     dedup_key = alert_dedupe_key(idea)
+    opportunity_key = opportunity_dedupe_key(idea)
     current_time = now or datetime.now(UTC)
     bucket["keys"][key] = {
         "source": _source(idea),
@@ -218,10 +263,13 @@ def mark_alert_sent(idea: TradeIdea, *, namespace: str = "alerts", status: str =
         "shape_fingerprint": dedup_key,
         "last_alert_time": _iso(current_time),
         "latest_candle_time": _iso(_latest_candle_time(idea)),
+        "opportunity_key": opportunity_key,
         "status": status,
     }
     fingerprints = bucket["fingerprints"]
     fingerprints[dedup_key] = _iso(current_time)
+    if opportunity_key:
+        bucket.setdefault("opportunities", {})[opportunity_key] = _iso(current_time)
     if len(fingerprints) > RECENT_FINGERPRINT_LIMIT:
         ordered = sorted(fingerprints.items(), key=lambda item: item[1] or "")
         bucket["fingerprints"] = dict(ordered[-RECENT_FINGERPRINT_LIMIT:])

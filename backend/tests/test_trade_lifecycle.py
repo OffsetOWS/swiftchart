@@ -21,6 +21,7 @@ def row() -> dict:
         "created_at": datetime(2026, 5, 1, 0, 0, tzinfo=UTC).isoformat(),
         "status": "OPEN",
         "result": "OPEN",
+        "first_delivered_at": "2026-05-01T00:01:00+00:00",
     }
 
 
@@ -30,10 +31,10 @@ def candles(*bars: tuple[float, float]) -> pd.DataFrame:
         [
             {
                 "timestamp": start + timedelta(hours=4 * index),
-                "open": 100.0,
+                "open": min(high, max(low, 100.0)),
                 "high": high,
                 "low": low,
-                "close": 100.0,
+                "close": min(high, max(low, 100.0)),
                 "volume": 1_000.0,
             }
             for index, (high, low) in enumerate(bars)
@@ -42,41 +43,45 @@ def candles(*bars: tuple[float, float]) -> pd.DataFrame:
 
 
 def test_lifecycle_continues_after_tp1_until_tp2():
-    outcome = evaluate_trade(row(), candles((106.0, 100.0), (111.0, 104.0)), expiry_bars=12)
+    outcome = evaluate_trade(row(), candles((102.0, 100.0), (106.0, 100.0), (111.0, 104.0)), expiry_bars=12)
 
     assert outcome["status"] == "TP2_HIT"
     assert outcome["result"] == "WIN"
     assert outcome["tp1_hit_at"] is not None
     assert outcome["tp2_hit_at"] is not None
     assert outcome["closed_at"] == outcome["tp2_hit_at"]
-    assert outcome["candles_to_resolution"] == 2
+    assert outcome["candles_to_resolution"] == 3
 
 
 def test_lifecycle_tracks_sl_after_tp1_without_break_even():
-    outcome = evaluate_trade(row(), candles((106.0, 100.0), (104.0, 94.0)), expiry_bars=12, move_stop_to_entry_after_tp1=False)
+    outcome = evaluate_trade(row(), candles((102.0, 100.0), (106.0, 100.0), (104.0, 94.0)), expiry_bars=12, move_stop_to_entry_after_tp1=False)
 
     assert outcome["status"] == "CLOSED_AFTER_TP1"
-    assert outcome["result"] == "PARTIAL_LOSS"
+    assert outcome["result"] == "LOSS"
     assert outcome["tp1_hit_at"] is not None
     assert outcome["sl_hit_at"] is not None
     assert outcome["closed_at"] == outcome["sl_hit_at"]
 
 
 def test_lifecycle_tracks_expiry_after_tp1():
-    outcome = evaluate_trade(row(), candles((106.0, 100.0), (104.0, 99.0), (103.0, 99.0)), expiry_bars=3)
+    outcome = evaluate_trade(row(), candles((102.0, 100.0), (106.0, 99.0), (103.0, 99.0)), expiry_bars=3)
 
-    assert outcome["status"] == "PARTIAL_WIN"
-    assert outcome["result"] == "PARTIAL_WIN"
+    assert outcome["status"] == "TIME_EXIT"
+    assert outcome["result"] == "WIN"
+    assert outcome["pnl_r_multiple"] is not None
     assert outcome["tp1_hit_at"] is not None
     assert outcome["expired_at"] is not None
     assert outcome["candles_to_resolution"] == 3
-    assert "EXPIRED_AFTER_TP1" in outcome["lifecycle_events"]
+    assert "TRACKING_HORIZON_ENDED_WITH_EXPOSURE" in outcome["lifecycle_events"]
+    assert "TIME_EXIT" in outcome["lifecycle_events"]
 
 
 def test_lifecycle_can_move_stop_to_break_even_after_tp1():
-    outcome = evaluate_trade(row(), candles((106.0, 100.0), (104.0, 100.5)), expiry_bars=12, move_stop_to_entry_after_tp1=True)
+    bars = candles((102.0, 100.0), (106.0, 101.0), (104.0, 100.5))
+    bars.loc[1:, ["open", "close"]] = 102.0
+    outcome = evaluate_trade(row(), bars, expiry_bars=12, move_stop_to_entry_after_tp1=True)
 
     assert outcome["status"] == "BREAK_EVEN"
-    assert outcome["result"] == "BREAK_EVEN"
+    assert outcome["result"] == "WIN"  # Runner is BE; booked TP1 makes the trade positive.
     assert outcome["tp1_hit_at"] is not None
     assert outcome["sl_hit_at"] is not None

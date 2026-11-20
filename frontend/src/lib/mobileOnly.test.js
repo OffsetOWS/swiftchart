@@ -5,7 +5,8 @@ import test from "node:test";
 const app = readFileSync(new URL("../App.jsx", import.meta.url), "utf8");
 const mobileApp = readFileSync(new URL("../components/MobileDemo.jsx", import.meta.url), "utf8");
 const deployScript = readFileSync(new URL("../../../scripts/deploy_frontend.sh", import.meta.url), "utf8");
-const vercelConfig = JSON.parse(readFileSync(new URL("../../../vercel.json", import.meta.url), "utf8"));
+process.env.SWIFTCHART_BACKEND_ORIGIN = "http://localhost:8000";
+const { config: vercelConfig } = await import("../../../vercel.ts");
 
 test("the active application has no legacy desktop view", () => {
   assert.match(app, /import MobileDemo/);
@@ -86,4 +87,18 @@ test("frontend deployments advance and verify the public custom domain", () => {
       headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }],
     },
   ]);
+});
+
+
+test("Git publication stays disabled without build-only configuration", async () => {
+  const prior=process.env.SWIFTCHART_BACKEND_ORIGIN;
+  delete process.env.SWIFTCHART_BACKEND_ORIGIN;
+  try {
+    const {config}=await import("../../../vercel.ts?without-origin");
+    assert.equal(config.git.deploymentEnabled,false);
+    assert.match(config.rewrites[0].destination,/backend-origin-required\.invalid/);
+  } finally {
+    if (prior===undefined) delete process.env.SWIFTCHART_BACKEND_ORIGIN;
+    else process.env.SWIFTCHART_BACKEND_ORIGIN=prior;
+  }
 });

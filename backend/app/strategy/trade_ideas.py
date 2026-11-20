@@ -1,3 +1,4 @@
+from app.config import get_settings
 import logging
 
 import pandas as pd
@@ -11,6 +12,9 @@ from app.strategy.market_structure import (
     volume_confirmation,
 )
 from app.strategy.support_resistance import average_true_range, find_support_resistance, nearest_range
+from app.strategy.strict_trend_short import StrictTrendShortResult, evaluate_strict_trend_short
+from app.strategy.decision_engine import evaluate_strategy_decision
+from app.utils.opportunities import canonical_opportunity_key, setup_family_from_regime
 from app.strategy.market_regime import detect_market_regime
 
 
@@ -158,6 +162,7 @@ def _signal_quality_control(
             "status": "READY",
             "reasons": [],
             "adjustment": 0.0,
+            "archive_details": {"branch":"INSUFFICIENT_INPUT", "penalty":0.0,"cap":None},
         }
 
     close = df["close"].astype(float)
@@ -289,6 +294,7 @@ def _signal_quality_control(
         "status": status,
         "reasons": reasons,
         "adjustment": round(adjusted - score, 1),
+        "archive_details": {"penalty":penalty,"cap":cap,"uncapped":score-penalty,"floor":0.0,"extension_atr":extension_atr,"rsi":rsi,"vwap":vwap,"ema20":ema20,"equilibrium":equilibrium,"momentum_decay":bool(momentum_decay),"far_from_equilibrium":bool(far_from_equilibrium),"rsi_exhausted":bool(rsi_exhausted),"trap_sweep":bool(trap_sweep)},
     }
 
 
@@ -468,6 +474,38 @@ def _regime_adjustment(direction: str, score: float, market_regime: MarketRegime
     return adjusted, penalty, f"Counter-trend {direction.lower()} allowed with {len(confirmations)} strong reversal confirmations."
 
 
+def _btc_regime_label(btc_context: dict | None) -> str:
+    return str((btc_context or {}).get("regime") or "unknown").lower()
+
+
+def _exceptional_reversal(direction: str, score: float, market_regime: MarketRegimeSnapshot, confirmations: list[str]) -> bool:
+    reclaim_key = "structure_reclaimed_bullish" if direction == "Long" else "structure_reclaimed_bearish"
+    return score >= 92 and len(confirmations) >= 4 and bool(market_regime.components.get(reclaim_key))
+
+
+def _context_gate(
+    *,
+    symbol: str,
+    direction: str,
+    score: float,
+    market_regime: MarketRegimeSnapshot,
+    confirmations: list[str],
+    btc_context: dict | None,
+) -> tuple[float, float, str | None, str | None]:
+    bias = market_regime.bias
+    btc_regime = _btc_regime_label(btc_context)
+    logger.debug(
+        "Context gate warning-only pair=%s direction=%s bias=%s btc_regime=%s confidence=%.1f confirmations=%s",
+        symbol,
+        direction,
+        bias,
+        btc_regime,
+        score,
+        len(confirmations),
+    )
+    return score, 0.0, None, None
+
+
 def _clone_regime_for_setup(
     market_regime: MarketRegimeSnapshot,
     *,
@@ -597,8 +635,11 @@ def _build_idea(
     bullish_sweep: LiquiditySweep | None,
     bearish_sweep: LiquiditySweep | None,
 ) -> tuple[TradeIdea | None, SignalReview | None]:
+    from app.services.score_archive import make_evidence
     entry = (entry_low + entry_high) / 2
     rr = _rr(entry, stop, tp2, direction)
+    rr_unrounded=max(0.0,(tp2-entry if direction=="Long" else entry-tp2)/abs(entry-stop)) if entry!=stop else 0.0
+    score_inputs = dict(rr_unrounded=rr_unrounded, rr_rounding="Python round(raw_rr,2) before scoring; unchanged", regime=regime, direction=direction, zone=zone.model_dump(mode="json"), sweep=sweep.model_dump(mode="json") if sweep else None, htf_bias=htf_bias, rr=rr, vol_ok=vol_ok, mom_ok=mom_ok, distance_from_mid=distance_from_mid, entry_low=entry_low, entry_high=entry_high, stop=stop, tp1=tp1, tp2=tp2, atr=average_true_range(df), bullish_sweep=bullish_sweep.model_dump(mode="json") if bullish_sweep else None, bearish_sweep=bearish_sweep.model_dump(mode="json") if bearish_sweep else None)
     if rr < settings.min_rr:
         rejected_reason = f"Signal rejected because risk/reward {rr:.2f} is below minimum {settings.min_rr:.2f}."
         _log_signal_review(
@@ -614,6 +655,7 @@ def _build_idea(
             confidence_adjustment=0,
         )
         return None, SignalReview(
+            score_evaluation=make_evidence(symbol=symbol,timeframe=timeframe,exchange=exchange,direction=direction,df=df,risk=settings,inputs=score_inputs,regime=market_regime_data),
             symbol=symbol,
             timeframe=timeframe,
             exchange=exchange,
@@ -652,6 +694,7 @@ def _build_idea(
         market_regime=market_regime_data,
     )
     adjusted_score, confidence_adjustment, regime_note = _regime_adjustment(direction, score, market_regime_data, confirmations)
+    regime_adjusted_score = adjusted_score
     trend_alignment = _regime_alignment(direction, market_regime_data)
     rejected_reason = regime_note if regime_note and "rejected" in regime_note.lower() else None
     quality = _signal_quality_control(
@@ -679,6 +722,10 @@ def _build_idea(
             rejected_reason = "Signal rejected because setup score is below 65 after exhaustion quality control. " + " ".join(quality_reasons)
         else:
             rejected_reason = "Signal rejected because setup score is below 65 after regime adjustment."
+    score_evaluation = make_evidence(symbol=symbol,timeframe=timeframe,exchange=exchange,direction=direction,df=df,risk=settings,inputs=score_inputs,parts=parts,base=score,regime_adjusted=regime_adjusted_score,quality=quality,final=round(adjusted_score,1),regime=market_regime_data,confirmations=confirmations)
+    if score_evaluation is not None:
+        score_evaluation["final_grade"]=_grade(adjusted_score)
+        score_evaluation["gate_results"]={"accepted":rejected_reason is None,"reason":rejected_reason,"internal_pass_floor":MIN_SETUP_SCORE,"unrounded_final":adjusted_score,"entry_status":entry_status}
     if rejected_reason:
         _log_signal_review(
             symbol=symbol,
@@ -693,6 +740,7 @@ def _build_idea(
             confidence_adjustment=confidence_adjustment,
         )
         return None, SignalReview(
+            score_evaluation=score_evaluation,
             symbol=symbol,
             timeframe=timeframe,
             exchange=exchange,
@@ -718,7 +766,10 @@ def _build_idea(
         reason = f"{reason} {' '.join(quality_reasons)} Entry Status: {entry_status}."
     reason = f"{reason} Market Regime: {market_regime_data.label} ({market_regime_data.score:+.0f}); trade is {trend_alignment}; confidence adjustment {confidence_adjustment:+.0f}."
 
+    signal_candle_time = df["timestamp"].iloc[-1]
+    setup_family = setup_family_from_regime(regime)
     idea = TradeIdea(
+        score_evaluation=score_evaluation,
         symbol=symbol,
         timeframe=timeframe,
         exchange=exchange,
@@ -757,9 +808,22 @@ def _build_idea(
         exhaustion_risk=str(quality["risk"]),
         entry_status=entry_status,
         downgraded_reasons=quality_reasons,
-        signal_candle_time=df["timestamp"].iloc[-1],
+        signal_candle_time=signal_candle_time,
+        setup_family=setup_family,
+        opportunity_key=canonical_opportunity_key(
+            exchange=exchange,
+            symbol=symbol,
+            timeframe=timeframe,
+            direction=direction,
+            setup_family=setup_family,
+            signal_candle_time=signal_candle_time,
+        ),
+        signal_candle_high=float(df["high"].iloc[-1]),
+        signal_candle_low=float(df["low"].iloc[-1]),
+        signal_candle_close=float(df["close"].iloc[-1]),
     )
     review = SignalReview(
+            score_evaluation=score_evaluation,
         symbol=symbol,
         timeframe=timeframe,
         exchange=exchange,
@@ -838,6 +902,7 @@ def build_trade_ideas(
 
     ideas: list[TradeIdea] = []
     signal_reviews: list[SignalReview] = []
+    strict_trend_short_shadow: StrictTrendShortResult | None = None
     distance_from_mid = abs((position if position is not None else 0.5) - 0.5)
     stop_buffer = max(atr * 0.65, range_width * 0.035)
 
@@ -846,6 +911,14 @@ def build_trade_ideas(
         if review is not None:
             signal_reviews.append(review)
         if idea is not None:
+            if idea.market_regime == "TRENDING_DOWN" and idea.direction == "Short" and strict_trend_short_shadow is not None:
+                idea.production_rule_accepted = True
+                idea.strict_trend_short_eligible = strict_trend_short_shadow.eligible
+                idea.strict_trigger_type = strict_trend_short_shadow.trigger_type
+                idea.strict_confirmation_type = strict_trend_short_shadow.confirmation_type
+                idea.strict_trigger_candle_time = strict_trend_short_shadow.trigger_candle_time
+                idea.strict_trigger_candle_completed = strict_trend_short_shadow.trigger_candle_completed
+            evaluate_strategy_decision(idea)
             ideas.append(idea)
 
     def reject_short(reason: str, missing_condition: str) -> None:
@@ -887,6 +960,27 @@ def build_trade_ideas(
     normal_volatility = 0.002 <= atr / max(price, 1e-9) <= 0.12
     near_long_edge = position is not None and position <= 0.4
     near_short_edge = position is not None and position >= 0.6
+    if regime == "TRENDING_DOWN":
+        try:
+            strict_trend_short_shadow = evaluate_strict_trend_short(
+                regime=regime,
+                direction="Short",
+                df=df,
+                timeframe=timeframe,
+                support=support,
+                resistance=resistance,
+                sweeps=sweeps,
+                htf_bias=htf_bias,
+                normalized_position=position,
+            )
+        except Exception:
+            # Shadow instrumentation must never suppress a production signal.
+            logger.exception(
+                "Strict trend-short shadow evaluation failed symbol=%s timeframe=%s exchange=%s",
+                symbol,
+                timeframe,
+                exchange,
+            )
 
     def evidence(direction: str) -> list[str]:
         items: list[str] = []
@@ -955,6 +1049,8 @@ def build_trade_ideas(
         ):
             softened_regime = "TRANSITION_TO_BEARISH" if market_regime_data.trade_decision == "WAIT" else "RANGE_BOUND"
             soften_note = f"short evidence at resistance/edge: {', '.join(short_evidence)}"
+        if softened_regime == "RANGE_BOUND" and not get_settings().allow_no_trade_range_softening:
+            softened_regime = None
         if softened_regime is None:
             logger.info(
                 "No setup generation symbol=%s timeframe=%s exchange=%s bias=%s reason=%s flip_trigger=%s decision=%s long_evidence=%s short_evidence=%s",
@@ -1187,10 +1283,10 @@ def build_trade_ideas(
         if unconfirmed and unconfirmed.confirmation_status != "confirmed":
             return [], "Unconfirmed sweep — no trade yet.", signal_reviews
         return [], "NO TRADE: setup score is below 65 or risk/reward is not good enough.", signal_reviews
-    return sorted(ideas, key=lambda idea: idea.rank_score, reverse=True), None, signal_reviews
+    return ideas, None, signal_reviews
 
 
-def analyze_dataframe(
+def _analyze_dataframe_impl(
     symbol: str,
     timeframe: str,
     exchange: str,
@@ -1237,3 +1333,14 @@ def analyze_dataframe(
         market_regime_data=market_regime_data,
         rejected_signals=[review for review in signal_reviews if not review.accepted],
     )
+
+
+def analyze_dataframe(symbol, timeframe, exchange, df, settings, htf_dfs=None, global_regime_score=None, breadth_above_ma_pct=None):
+    from app.services.score_archive import capture_context
+    with capture_context(symbol, timeframe, exchange, df, settings, htf_dfs, global_regime_score, breadth_above_ma_pct):
+        result = _analyze_dataframe_impl(symbol, timeframe, exchange, df, settings, htf_dfs, global_regime_score, breadth_above_ma_pct)
+        from app.services.score_archive import make_evidence
+        for review in result.rejected_signals:
+            if review.score_evaluation is None:
+                review.score_evaluation=make_evidence(symbol=symbol,timeframe=timeframe,exchange=exchange,direction=review.direction,df=df,risk=settings,inputs={"not_computed_reason":review.reason})
+        return result

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from app.config import get_settings
@@ -23,7 +24,8 @@ def perp_volume_24h(market: dict[str, Any]) -> float | None:
         if value is None or value == "":
             continue
         try:
-            return float(value)
+            parsed = float(value)
+            return parsed if math.isfinite(parsed) and parsed >= 0 else None
         except (TypeError, ValueError):
             continue
     return None
@@ -39,7 +41,8 @@ def skip_low_volume_market(market: dict[str, Any], min_volume: float | None = No
     if is_liquid_perp_market(market, min_volume):
         return False
     symbol = str(market.get("symbol", "")).upper() or "UNKNOWN"
-    logger.info("Skipping %s: perp volume below $100k", symbol)
+    threshold = get_settings().min_perp_volume_24h if min_volume is None else min_volume
+    logger.info("Skipping %s: perp volume below $%s or unavailable", symbol, f"{threshold:,.0f}")
     return True
 
 

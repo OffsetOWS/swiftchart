@@ -79,7 +79,7 @@ function NotificationCard({ notification, renderAsset, onOpen, onDelete }) {
             {!notification.read ? <i aria-label="Unread" /> : null}
           </div>
           <p>{notification.message}</p>
-          <small>{notification.score ? `Score ${notification.score} · ` : ""}{timeAgo(notification.timestamp)}</small>
+          <small>{timeAgo(notification.timestamp)}</small>
         </div>
         {notification.statusBadge ? <span className={`notification-status ${badgeTone(notification)}`}>{notification.statusBadge}</span> : null}
       </button>

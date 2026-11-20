@@ -1,15 +1,15 @@
-# Performance Tracking
+# Signal Lifecycle
 
-SwiftChart saves signal history so the system can be reviewed after the fact.
+Saved signals retain their entry, stop, targets and tracking status.
 
 ## Signal memory
 
-Saved ideas include direction, entry, stop, targets, score, regime, confidence, and result state.
+The original alert identifies the setup and its price levels.
 
 ## Outcome checks
 
-The history system can review later candles to see whether entry, take profit, or stop levels were reached.
+Settled target, stop and 48-hour close events use the same tracker as signal history. Unresolved price ordering waits for settlement.
 
-## Why it matters
+## Tracking window
 
-Performance tracking turns the scanner into a measurable workflow instead of a stream of one-off opinions.
+Crypto positions close at the end of the 48-hour tracking window if neither the stop nor final target has been reached. The exact UTC deadline is shown on the signal.

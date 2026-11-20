@@ -136,9 +136,15 @@ class ForexMarketDataService:
         timeframe = normalize_forex_timeframe(timeframe)
         current = now or datetime.now(UTC)
         expected = latest_expected_candle_open(timeframe, current)
-        cached = latest_forex_candle(pair.pair, timeframe)
+        primary = getattr(self.provider, "primary", self.provider)
+        preferred_provider = getattr(primary, "name", self.provider.name)
+        cached = latest_forex_candle(
+            pair.pair, timeframe, provider=preferred_provider
+        )
         if cached and datetime.fromisoformat(cached["candle_open_at"]) >= expected:
-            return _frame_from_rows(list_forex_candles(pair.pair, timeframe, limit=limit))
+            return _frame_from_rows(list_forex_candles(
+                pair.pair, timeframe, limit=limit, provider=cached["provider"]
+            ))
 
         settings = get_settings()
         lock_key = f"forex-candle:{pair.pair}:{timeframe}:{expected.isoformat()}"
@@ -154,23 +160,36 @@ class ForexMarketDataService:
             if acquired:
                 break
             await asyncio.sleep(0.2)
-            cached = latest_forex_candle(pair.pair, timeframe)
+            cached = latest_forex_candle(
+                pair.pair, timeframe, provider=preferred_provider
+            )
             if cached and datetime.fromisoformat(cached["candle_open_at"]) >= expected:
                 return _frame_from_rows(
-                    list_forex_candles(pair.pair, timeframe, limit=limit)
+                    list_forex_candles(
+                        pair.pair, timeframe, limit=limit, provider=cached["provider"]
+                    )
                 )
         if not acquired:
-            cached_rows = list_forex_candles(pair.pair, timeframe, limit=limit)
+            cached_rows = list_forex_candles(
+                pair.pair,
+                timeframe,
+                limit=limit,
+                provider=cached["provider"] if cached else None,
+            )
             if cached_rows:
                 logger.warning("Forex candle lock timed out key=%s; serving stored data", lock_key)
                 return _frame_from_rows(cached_rows)
             raise TimeoutError(f"Forex market-data synchronization timed out for {pair.pair} {timeframe}")
 
         try:
-            cached = latest_forex_candle(pair.pair, timeframe)
+            cached = latest_forex_candle(
+                pair.pair, timeframe, provider=preferred_provider
+            )
             if cached and datetime.fromisoformat(cached["candle_open_at"]) >= expected:
                 return _frame_from_rows(
-                    list_forex_candles(pair.pair, timeframe, limit=limit)
+                    list_forex_candles(
+                        pair.pair, timeframe, limit=limit, provider=cached["provider"]
+                    )
                 )
             fetch_limit = (
                 settings.forex_bootstrap_candle_limit
@@ -223,9 +242,48 @@ class ForexMarketDataService:
                 len(rows),
                 expected.isoformat(),
             )
-            return _frame_from_rows(list_forex_candles(pair.pair, timeframe, limit=limit))
+            return _frame_from_rows(list_forex_candles(
+                pair.pair, timeframe, limit=limit, provider=source_provider
+            ))
         finally:
             release_market_data_lock(lock_key, owner)
+
+    async def live_candle(
+        self,
+        pair: ForexPairConfig,
+        timeframe: str,
+        *,
+        completed_through: datetime,
+    ) -> dict | None:
+        """Fetch the forming candle for display without caching it as completed data."""
+        timeframe = normalize_forex_timeframe(timeframe)
+        frame = await self.provider.candles(
+            pair,
+            PROVIDER_TIMEFRAMES[timeframe],
+            2,
+            include_incomplete=True,
+        )
+        if frame.empty:
+            return None
+        cutoff = pd.Timestamp(completed_through)
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize(UTC)
+        else:
+            cutoff = cutoff.tz_convert(UTC)
+        candidates = frame[pd.to_datetime(frame["timestamp"], utc=True) > cutoff]
+        if "complete" in candidates.columns:
+            candidates = candidates[~candidates["complete"].astype(bool)]
+        if candidates.empty:
+            return None
+        row = candidates.sort_values("timestamp").iloc[-1]
+        return {
+            "timestamp": pd.Timestamp(row["timestamp"]).to_pydatetime(),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume") or 0),
+        }
 
 
 def get_forex_market_data_service() -> ForexMarketDataService:

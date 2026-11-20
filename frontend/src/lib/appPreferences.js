@@ -25,7 +25,7 @@ export const DEFAULT_APP_PREFERENCES = Object.freeze({
     defaultTimeframe: "4h",
     minimumScore: 65,
     preferredExchange: "all",
-    defaultSorting: "highest_score",
+    defaultSorting: "highest_volume",
     hideLowConviction: false,
     showOnlyOpen: false,
     prioritizeHighConviction: true,
