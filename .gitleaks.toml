@@ -1,0 +1,31 @@
+title = "Swiftchart independent full-history audit"
+[extend]
+useDefault = true
+
+[[rules]]
+id = "xai-api-key"
+description = "xAI API key"
+regex = '''\bxai-[A-Za-z0-9_-]{40,}'''
+
+[[rules]]
+id = "aws-secret-access-key-context"
+description = "AWS secret access key assignment"
+regex = '''(?i)(?:aws_secret_access_key|secretaccesskey)[\s"']*[:=][\s"']*([A-Za-z0-9/+=]{40})'''
+secretGroup = 1
+
+[[rules]]
+id = "oanda-api-key-context"
+description = "OANDA API token assignment"
+regex = '''(?i)(?:oanda[_-]?(?:api[_-]?)?(?:key|token)|oanda_access_token)[\s"']*[:=][\s"']*([a-f0-9]{32}-[a-f0-9]{32})'''
+secretGroup = 1
+
+[[rules]]
+id = "wallet-private-key-context"
+description = "Wallet private key assignment"
+regex = '''(?i)(?:private[_-]?key|signing[_-]?key)[\s"']*[:=][\s"']*((?:0x)?[a-f0-9]{64})'''
+secretGroup = 1
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram Bot API token, including bare tokens without a URL prefix"
+regex = '''\b[0-9]{5,20}:[A-Za-z0-9_-]{35}'''

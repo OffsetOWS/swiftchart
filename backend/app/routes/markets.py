@@ -219,8 +219,9 @@ async def refresh_top_ideas(
 async def active_crypto_trades(
     exchange: str = Query(default="all"),
     limit: int = Query(default=50, ge=1, le=100),
+    symbol: str | None = None,
 ):
-    trades = await run_crypto_work(list_active_crypto_trades, exchange=exchange, limit=limit)
+    trades = await run_crypto_work(list_active_crypto_trades, exchange=exchange, limit=limit, symbol=symbol)
     return {"trades": trades, "count": len(trades), "source": "telegram-canonical"}
 
 

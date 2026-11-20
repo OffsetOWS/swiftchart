@@ -9,8 +9,8 @@ import subprocess
 def included(name):
     # Packing policy is local-only; the shipped validator needs only stdlib.
     from scripts.stage1_pack import included as legacy_included
-    return (legacy_included(name) and name != 'docs/stage1_vps_baseline.json') or name in {
-        'scripts/final_phase_admin.py', 'scripts/final_phase_audit.py', 'scripts/crypto_soak_gate.py'}
+    return (name.startswith('agent/') and not name.startswith('agent/tests/') and '__pycache__' not in name and (name.endswith('.py') or name in {'agent/Dockerfile','agent/requirements.txt','agent/.dockerignore'})) or (legacy_included(name) and name != 'docs/stage1_vps_baseline.json') or name in {
+        'scripts/final_phase_admin.py', 'scripts/agent_vps_release.py', 'scripts/final_phase_audit.py', 'scripts/crypto_soak_gate.py'}
 
 
 def fingerprint(hashes):
@@ -61,7 +61,7 @@ def validate(report, commit, source_fingerprint, *, now=None):
         raise ValueError('Every release API probe must be exercised successfully')
     if report.get('failures') or report.get('api_probe_failures'):
         raise ValueError('API/workload probes must all pass')
-    return {'passed': True, 'source_commit': commit, 'source_fingerprint': source_fingerprint,
+    return {'agent_load': report.get('agent_load'), 'passed': True, 'source_commit': commit, 'source_fingerprint': source_fingerprint,
             'elapsed_seconds': report['elapsed_seconds'], 'completed_at': report['completed_at'],
             'health_successes': health['successes'], 'worst_health_seconds': health['worst_seconds'],
             'scans_completed': runtime['scans_completed'], 'lifecycle_completed': runtime['lifecycle_completed']}

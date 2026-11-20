@@ -648,3 +648,12 @@ async def _scan_loop() -> None:
         except Exception:
             logger.exception("Background scan failed")
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+
+
+def read_cached_top_ideas(exchange: str, timeframe: str) -> dict:
+    """Read the in-process scan snapshot without starting or queueing any work."""
+    key = (normalize_exchange(exchange), timeframe.lower())
+    cached = _scan_cache.get(key)
+    if cached:
+        return {**cached[1], "cache_age_seconds": max(0, monotonic() - cached[0])}
+    return {"ideas": [], "pending_setups": [], "available": False}

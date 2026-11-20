@@ -60,3 +60,7 @@ app.include_router(trade_history_router, prefix="/api", tags=["trade-history"])
 app.include_router(genlayer_router, prefix="/api", tags=["genlayer-ai"])
 app.include_router(market_intelligence_router, prefix="/api", tags=["market-intelligence"])
 app.include_router(forex_router, prefix="/api", tags=["forex"])
+
+# The private router also rejects proxy headers; nginx blocks /internal/ at ingress.
+from app.routes.agent_internal import router as agent_internal_router
+app.include_router(agent_internal_router)

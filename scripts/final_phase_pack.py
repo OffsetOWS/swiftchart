@@ -43,6 +43,10 @@ def pack(root, ref, output, soak_report):
         ],
     }
     manifest["soak"] = validate(json.loads(soak_report.read_text()), sha, fingerprint(manifest["files"]))
+    if any(name.startswith('agent/') for name in manifest['files']):
+        load = manifest['soak'].get('agent_load') or {}
+        if not load.get('passed') or load.get('requested') != 100 or load.get('answered') != 100 or load.get('failures') != 0:
+            raise ValueError('Agent Swift requires 100 passed concurrent agent questions during the release soak')
     with output.open("xb") as stream, tarfile.open(
         fileobj=stream, mode="w:gz"
     ) as archive:

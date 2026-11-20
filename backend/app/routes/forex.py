@@ -9,6 +9,7 @@ import time
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
+from app.services.crypto_work import run_crypto_work
 from app.config import get_settings
 from app.forex.models import (
     DISPLAY_ACTIVE_FOREX_STATUSES,
@@ -120,7 +121,7 @@ async def forex_pair_chart(
         higher = await service.completed_candles(
             pair, higher_timeframe, limit=min(limit, 240)
         ) if higher_timeframe else None
-        analysis = build_pair_chart_analysis(pair, normalized_timeframe, frame, higher)
+        analysis = await run_crypto_work(build_pair_chart_analysis, pair, normalized_timeframe, frame, higher)
         if not frame.empty:
             live = await service.live_candle(
                 pair,

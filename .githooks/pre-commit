@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "Commit blocked: install Gitleaks (macOS: brew install gitleaks)." >&2
+    exit 1
+fi
+python3 scripts/check_staged_security.py
+exec gitleaks git --staged --redact=100 --no-banner \
+    --config "$repo_root/.gitleaks.toml" \
+    --gitleaks-ignore-path "$repo_root/.gitleaksignore" \
+    --ignore-gitleaks-allow --max-archive-depth=3 --max-decode-depth=3

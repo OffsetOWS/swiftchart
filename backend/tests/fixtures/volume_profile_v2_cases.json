@@ -1,0 +1,131 @@
+{
+  "profile_cases": [
+    {
+      "name": "directional_bins",
+      "rows": 32,
+      "mintick": 1.0,
+      "value_area_percent": 70.0,
+      "bars": [
+        {"open": 0.0, "high": 1.0, "low": 0.0, "close": 1.0, "volume": 10.0},
+        {"open": 2.0, "high": 2.0, "low": 1.0, "close": 1.0, "volume": 30.0},
+        {"open": 32.0, "high": 32.0, "low": 32.0, "close": 32.0, "volume": 0.0}
+      ],
+      "expected": {"available": true, "poc": 1.5, "vah": 2.0, "val": 1.0, "delta_percent": -50.0}
+    },
+    {
+      "name": "poc_tie_prefers_higher_equidistant_bin",
+      "rows": 32,
+      "mintick": 1.0,
+      "value_area_percent": 50.0,
+      "bars": [
+        {"open": 5.0, "high": 6.0, "low": 5.0, "close": 6.0, "volume": 20.0},
+        {"open": 27.0, "high": 27.0, "low": 26.0, "close": 26.0, "volume": 20.0},
+        {"open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0},
+        {"open": 32.0, "high": 32.0, "low": 32.0, "close": 32.0, "volume": 0.0}
+      ],
+      "expected": {"available": true, "poc": 26.5, "vah": 27.0, "val": 26.0, "delta_percent": 0.0}
+    },
+    {
+      "name": "overlap_allocation_and_value_expansion",
+      "rows": 32,
+      "mintick": 1.0,
+      "value_area_percent": 70.0,
+      "bars": [
+        {"open": 0.0, "high": 2.0, "low": 0.0, "close": 2.0, "volume": 20.0},
+        {"open": 3.0, "high": 3.0, "low": 1.0, "close": 1.0, "volume": 20.0},
+        {"open": 32.0, "high": 32.0, "low": 32.0, "close": 32.0, "volume": 0.0}
+      ],
+      "expected": {"available": true, "poc": 1.5, "vah": 3.0, "val": 1.0, "delta_percent": 0.0}
+    },
+    {
+      "name": "missing_volume",
+      "rows": 32,
+      "mintick": 1.0,
+      "value_area_percent": 70.0,
+      "bars": [
+        {"open": 10.0, "high": 12.0, "low": 9.0, "close": 11.0, "volume": null},
+        {"open": 11.0, "high": 13.0, "low": 10.0, "close": 12.0, "volume": null}
+      ],
+      "expected": {"available": false, "poc": null, "vah": null, "val": null, "delta_percent": null}
+    }
+  ],
+  "event_cases": [
+    {
+      "name": "bullish_val_rejection",
+      "previous": {"poc": 15.0, "vah": 20.0, "val": 10.0},
+      "previous_close": 11.0,
+      "bar": {"open": 9.5, "high": 12.0, "low": 8.5, "close": 10.5},
+      "tolerance": 1.0,
+      "expected": {"bullish_val_rejection": true, "bearish_vah_rejection": false, "bullish_reentry": false, "bearish_reentry": false}
+    },
+    {
+      "name": "bearish_vah_rejection",
+      "previous": {"poc": 15.0, "vah": 20.0, "val": 10.0},
+      "previous_close": 19.0,
+      "bar": {"open": 20.5, "high": 21.5, "low": 19.0, "close": 19.5},
+      "tolerance": 1.0,
+      "expected": {"bullish_val_rejection": false, "bearish_vah_rejection": true, "bullish_reentry": false, "bearish_reentry": false}
+    },
+    {
+      "name": "bullish_val_reentry",
+      "previous": {"poc": 15.0, "vah": 20.0, "val": 10.0},
+      "previous_close": 8.0,
+      "bar": {"open": 9.0, "high": 12.0, "low": 8.5, "close": 11.0},
+      "tolerance": 1.0,
+      "expected": {"bullish_val_rejection": true, "bearish_vah_rejection": false, "bullish_reentry": true, "bearish_reentry": false}
+    },
+    {
+      "name": "bearish_vah_reentry",
+      "previous": {"poc": 15.0, "vah": 20.0, "val": 10.0},
+      "previous_close": 22.0,
+      "bar": {"open": 21.0, "high": 21.5, "low": 18.0, "close": 19.0},
+      "tolerance": 1.0,
+      "expected": {"bullish_val_rejection": false, "bearish_vah_rejection": true, "bullish_reentry": false, "bearish_reentry": true}
+    }
+  ],
+  "reversion_cases": [
+    {
+      "name": "poc_touched_within_eight_bars",
+      "direction": 1,
+      "target": 15.0,
+      "boundary": 10.0,
+      "tolerance": 1.0,
+      "bars": [
+        {"high": 13.0, "low": 10.5, "close": 12.0},
+        {"high": 14.0, "low": 11.0, "close": 13.0},
+        {"high": 15.2, "low": 12.5, "close": 14.5}
+      ],
+      "expected": "reverted"
+    },
+    {
+      "name": "poc_tracking_expires_after_eight_bars",
+      "direction": -1,
+      "target": 15.0,
+      "boundary": 20.0,
+      "tolerance": 1.0,
+      "bars": [
+        {"high": 19.5, "low": 17.0, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0},
+        {"high": 19.0, "low": 16.5, "close": 18.0}
+      ],
+      "expected": "expired"
+    },
+    {
+      "name": "poc_tracking_cancels_outside_value",
+      "direction": 1,
+      "target": 15.0,
+      "boundary": 10.0,
+      "tolerance": 1.0,
+      "bars": [
+        {"high": 12.0, "low": 8.0, "close": 8.5}
+      ],
+      "expected": "cancelled"
+    }
+  ]
+}

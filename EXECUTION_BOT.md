@@ -118,7 +118,7 @@ curl -X POST http://127.0.0.1:8100/webhook/signal \
 On the VPS through Nginx:
 
 ```bash
-curl -X POST http://156.67.30.173/execution/webhook/signal \
+curl -X POST http://YOUR_SERVER_IP/execution/webhook/signal \
   -H "Content-Type: application/json" \
   -H "X-SwiftChart-Secret: change-this-secret" \
   -d '{"pair":"BTC","side":"BUY","entry":94500,"confidence":87,"timeframe":"15m","reason":"SwiftChart signal"}'
@@ -136,7 +136,7 @@ API:
 
 ```bash
 curl http://127.0.0.1:8100/dashboard
-curl http://156.67.30.173/execution/dashboard
+curl http://YOUR_SERVER_IP/execution/dashboard
 ```
 
 ## PM2
