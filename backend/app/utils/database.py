@@ -19,7 +19,10 @@ def _sqlite_path() -> Path:
 def _connect():
     path = _sqlite_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
+    # Full-history reads can hold a shared lock beyond SQLite's five-second
+    # default. Wait for that reader to finish instead of losing a lifecycle
+    # commit. Database work remains in the bounded worker pool.
+    connection = sqlite3.connect(path, timeout=30)
     connection.row_factory = sqlite3.Row
     return connection
 
