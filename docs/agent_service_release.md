@@ -27,6 +27,16 @@ or ECS commands. Never publish the frontend or apply the separate HTTPS plan.
   is insufficient. Verify this before any cutover; preparation fails closed if
   workload credentials are absent. The runtime file supports a dedicated
   `AWS_BEARER_TOKEN_BEDROCK` or a dedicated AWS key pair supplied privately.
+  The preferred VPS setup uses a dedicated IAM Roles Anywhere role restricted to
+  the existing Bedrock model, with a certificate-based credential process.
+  Set `AWS_PROFILE=swiftchart-agent-vps` and
+  `AWS_CONFIG_FILE=/run/bedrock/config`. Store the private profile, workload
+  certificate/key and verified AWS signing helper in `/etc/swiftchart-agent/aws`,
+  readable only by container UID 10001. Mount this directory read-only at
+  `/run/bedrock`; the SDK renews its one-hour role sessions automatically.
+  Keep the certificate authority key on the owner's machine only. Record the
+  workload certificate expiry and renew it before expiry; never mix operator
+  credentials or static keys into this profile.
 - Verify existing EFS state and any legacy custom alert obligations before
   stopping the old service. Retain EFS and the old task definition for rollback.
   The new agent uses fresh bounded JSON conversations. It does not import the
@@ -109,6 +119,7 @@ private runtime file, host networking and the production resource limits:
 docker run --rm --network host --read-only --cpus 0.25 --memory 768m \
   --memory-swap 768m --pids-limit 128 --tmpfs /tmp:rw,nosuid,nodev,size=134217728 \
   --env-file /etc/swiftchart-agent/runtime.env \
+  --mount type=bind,src=/etc/swiftchart-agent/aws,dst=/run/bedrock,readonly \
   --entrypoint python "swiftchart-agent:$sha" \
   -m telegram_bot.check_setup --api --telegram --bedrock
 ```
@@ -146,7 +157,8 @@ docker inspect swiftchart-agent --format '{{json .HostConfig}}'
 
 Inspect only sanitized container metadata; environment values are private.
 Verify 0.25 CPU, 768 MiB RAM and swap cap, 128 PIDs, read-only root, bounded logs,
-no published port and only `/var/lib/swiftchart-agent` mounted for JSON/log state.
+no published port, `/var/lib/swiftchart-agent` mounted for JSON/log state, and
+the dedicated workload identity mounted read-only at `/run/bedrock`.
 The API trading database and old EFS are never mounted into this container.
 Do not create another signal scanner or alert worker.
 

@@ -6,6 +6,7 @@ Rollback preserves live database writes and never resets the shared checkout.
 from __future__ import annotations
 
 import argparse
+import configparser
 from copy import deepcopy
 import hashlib
 import json
@@ -26,6 +27,40 @@ from scripts.stage2_admin import exported_value
 from scripts.crypto_soak_gate import validate_summary
 
 TOKEN_FILE=Path('/etc/swiftchart-agent/api-token.env')
+WORKLOAD_AUTH_DIR=Path('/etc/swiftchart-agent/aws')
+
+
+def role_credentials(data):
+    """Validate the dedicated, read-only mounted renewable workload profile."""
+    if not (data.get('AWS_PROFILE') or data.get('AWS_CONFIG_FILE')):
+        return False
+    if data.get('AWS_PROFILE')!='swiftchart-agent-vps' or data.get('AWS_CONFIG_FILE')!='/run/bedrock/config':
+        raise ValueError('Only the dedicated VPS workload profile is permitted')
+    if any(data.get(key) for key in ('AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_SESSION_TOKEN','AWS_BEARER_TOKEN_BEDROCK')):
+        raise ValueError('Do not mix the renewable workload profile with static credentials')
+    for name in ('config','workload.key','workload.crt'):
+        path=WORKLOAD_AUTH_DIR/name
+        if not path.is_file() or path.is_symlink() or path.stat().st_mode & 0o077:
+            raise ValueError('Workload configuration and certificate files must be private')
+    helper=WORKLOAD_AUTH_DIR/'aws_signing_helper'
+    if not helper.is_file() or helper.is_symlink() or helper.stat().st_mode & 0o022:
+        raise ValueError('Workload signing helper must not be writable by group or others')
+    config=configparser.ConfigParser(interpolation=None)
+    config.read(WORKLOAD_AUTH_DIR/'config')
+    section='profile swiftchart-agent-vps'
+    if config.sections()!=[section] or set(config[section])!={'region','credential_process'}:
+        raise ValueError('Unexpected workload profile configuration')
+    command=shlex.split(config[section]['credential_process'])
+    if config[section]['region']!=data['TRADING_AGENT_AWS_REGION'] or command[:2]!=['/run/bedrock/aws_signing_helper','credential-process']:
+        raise ValueError('Unexpected workload credential provider')
+    flags=command[2:]
+    if len(flags)!=14:
+        raise ValueError('Unexpected workload credential provider arguments')
+    values=dict(zip(flags[::2],flags[1::2]))
+    expected={'--certificate','--private-key','--trust-anchor-arn','--profile-arn','--role-arn','--region','--session-duration'}
+    if set(values)!=expected or values['--certificate']!='/run/bedrock/workload.crt' or values['--private-key']!='/run/bedrock/workload.key' or values['--region']!=data['TRADING_AGENT_AWS_REGION'] or values['--session-duration']!='3600':
+        raise ValueError('Unexpected workload credential provider arguments')
+    return True
 
 
 def invoke(args):
@@ -45,7 +80,7 @@ def load_env(path):
     required=['TRADING_AGENT_TELEGRAM_BOT_TOKEN','TRADING_AGENT_AWS_REGION','TRADING_AGENT_BEDROCK_MODEL_ID']
     if any(not data.get(key) for key in required) or not (data.get('TRADING_AGENT_ALLOWED_USER_IDS') or data.get('TRADING_AGENT_ALLOWED_CHAT_IDS')):
         raise ValueError('Runtime credentials/model/unchanged allowlist are required')
-    if not (data.get('AWS_BEARER_TOKEN_BEDROCK') or (data.get('AWS_ACCESS_KEY_ID') and data.get('AWS_SECRET_ACCESS_KEY'))):
+    if not (role_credentials(data) or data.get('AWS_BEARER_TOKEN_BEDROCK') or (data.get('AWS_ACCESS_KEY_ID') and data.get('AWS_SECRET_ACCESS_KEY'))):
         raise ValueError('A dedicated VPS Bedrock credential source is required; never copy the operator login session')
     return data
 
@@ -198,12 +233,15 @@ def start_agent(args,state):
     os.chown(directory,10001,10001)
     if subprocess.run(['docker','inspect','swiftchart-agent'],capture_output=True).returncode==0:
         raise ValueError('An agent container already exists; refusing an overlapping poller')
+    env=load_env(Path(state['runtime_env']))
+    auth_mount=['--mount',f'type=bind,src={WORKLOAD_AUTH_DIR},dst=/run/bedrock,readonly'] if role_credentials(env) else []
     invoke(['docker','run','-d','--name','swiftchart-agent','--restart','unless-stopped',
             '--cpus','0.25','--memory','768m','--memory-swap','768m','--pids-limit','128',
             '--network','host','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=134217728',
             '--cap-drop','ALL','--security-opt','no-new-privileges','--stop-timeout','30',
             '--env-file',state['runtime_env'],'--mount',f'type=bind,src={directory},dst=/state',
             '--log-opt','max-size=5m','--log-opt','max-file=3',
+            *auth_mount,
             '--label','org.opencontainers.image.revision='+state['commit'],args.image])
     print(json.dumps({'agent_started':True,'cpu_quota':0.25,'memory_mib':768,'database_mounted':False}))
 
