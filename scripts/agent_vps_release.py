@@ -18,6 +18,8 @@ import shlex
 import shutil
 import subprocess
 import sys
+from time import monotonic, sleep
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -186,6 +188,20 @@ def switch_api(config_path,root):
     verify_api(root)
 
 
+def wait_api_ready(timeout=60):
+    """Wait only for read readiness; never retry an API switch or deployment."""
+    deadline=monotonic()+timeout
+    while monotonic()<deadline:
+        try:
+            with urlopen('http://127.0.0.1:8000/health',timeout=2) as response:
+                if response.status==200:
+                    return
+        except (URLError,TimeoutError,OSError):
+            pass
+        sleep(0.25)
+    raise ValueError('API failed to become healthy before the readiness deadline')
+
+
 def activate_api(args,state):
     verify_release(Path(state['root']),state['commit'])
     verify_api(Path(state['previous_root']))
@@ -200,6 +216,7 @@ def activate_api(args,state):
     invoke(['systemctl','reload','nginx'])
     try:
         switch_api(args.state/'release-api.json',Path(state['root']))
+        wait_api_ready()
         verify(args,state)
         invoke(['pm2','save'])
     except Exception:

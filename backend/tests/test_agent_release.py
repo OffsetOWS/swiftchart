@@ -82,3 +82,33 @@ def test_workload_private_key_permissions_and_provider_are_checked(tmp_path,monk
     config=directory/'config';config.write_text(config.read_text().replace('/run/bedrock/aws_signing_helper','/bin/sh'))
     with pytest.raises(ValueError,match='provider'):
         release.role_credentials(data)
+
+
+def test_api_readiness_wait_retries_only_health_reads(monkeypatch):
+    from scripts import agent_vps_release as release
+    from urllib.error import URLError
+    calls=[]
+    class Response:
+        status=200
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+    def read(url,timeout):
+        calls.append(url)
+        if len(calls)<3:raise URLError('Starting')
+        return Response()
+    monkeypatch.setattr(release,'urlopen',read)
+    monkeypatch.setattr(release,'sleep',lambda _:None)
+    release.wait_api_ready()
+    assert calls==['http://127.0.0.1:8000/health']*3
+
+
+def test_api_readiness_wait_fails_at_deadline_without_restarting(monkeypatch):
+    from scripts import agent_vps_release as release
+    from urllib.error import URLError
+    clock=iter([0,0,61])
+    monkeypatch.setattr(release,'monotonic',lambda:next(clock))
+    monkeypatch.setattr(release,'sleep',lambda _:None)
+    monkeypatch.setattr(release,'urlopen',lambda *a,**k:(_ for _ in ()).throw(URLError('Starting')))
+    monkeypatch.setattr(release,'invoke',lambda *a:pytest.fail('Readiness must not restart processes'))
+    with pytest.raises(ValueError,match='readiness deadline'):
+        release.wait_api_ready()
