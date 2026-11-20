@@ -70,11 +70,11 @@ def signal_state(signals):
     active = []
     for row in signals:
         raw = str(row.get('display_status') or row.get('lifecycle_status') or row.get('status') or row.get('entry_status') or '').upper()
-        if raw in {'OPEN', 'ACTIVE', 'TAKEN', 'TRIGGERED', 'ENTERED', 'TP1_HIT', 'TP1_HIT_TP2_RUNNING', 'READY', 'PENDING', 'WAITING', 'WAITING_ENTRY'}:
+        if raw in {'OPEN', 'ACTIVE', 'TAKEN', 'TRIGGERED', 'ENTERED', 'TP1_HIT', 'TP1_HIT_TP2_RUNNING', 'READY', 'PENDING', 'PENDING_ENTRY', 'WAITING', 'WAITING_ENTRY'}:
             active.append(raw)
     if not active:
         return 'no active signal'
-    if all(raw in {'READY', 'PENDING', 'WAITING', 'WAITING_ENTRY'} for raw in active):
+    if all(raw in {'READY', 'PENDING', 'PENDING_ENTRY', 'WAITING', 'WAITING_ENTRY'} for raw in active):
         return 'signal active, awaiting entry'
     if 'TP1_HIT' in active or 'TP1_HIT_TP2_RUNNING' in active:
         return 'signal active, first target reached'
@@ -132,6 +132,93 @@ def presentation(data, *, observed_at):
         [f'Now: {action}.', f'What to do: {action}.'],
         [f'Data: {as_of}. Not financial advice.'],
     ]
-    return {'symbol': symbol, 'price': price, 'support': support, 'resistance': resistance,
+    result = {'symbol': symbol, 'price': price, 'support': support, 'resistance': resistance,
             'bias': bias, 'trend': trend, 'higher_timeframe': higher, 'signal': signal,
             'as_of': as_of, 'line_options': options}
+    structure = {'HH/HL': 'higher highs and higher lows', 'LH/LL': 'lower highs and lower lows',
+                 'Range': 'a respected trading range', 'Mixed / Choppy': 'mixed, choppy structure'}.get(data.get('structure'))
+    if structure is None:
+        structure = {'upward': 'recent structure favours buyers', 'downward': 'recent structure favours sellers',
+                     'sideways': 'price is moving in a range', 'unclear': 'structure has no clear direction'}[trend]
+    else:
+        structure = 'price is forming ' + structure
+    up = formatted(resistance_band[1]) if resistance_band else None
+    down = formatted(support_band[0]) if support_band else None
+    upside = f'A break and hold above {up} would support an upward move' if up else 'There is no confirmed upper boundary for a priced breakout scenario'
+    downside = f'A break and hold below {down} would support further weakness' if down else 'There is no confirmed lower boundary for a priced breakdown scenario'
+    if bias == 'downward' and up:
+        change = f'The downward view weakens if price breaks and holds above {up}'
+    elif bias == 'upward' and down:
+        change = f'The upward view weakens if price breaks and holds below {down}'
+    else:
+        change = 'A clear break and hold outside the nearest zones would change the picture'
+    below = formatted(resistance_band[0]) if resistance_band else down
+    hold = f'Holding below {below} keeps the downward scenario in play' if below else 'Wait for fresh structure before assigning a lower boundary'
+    brief = [
+        [f'{symbol} {str(data.get("timeframe") or "").upper()}: {bias} bias because {structure}; {signal}.',
+         f'{symbol} {str(data.get("timeframe") or "").upper()} has a {bias} bias: {structure}. {signal.capitalize()}.'],
+        [f'Price: {price}. Support: {support_text}; resistance: {resistance_text}.',
+         f'Price: {price}. Nearest support: {support_text}; nearest resistance: {resistance_text}.'],
+        [change + '.'],
+        [f'Now: {action}. Data: {as_of}. Not financial advice.'],
+    ]
+    companion = (data.get('companion') or {}).get('reply') or {}
+    companion_line = (f'{companion["timeframe"]} context: {companion["trend"]} trend; {companion["structure"]}.'
+                      if companion.get('timeframe') else 'Companion timeframe context is not available yet; no direction is assumed.')
+    detailed = [options[0], [f'Current API price: {price}.'],
+                [f'{str(data.get("timeframe") or "").upper()} trend: {trend}; {structure}.'],
+                [companion_line], options[2], [upside + '.'], [hold + '. ' + downside + '.'],
+                ['View invalidation: ' + change[0].lower() + change[1:] + '.'],
+                [f'Now: {action}. Data: {as_of}. Not financial advice.']]
+    result.update(timeframe=str(data.get('timeframe') or '').upper(), structure=structure,
+                  view_change=change, upside=upside, downside=downside,
+                  trigger_above=up, trigger_below=down,
+                  views={'default': brief, 'detail': detailed})
+    return result
+
+
+def chart_projection(data, *, observed_at):
+    """All plotted market labels and axis numbers are API-owned facts."""
+    candles = [{k: row[k] for k in ('timestamp','open','high','low','close') if k in row}
+               for row in data.get('chart_candles', [])[-100:]]
+    if len(candles) < 10:
+        return {'available': False, 'symbol': data.get('symbol'), 'message': 'Candle history is unavailable.'}
+    kind, symbol = data['market_type'], data['symbol']
+    fmt = lambda value: price_text(value,kind,symbol,data.get('price_format') or {})
+    if fmt(data.get('current_price')) is None:
+        return {'available': False, 'symbol': symbol, 'message':'Verified price precision is unavailable.'}
+    support, resistance = nearest_zones(data)
+    levels = []
+    for label, value, colour in [('Support',support,'#3ddc97'),('Resistance',resistance,'#ff646d')]:
+        if value:
+            levels.append({'label':label,'low':float(value[0]),'high':float(value[1]),
+                           'text':f'{label} {fmt(value[0])}–{fmt(value[1])}','colour':colour})
+    signals = data.get('signals', [])
+    for row in signals[:1]:
+        if not signal_state([row]).startswith('signal active'):
+            continue
+        entry = row.get('entry_price')
+        pairs = [('Entry',entry),('Stop',row.get('stop_loss')),('Target 1',row.get('take_profit_1')),('Target 2',row.get('take_profit_2'))]
+        if not entry:
+            zone = row.get('entry_zone') or [row.get('entry_zone_low'),row.get('entry_zone_high')]
+            pairs[:1] = [('Entry low',zone[0]),('Entry high',zone[1])]
+        for label, price in pairs:
+            if decimal(price) and fmt(price):
+                levels.append({'label':label,'low':float(price),'high':float(price),'text':f'{label} {fmt(price)}','colour':'#c7a7ff' if label.startswith('Entry') else '#f2c46d'})
+    current = float(data['current_price'])
+    levels.append({'label':'Current','low':current,'high':current,'text':'Current '+str(fmt(current)), 'colour':'#6fd0d4'})
+    values = [float(row[key]) for row in candles for key in ('low','high')] + [v for level in levels for v in (level['low'],level['high'])]
+    low, high = min(values), max(values)
+    padding = max((high-low)*.05, high*.001)
+    low, high = max(low-padding, low*.5), high+padding
+    ticks = [{'value': low+(high-low)*i/5, 'text':fmt(low+(high-low)*i/5)} for i in range(6)]
+    times = []
+    for index in sorted({0,len(candles)//4,len(candles)//2,len(candles)*3//4,len(candles)-1}):
+        value = candles[index]['timestamp']
+        time = datetime.fromisoformat(str(value).replace('Z','+00:00')) if isinstance(value,str) else value
+        times.append({'index':index,'text':time.astimezone(UTC).strftime('%d %b %H:%M')})
+    facts = presentation(data,observed_at=observed_at)
+    return {'available':True,'symbol':symbol,'timeframe':str(data['timeframe']).upper(),
+            'candles':candles,'candle_count':len(candles),'levels':levels,'axis_min':low,'axis_max':high,'axis_ticks':ticks,
+            'time_ticks':times,'as_of':facts['as_of'],
+            'palette':{'background':'#070908','panel':'#151513','text':'#e2e2db','muted':'#939b97','grid':'#292d2a','up':'#3ddc97','down':'#ff646d'}}

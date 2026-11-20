@@ -28,6 +28,25 @@ router = APIRouter(prefix='/internal/agent', dependencies=[Depends(authorize)], 
 Kind = Literal['crypto', 'forex']
 
 
+@router.get('/prices')
+async def prices(market_type: Kind, symbols: str = Query(max_length=1800)):
+    return await agent_data.prices(market_type,symbols.split(','))
+
+
+@router.get('/chart/{symbol}')
+async def chart(symbol: str, market_type: Kind, timeframe: str = '4h'):
+    if len(symbol)>40:raise HTTPException(422,'Invalid symbol')
+    from app.services.market_data import interactive_candles
+    with interactive_candles():
+        return await agent_data.cached(('chart',market_type,symbol,timeframe),lambda:agent_data.chart(market_type,symbol,timeframe))
+
+
+@router.get('/signal-context/{market_type}/{identity}')
+async def signal_context(market_type: Kind, identity: str):
+    if len(identity)>60:raise HTTPException(422,'Invalid signal identity')
+    return await agent_data.cached(('signal-context',market_type,identity),lambda:agent_data.signal_context(market_type,identity))
+
+
 @router.get('/markets')
 async def markets():
     return await agent_data.cached(('markets',), agent_data.markets)
@@ -51,10 +70,12 @@ async def active(market_type: Literal['all', 'crypto', 'forex'] = 'all', symbol:
 
 
 @router.get('/snapshot/{symbol}')
-async def snapshot(symbol: str, market_type: Kind, timeframe: str = '4h'):
+async def snapshot(symbol: str, market_type: Kind, timeframe: str = '4h', detail: bool = False):
     if len(symbol) > 40:
         raise HTTPException(422, 'Invalid symbol')
-    return await agent_data.cached(('snapshot', market_type, symbol, timeframe), lambda: agent_data.snapshot(market_type, symbol, timeframe))
+    from app.services.market_data import interactive_candles
+    with interactive_candles():
+        return await agent_data.cached(('snapshot', market_type, symbol, timeframe, detail), lambda: agent_data.snapshot(market_type, symbol, timeframe, detail=detail))
 
 
 @router.get('/currency-strength')

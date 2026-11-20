@@ -5,6 +5,37 @@ Grok clients, the HTTP tool adapter, conversation JSON store, and tests.
 There is no backend copy, exchange connection, agent SQLite store, or trading
 database in the agent image. The canonical backend remains under `backend/`.
 
+Market answers have a four-line default and a detailed view with both timeframes,
+upside/downside scenarios and invalidation. Hermes writes from the API's display
+facts; numerical and semantic checks fall back to the API template on failure.
+The default uses cached higher-timeframe context without queuing extra provider
+reads. Unavailable context is described plainly; detailed requests fetch it.
+
+Each market reply carries Chart, More detail, timeframe, News and Alert me
+buttons. Button tokens belong to that chat and user, expire after seven days,
+and preserve the original reply's market context. Follow-ups reuse the latest
+symbol and timeframe. Signal alerts deep-link using a canonical signal ID.
+Charts contain API candles, API-formatted axes and levels, with a short cache.
+No chart renderer or agent tool calculates market prices.
+
+Price alerts are user-requested notifications: ten active per user, seven-day
+expiry, five-second polling using fresh API quotes. `/alerts` lists and cancels
+them. State is owner-only JSON outside Git. A hit is claimed before sending;
+ambiguous Telegram delivery is recorded and never automatically retried, because
+Telegram has no idempotency key. This prevents duplicate notifications after a
+restart, though a network failure can leave delivery uncertain. No trades are
+placed. Stale or unavailable quotes cannot create or trigger an alert.
+
+Unverified Variational candle coverage is excluded from the catalogue and new
+analysis/scans. Enable it only after verifying the candle feed, with both
+`VARIATIONAL_ENABLED` and `VARIATIONAL_CANDLES_VERIFIED`. Existing tracking and
+Forex strategy rules are unchanged. Provider identifiers retain their original
+case even though public symbols are normalized.
+
+Internal loopback/token-protected reads now also include `/prices`,
+`/chart/{symbol}`, `/signal-context/{market_type}/{identity}` and the snapshot's
+`detail` parameter. They must remain inaccessible through the public proxy.
+
 Run with `PYTHONPATH=agent python -m telegram_bot.main`. The source directory is
 intentionally not a Python `agent` package: that name belongs to Hermes.
 

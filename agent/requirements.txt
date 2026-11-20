@@ -1,3 +1,4 @@
 httpx==0.28.1
 python-telegram-bot==21.10
 hermes-agent[bedrock]==0.19.0
+Pillow==12.2.0

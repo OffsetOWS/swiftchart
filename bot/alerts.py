@@ -102,7 +102,7 @@ async def dispatch_crypto_outbox(bot: Bot) -> dict[str, int | str]:
                 response = await bot.send_message(
                     chat_id=chat_id,
                     text=message,
-                    reply_markup=trade_alert_keyboard(signal_id),
+                    reply_markup=trade_alert_keyboard(signal_id, agent_signal_id=candidate.trade_idea_id),
                 )
                 sent += 1
                 final_status = mark_telegram_recipient_success(

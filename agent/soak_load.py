@@ -47,7 +47,7 @@ def run_load(origin, token, output, count=100):
             answer=await service.handle_message(chat_id=index+1,user_id=1,text=f'{symbol} levels')
             durations.append(monotonic()-started)
             return (symbol in answer and 'Data:' in answer and 'Price:' in answer
-                    and 'Price: unavailable' not in answer and len(answer.splitlines()) == 5)
+                    and 'Price: unavailable' not in answer and len(answer.splitlines()) == 4)
         started=monotonic()
         results=await asyncio.gather(*(question(index) for index in range(count)))
         await api.close()

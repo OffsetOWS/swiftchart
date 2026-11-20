@@ -27,9 +27,14 @@ def render_signal(data):
     return render_snapshot(data)
 
 
-def render_snapshot(data):
-    options = (data.get('reply') or {}).get('line_options')
-    if not isinstance(options, list) or len(options) != 5 or not all(isinstance(row, list) and row and all(isinstance(item, str) for item in row) for row in options):
+def reply_options(data, *, detail=False):
+    facts = data.get('reply') or {}
+    return (facts.get('views') or {}).get('detail' if detail else 'default') or facts.get('line_options')
+
+
+def render_snapshot(data, *, detail=False):
+    options = reply_options(data, detail=detail)
+    if not isinstance(options, list) or not 3 <= len(options) <= 12 or not all(isinstance(row, list) and row and all(isinstance(item, str) for item in row) for row in options):
         return f'{data.get("symbol", "SwiftChart")}\nSwiftChart display facts are unavailable. Please retry shortly.\nNot financial advice.'
     return '\n'.join(row[0] for row in options)
 
@@ -37,7 +42,7 @@ def render_snapshot(data):
 NUMBER = re.compile(r'\d+(?:[.,]\d+)*(?:[eE][+-]?\d+)?')
 
 
-def checked_reply(text, data):
+def checked_reply(text, data, *, detail=False):
     """Check every number, then line placement and meaning. Fail closed.
 
     Numeric inclusion alone would permit a model to swap support/resistance or
@@ -47,8 +52,8 @@ def checked_reply(text, data):
     facts = data.get('reply') or {}
     allowed_numbers = set(NUMBER.findall(json.dumps(facts, ensure_ascii=False)))
     if any(number not in allowed_numbers for number in NUMBER.findall(text)):
-        return render_snapshot(data), False, 'ungrounded_number'
-    lines, options = text.splitlines(), facts.get('line_options') or []
-    if len(lines) != 5 or len(options) != 5 or any(line not in choices for line, choices in zip(lines, options)):
-        return render_snapshot(data), False, 'shape_or_fact_mismatch'
+        return render_snapshot(data, detail=detail), False, 'ungrounded_number'
+    lines, options = text.splitlines(), reply_options(data, detail=detail) or []
+    if len(lines) != len(options) or not 3 <= len(lines) <= 12 or any(line not in choices for line, choices in zip(lines, options)):
+        return render_snapshot(data, detail=detail), False, 'shape_or_fact_mismatch'
     return text, True, None

@@ -360,7 +360,7 @@ assert not Path('forbidden.db').exists()
 
 def test_bot_warms_hermes_off_event_loop_before_polling_commands():
     import threading
-    from telegram_bot.main import post_init
+    from telegram_bot.main import post_init, post_shutdown
     from telegram_bot.handlers import SERVICE_KEY
     observed=[]
     main_thread=threading.get_ident()
@@ -370,11 +370,16 @@ def test_bot_warms_hermes_off_event_loop_before_polling_commands():
             observed.append('warm')
     class Bot:
         async def set_my_commands(self,commands):
-            assert observed==['warm']
+            assert observed==['warm','provider']
             observed.append('commands')
-    application=SimpleNamespace(bot_data={SERVICE_KEY:SimpleNamespace(orchestrator=Orchestrator())},bot=Bot())
-    asyncio.run(post_init(application))
-    assert observed==['warm','commands']
+    async def warm_up(): observed.append('provider')
+    application=SimpleNamespace(bot_data={SERVICE_KEY:SimpleNamespace(orchestrator=Orchestrator(),warm_up=warm_up)},bot=Bot())
+    async def check():
+        await post_init(application)
+        assert 'alert_worker' in application.bot_data
+        await post_shutdown(application)
+    asyncio.run(check())
+    assert observed==['warm','provider','commands']
 
 
 def test_managed_hermes_home_pins_context_without_network_discovery(tmp_path,monkeypatch):

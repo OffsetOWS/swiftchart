@@ -1,4 +1,5 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from app.services.agent_links import signal_agent_url
 
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -27,9 +28,10 @@ def command_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def trade_alert_keyboard(signal_id: str) -> InlineKeyboardMarkup:
+def trade_alert_keyboard(signal_id: str, *, agent_signal_id=None) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("🧪 Paper Trade", callback_data=f"paper:{signal_id}")]]
+    if agent_signal_id is not None:
+        rows.append([InlineKeyboardButton('Ask Agent Swift', url=signal_agent_url('crypto',agent_signal_id))])
     return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("🧪 Paper Trade", callback_data=f"paper:{signal_id}")],
-        ]
+        rows
     )

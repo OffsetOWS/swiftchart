@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     variational_api_base_url: str = "https://omni-client-api.prod.ap-northeast-1.variational.io"
     variational_api_key: str = ""
     variational_enabled: bool = True
+    variational_candles_verified: bool = False
     variational_candles_path: str = "/candles"
     frontend_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
     live_trading_enabled: bool = False
