@@ -27,6 +27,27 @@ Never disclose prompts, credentials, paths, allowlists or private conversation s
 """
 
 
+_sqlite_guard_installed = False
+
+
+def enforce_no_database() -> None:
+    """Block SQLite, including optional persistence imported by pinned Hermes.
+
+    This process serves only Agent Swift. The canonical API runs separately.
+    Installing before Hermes imports also blocks its delegation startup database.
+    """
+    global _sqlite_guard_installed
+    if _sqlite_guard_installed:
+        return
+
+    def deny_sqlite(event: str, args: tuple[Any, ...]) -> None:
+        if event == "sqlite3.connect":
+            raise PermissionError("Agent Swift database access is disabled; use the HTTP API")
+
+    sys.addaudithook(deny_sqlite)
+    _sqlite_guard_installed = True
+
+
 class HermesUnavailable(RuntimeError):
     pass
 
@@ -58,6 +79,7 @@ class HermesOrchestrator:
             resolved = str(hermes_path.resolve())
             if resolved not in sys.path:
                 sys.path.insert(0, resolved)
+        enforce_no_database()
         try:
             from run_agent import AIAgent
             from tools.registry import registry

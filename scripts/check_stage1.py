@@ -7,5 +7,5 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(ROOT / "backend"), str(ROOT)]),
        "PYTHONDONTWRITEBYTECODE": "1"}
-args = [sys.executable, "-m", "pytest", "backend/tests", "execution_bot/tests", "agent/tests", "agent/tests", "agent/tests", "agent/tests", "agent/tests", "agent/tests", "agent/tests", "agent/tests", "agent/tests", "agent/tests", "-q", "-p", "no:cacheprovider"]
+args = [sys.executable, "-m", "pytest", "backend/tests", "execution_bot/tests", "agent/tests", "-q", "-p", "no:cacheprovider"]
 raise SystemExit(subprocess.run(args, cwd=ROOT, env=env).returncode)

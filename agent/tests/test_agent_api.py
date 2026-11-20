@@ -315,3 +315,26 @@ def test_grok_timeout_is_bounded_and_does_not_raise(tmp_path):
     client=GrokContextClient(settings(tmp_path),client_factory=factory)
     assert run(client.fetch('latest news')) is None
     assert len(calls)==2
+
+
+def test_database_guard_rejects_real_sqlite_including_memory(tmp_path):
+    import os
+    import subprocess
+    import sys
+    script = """
+from trading_agent.hermes import enforce_no_database
+enforce_no_database()
+enforce_no_database()
+import sqlite3
+from pathlib import Path
+for target in (':memory:', 'forbidden.db'):
+    try:
+        sqlite3.connect(target)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError('SQLite unexpectedly permitted')
+assert not Path('forbidden.db').exists()
+"""
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1]))
+    subprocess.run([sys.executable, '-c', script], cwd=tmp_path, env=env, check=True)

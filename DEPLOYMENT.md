@@ -61,7 +61,7 @@ Shared by: backend + Telegram bot
 Run this from your computer:
 
 ```bash
-ssh root@156.67.30.173
+ssh root@YOUR_SERVER_IP
 ```
 
 ## 2. Install Server Packages
@@ -137,7 +137,7 @@ VARIATIONAL_ENABLED=true
 VARIATIONAL_API_BASE_URL=https://omni-client-api.prod.ap-northeast-1.variational.io
 VARIATIONAL_API_KEY=
 VARIATIONAL_CANDLES_PATH=/candles
-FRONTEND_ORIGINS=http://156.67.30.173,https://YOUR_DOMAIN
+FRONTEND_ORIGINS=http://YOUR_SERVER_IP,https://YOUR_DOMAIN
 LIVE_TRADING_ENABLED=false
 DEFAULT_EXCHANGE=all
 DEFAULT_TIMEFRAME=4h
@@ -238,7 +238,7 @@ Paste this:
 ```nginx
 server {
     listen 80;
-    server_name 156.67.30.173 YOUR_DOMAIN;
+    server_name YOUR_SERVER_IP YOUR_DOMAIN;
 
     root /opt/swiftchart/frontend/dist;
     index index.html;
@@ -295,7 +295,7 @@ In your domain DNS, create this record:
 ```text
 Type: A
 Name: @ or app
-Value: 156.67.30.173
+Value: YOUR_SERVER_IP
 ```
 
 Then run this on the VPS, replacing `YOUR_DOMAIN`:
@@ -337,7 +337,7 @@ curl http://127.0.0.1:8000/health
 Check website from the VPS:
 
 ```bash
-curl http://156.67.30.173
+curl http://YOUR_SERVER_IP
 ```
 
 Check Nginx:
