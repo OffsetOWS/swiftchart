@@ -20,6 +20,7 @@ from app.services.market_data import get_candles_cached
 from app.services.scanner import discover_all_scan_markets, read_cached_top_ideas
 from app.services.trade_history import get_trade_history, list_active_crypto_trades
 from app.models.schemas import RiskSettings
+from app.services.agent_presentation import presentation
 
 
 SIGNAL_FIELDS = {
@@ -51,6 +52,10 @@ def signal_projection(value, market_type=None):
             elif raw in {'AMBIGUOUS','UNRESOLVED','EXPIRED_POSITION','EXPIRED_RUNNER'}:
                 raw = 'UNRESOLVED'
         result['display_status'] = raw
+    if market_type:
+        display = {**result, 'market_type': market_type, 'bias': result.get('direction'),
+                   'single_signal': result}
+        result['reply'] = presentation(display, observed_at=datetime.now(UTC).isoformat())
     return result
 
 
@@ -194,7 +199,7 @@ async def snapshot(kind, symbol, timeframe):
                               min_rr=settings.default_min_rr, max_open_trades=settings.default_max_open_trades,
                               preferred_timeframe=timeframe), supplemental_timeout_seconds=8,
         ))
-        data = {key: analysis.get(key) for key in ('symbol', 'exchange', 'timeframe', 'current_price', 'market_condition', 'higher_timeframe_bias')}
+        data = {key: analysis.get(key) for key in ('symbol', 'exchange', 'timeframe', 'current_price', 'price_format', 'market_condition', 'higher_timeframe_bias')}
         data['support_zones'] = zone_projection(analysis.get('support_zones', []))
         data['resistance_zones'] = zone_projection(analysis.get('resistance_zones', []))
         # Reanalysed candidate plans never become a claimed published signal.
@@ -203,7 +208,14 @@ async def snapshot(kind, symbol, timeframe):
         data['setup_status'] = 'PUBLISHED_SIGNAL' if data['signals'] else 'NO_PUBLISHED_SIGNAL'
         source = '/api/analyze read-only analysis + /api/active-crypto-trades canonical statuses'
     data['market_type'] = kind
-    return envelope(data, source)
+    # Hypothetical Forex chart levels are not an executable/published signal.
+    # Retain canonical chart decision and raw zones for parity, but never return
+    # candidate entry/stop/target numbers to the language model on a no-trade.
+    if not data.get('signals') or data.get('decision') not in {'LONG', 'SHORT'}:
+        data.pop('levels', None)
+    result = envelope(data, source)
+    result['data']['reply'] = presentation(result['data'], observed_at=result['observed_at'])
+    return result
 
 
 async def strength(horizon):

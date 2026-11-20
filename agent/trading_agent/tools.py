@@ -63,7 +63,7 @@ class SwiftChartReadOnlyTools:
         if not data.get('crypto') and market_type != 'forex':
             from trading_agent.api import APIUnavailable
             raise APIUnavailable('SwiftChart crypto coverage is temporarily unavailable')
-        covered = ', '.join(item['symbol'] for kind in ('crypto', 'forex') for item in data.get(kind, []))
+        covered = ', '.join(dict.fromkeys(item['symbol'] for kind in ('crypto', 'forex') for item in data.get(kind, [])))
         raise UnsupportedMarket(f'{value or "That symbol"} is not covered. Supported symbols: {covered or "temporarily unavailable"}.')
 
     async def scan_crypto(self, args):

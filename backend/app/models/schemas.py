@@ -298,6 +298,7 @@ class AnalysisResponse(BaseModel):
     timeframe: str
     exchange: str
     current_price: float
+    price_format: dict[str, Any] | None = None
     market_condition: MarketCondition
     support_zones: list[Zone]
     resistance_zones: list[Zone]

@@ -83,6 +83,8 @@ class HyperliquidClient(ExchangeClient):
                     "active": not item.get("isDelisted", False),
                     "volume": context.get("dayNtlVlm"),
                     "perpVolume24h": context.get("dayNtlVlm"),
+                    "price_format": {"kind": "hyperliquid-perp", "size_decimals": item["szDecimals"]}
+                    if isinstance(item.get("szDecimals"), int) and 0 <= item["szDecimals"] <= 6 else None,
                 }
             )
         return markets
