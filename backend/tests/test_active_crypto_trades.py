@@ -70,3 +70,15 @@ def test_active_crypto_feed_excludes_expired_trade(active_trade_db):
         )
 
     assert list_active_crypto_trades() == []
+
+
+def test_symbol_filter_is_applied_before_active_feed_limit(active_trade_db):
+    save_trade_ideas([crypto_idea('ZECUSDT'), crypto_idea('ETHUSDT')])
+    recipients = claim_telegram_dispatches({101})
+    assert len(recipients) == 2
+    for index, recipient in enumerate(recipients):
+        mark_telegram_recipient_success(recipient.dispatch_id, 101, telegram_message_id=index+10)
+    with get_connection() as connection:
+        connection.execute("UPDATE trade_ideas SET market_volume_24h=CASE WHEN symbol='ZECUSDT' THEN 100000000 ELSE 1 END")
+    assert list_active_crypto_trades(limit=1)[0]['symbol'] == 'ZECUSDT'
+    assert list_active_crypto_trades(limit=1, symbol='ETHUSDT')[0]['symbol'] == 'ETHUSDT'

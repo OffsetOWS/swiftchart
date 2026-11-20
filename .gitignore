@@ -25,3 +25,55 @@ propr_scalper.py
 config.json
 .vercel
 .env*
+
+# Agent Swift service runtime and private data
+# Security: environment, credentials, keys, and local audit backups.
+.env
+.env.*
+*.env
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.ppk
+id_rsa*
+id_ed25519*
+id_ecdsa*
+credentials
+.netrc
+.npmrc
+.pypirc
+.security-cleanup/
+
+# Databases, journals, dumps, logs, and runtime state.
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite-*
+*.sqlite.*
+*.sqlite3
+*.sqlite3-*
+*.sqlite3.*
+*.dump
+*.sql.gz
+*.log
+*.log.*
+logs/
+
+# Raw analysis and personal data stay outside Git.
+analysis_outputs/
+variational_rewards/
+personal_data/
+private_data/
+user_data/
+customer_data/
+wallet_tracker/
+exports/
+
+agent/.runtime/
+agent/.hermes/

@@ -1085,7 +1085,7 @@ def update_outcome(trade_id: int, outcome: dict) -> None:
 ACTIVE_TRADE_STATUSES = ("PENDING", "OPEN", "ENTRY_TRIGGERED", "TP1_HIT")
 
 
-def list_active_crypto_trades(exchange: str | None = None, limit: int = 50) -> list[dict]:
+def list_active_crypto_trades(exchange: str | None = None, limit: int = 50, *, symbol: str | None = None) -> list[dict]:
     """Return unresolved crypto trades that were successfully delivered on Telegram."""
     selected_exchange = str(exchange or "all").lower()
     clauses = [
@@ -1099,6 +1099,9 @@ def list_active_crypto_trades(exchange: str | None = None, limit: int = 50) -> l
     if selected_exchange != "all":
         clauses.append("t.exchange = ?")
         values.append(selected_exchange)
+    if symbol:
+        clauses.append("t.symbol = ?")
+        values.append(canonical_crypto_symbol(symbol))
     row_limit = min(100, max(1, int(limit or 50)))
     with get_connection() as connection:
         rows = connection.execute(

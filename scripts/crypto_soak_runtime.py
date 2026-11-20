@@ -167,6 +167,32 @@ factory.get_exchange = lambda _: exchange
 market_data.get_exchange = lambda _: exchange
 
 
+class StoredForex:
+    def __init__(self, path):
+        snapshots = json.loads(Path(path).read_text())
+        self.charts = {(row['symbol'], row['timeframe']): row for key in ('forex','forex_higher') for row in snapshots[key]}
+
+    async def completed_candles(self, pair, timeframe, limit=240):
+        row = self.charts[(pair.pair, timeframe)]
+        bars = [bar for bar in row['candles'] if bar.get('complete', True)]
+        frame = pd.DataFrame(bars)
+        frame['timestamp'] = pd.to_datetime(frame['timestamp'], utc=True)
+        return frame.tail(limit).copy()
+
+    async def live_candle(self, pair, timeframe, **kwargs):
+        rows = self.charts[(pair.pair, timeframe)]['candles']
+        forming = [bar for bar in rows if not bar.get('complete', True)]
+        if not forming:
+            return None
+        return {key: value for key, value in forming[-1].items() if key != 'complete'}
+
+
+if os.environ.get('SOAK_AGENT_FOREX_FIXTURES'):
+    from app.routes import forex as forex_routes
+    stored_forex = StoredForex(os.environ['SOAK_AGENT_FOREX_FIXTURES'])
+    forex_routes.get_forex_market_data_service = lambda: stored_forex
+
+
 async def no_external_funding(*_args, **_kwargs):
     # Keep accounting code unchanged; unavailable fixture stays unknown.
     return None

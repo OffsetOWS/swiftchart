@@ -1,0 +1,10 @@
+**/__pycache__
+**/*.pyc
+.env*
+tests/
+.runtime/
+.hermes/
+*.db*
+*.sqlite*
+*.log*
+README.md

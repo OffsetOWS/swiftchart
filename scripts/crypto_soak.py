@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import resource
+import secrets
 from datetime import UTC, datetime
 import hashlib
 import json
@@ -56,6 +57,10 @@ def run(args):
                HYPERLIQUID_CANDLE_REQUEST_DELAY_SECONDS='0', API_RATE_LIMIT_PER_MINUTE='100000',
                SCANNER_RATE_LIMIT_PER_MINUTE='100000', SOAK_CODE_ROOT=str(args.code_root.resolve()), SOAK_OUTPUT=str(output), SOAK_CANDLES=str(args.candles.resolve()),
                SOAK_PROFILE=str(args.profile).lower(), SOAK_PORT=str(port), SOAK_OUTCOMES=args.outcomes)
+    token = secrets.token_urlsafe(32)
+    env['AGENT_INTERNAL_API_TOKEN'] = token
+    if getattr(args, 'agent_forex_fixtures', None):
+        env['SOAK_AGENT_FOREX_FIXTURES'] = str(args.agent_forex_fixtures.resolve())
     logs = open(output / 'runtime.private.log', 'w')
     cpu_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     process = subprocess.Popen([sys.executable, str(ROOT / 'scripts/crypto_soak_runtime.py')], cwd=output, env=env, stdout=logs, stderr=logs)
@@ -66,6 +71,9 @@ def run(args):
     api_probes = []
     probe_pool = ThreadPoolExecutor(max_workers=3)
     pending_probes = []
+    agent_pool = ThreadPoolExecutor(max_workers=1)
+    agent_future = None
+    agent_load = None
     def api_probe(path, timeout):
         t = time.monotonic()
         try:
@@ -90,6 +98,12 @@ def run(args):
         if started is None:
             raise RuntimeError('Isolated API did not become ready')
         print(json.dumps({'ready': True, 'archive': args.archive, 'outcomes': args.outcomes, 'database_rows': sizes}), flush=True)
+        if getattr(args, 'agent_questions', 0):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('swiftchart_agent_soak_load', ROOT / 'agent/soak_load.py')
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            agent_future = agent_pool.submit(module.run_load, f'http://127.0.0.1:{port}', token, output, args.agent_questions)
         next_probe = started
         next_api_probe = started
         next_stats_probe = started + 15
@@ -121,6 +135,14 @@ def run(args):
         elapsed = time.monotonic() - started
         for job in pending_probes:
             api_probes.append(job.result())
+        if agent_future is not None:
+            try:
+                agent_load = agent_future.result(timeout=1)
+                if not agent_load.get('passed') or agent_load.get('answered') != args.agent_questions:
+                    failures.append({'reason': 'agent-questions-failed'})
+            except Exception as exc:
+                agent_load = {'passed': False, 'error_type': type(exc).__name__}
+                failures.append({'reason': 'agent-load-failed'})
         process.send_signal(signal.SIGUSR1)
         time.sleep(0.1)
     finally:
@@ -130,6 +152,7 @@ def run(args):
         except subprocess.TimeoutExpired:
             process.kill(); process.wait()
         logs.close()
+        agent_pool.shutdown(wait=True, cancel_futures=True)
         probe_pool.shutdown(wait=True, cancel_futures=True)
     runtime = json.loads((output/'runtime.json').read_text()) if (output/'runtime.json').exists() else {}
     if runtime.get('scans_completed', 0) < 1 or runtime.get('lifecycle_completed', 0) < 1:
@@ -149,7 +172,7 @@ def run(args):
     cpu_seconds = cpu_after.ru_utime + cpu_after.ru_stime - cpu_before.ru_utime - cpu_before.ru_stime
     api_failures = [row for row in api_probes if not row['ok']]
     sha = identity[0]
-    report = {'completed_at': datetime.now(UTC).isoformat(), 'source_commit': sha,
+    report = {'agent_load': agent_load, 'completed_at': datetime.now(UTC).isoformat(), 'source_commit': sha,
               'release_gate': not args.diagnose, 'requested_seconds': args.seconds, 'elapsed_seconds': elapsed, 'source_fingerprint': identity[1], 'cpu_seconds': cpu_seconds,
               'archive': args.archive, 'outcomes': args.outcomes, 'database_rows': sizes,
               'new_score_evaluations': new_evaluations, 'new_market_snapshots': new_snapshots, 'api_probes': api_probes, 'api_probe_failures': api_failures,
@@ -174,6 +197,8 @@ if __name__ == '__main__':
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--code-root', type=Path, default=ROOT)
     p.add_argument('--seconds', type=float, default=900)
+    p.add_argument('--agent-forex-fixtures', type=Path, help='Private captured production Forex chart responses')
+    p.add_argument('--agent-questions', type=int, default=0, help='Run concurrent real-agent factual turns against this isolated API')
     p.add_argument('--diagnose', action='store_true', help='Short diagnostic only; never qualifies as a release gate')
     p.add_argument('--archive', choices=['on','off'], default='on')
     p.add_argument('--outcomes', choices=['on','off'], default='on')
