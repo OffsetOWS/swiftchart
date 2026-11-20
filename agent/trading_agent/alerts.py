@@ -30,9 +30,11 @@ class AlertStore:
             if row['state'] == 'active' and datetime.fromisoformat(row['expires_at']) <= now:
                 row['state'] = 'expired'
 
-    def create(self, user_id, chat_id, market, target, quote, *, now=None):
+    def create(self, user_id, chat_id, market, target, quote, *, now=None, direction=None):
         now = now or datetime.now(UTC)
         target, current = positive_price(target), positive_price(quote['price'])
+        if direction not in {None,'above','below'}:
+            raise ValueError('Invalid alert direction')
         try:
             observed = datetime.fromisoformat(quote['observed_at'].replace('Z', '+00:00'))
             fresh = 0 <= (now-observed).total_seconds() <= 60
@@ -48,10 +50,12 @@ class AlertStore:
             row = {'id': secrets.token_urlsafe(6), 'user_id': user_id, 'chat_id': chat_id,
                    'symbol': market['symbol'], 'market_type': market['market_type'],
                    'timeframe': market['timeframe'], 'target': str(target),
-                   'direction': 'above' if target >= current else 'below',
+                   'direction': direction or ('above' if target >= current else 'below'),
                    'created_at': now.isoformat(), 'expires_at': (now+timedelta(days=7)).isoformat(), 'state': 'active'}
             rows.append(row)
-            data['alerts'] = rows[-200:]
+            active = [row for row in rows if row['state']=='active']
+            history = [row for row in rows if row['state']!='active']
+            data['alerts'] = active + history[-(200-len(active)):]
         return dict(row)
 
     def list(self, user_id, *, now=None):
@@ -138,7 +142,8 @@ async def deliver_alerts(service, bot, *, now=None):
                 continue
             success = False
             try:
-                await bot.send_message(chat_id=hit['chat_id'], text=f"Price alert: {hit['symbol']} reached your target {hit['target']}.\nSwiftChart price: {quote['display_price']}. Data: {quote['observed_at']}.\nNot financial advice.")
+                relation = 'at or above' if hit['direction']=='above' else 'at or below'
+                await bot.send_message(chat_id=hit['chat_id'], text=f"Price alert: {hit['symbol']} met your condition: {relation} {hit['target']}.\nSwiftChart price: {quote['display_price']}. Data: {quote['observed_at']}.\nNot financial advice.")
                 success = True
                 delivered += 1
             except Exception as exc:

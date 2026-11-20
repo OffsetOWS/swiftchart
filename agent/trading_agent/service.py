@@ -121,7 +121,8 @@ class TradingAgentService:
         args = {k: market[k] for k in ('symbol', 'market_type', 'timeframe')}
         args['detail'] = detail
         if data is None:
-            fetch = self.tools.get_market_snapshot(args)
+            fetch = (self.tools.get_signal_context({'market_type':market['market_type'],'signal_id':market['signal_id']})
+                     if market.get('signal_id') else self.tools.get_market_snapshot(args))
             data = await asyncio.wait_for(fetch, max(0.1, budget-1.0)) if budget else await fetch
         remaining = max(.1, budget-(perf_counter()-started)) if budget else None
         text = await self._write_snapshot(data, detail=detail, timeout=remaining)
@@ -168,12 +169,15 @@ class TradingAgentService:
         if detected and detected[0] in {'crypto','forex'}:
             market = {'market_type':detected[0], 'symbol':detected[1], 'timeframe':timeframe or (previous or {}).get('timeframe') or ('1h' if detected[0]=='forex' else '4h')}
         elif previous and (followup or timeframe or target or re.search(r'\b(it|that|same|now|and|levels?|price|invalidation)\b', text, re.I)):
-            market = {k:previous[k] for k in ('symbol','market_type','timeframe')}
-            if timeframe: market['timeframe'] = timeframe
+            market = {k:previous[k] for k in ('symbol','market_type','timeframe','signal_id') if previous.get(k)}
+            if timeframe:
+                if timeframe.lower()!=market['timeframe'].lower():market.pop('signal_id',None)
+                market['timeframe'] = timeframe
         else:
             return await self._answer(text, history, key)
         if target:
-            return await self.create_alert(chat_id, user_id, market, target[1])
+            comparison = re.search(r'\b(above|below)\s*\$?'+re.escape(target[1]),text,re.I)
+            return await self.create_alert(chat_id, user_id, market, target[1],direction=comparison[1].lower() if comparison else None)
         detail = bool(re.search(r'\b(more detail|detailed|explain|why|full)\b', text, re.I))
         return await self._market_reply(chat_id, user_id, market, detail=detail, budget=None if detail else 4.0)
 
@@ -200,7 +204,9 @@ class TradingAgentService:
         if action.startswith('tf'):
             timeframe = action[2:]
             if timeframe not in {'1h','4h','1d'}:raise ValueError('Unsupported timeframe')
-            context = await asyncio.to_thread(self.contexts.update, chat_id, user_id, token, timeframe=timeframe)
+            changes = {'timeframe':timeframe}
+            if timeframe.lower()!=context['timeframe'].lower():changes['signal_id']=None
+            context = await asyncio.to_thread(self.contexts.update, chat_id, user_id, token, **changes)
         elif action == 'detail':
             context = await asyncio.to_thread(self.contexts.update, chat_id, user_id, token, detail=not context.get('detail',False))
         else:
@@ -216,21 +222,21 @@ class TradingAgentService:
         market = {'symbol':data['symbol'],'timeframe':data['timeframe'],'market_type':kind,'signal_id':identity}
         return await self._market_reply(chat_id,user_id,market,data=data,detail=True)
 
-    async def create_alert(self, chat_id, user_id, market, target):
+    async def create_alert(self, chat_id, user_id, market, target, *, direction=None):
         if not self.settings.is_authorized(chat_id=chat_id,user_id=user_id):
             raise ValueError('This trading-agent bot is private.')
         target = positive_price(target)
         prices = await self.tools.get_prices({'market_type':market['market_type'],'symbols':[market['symbol']]})
         quote = prices.get('quotes',{}).get(market['symbol'])
         if not quote:raise ValueError('A fresh SwiftChart price is unavailable; no alert was created.')
-        row = await asyncio.to_thread(self.alerts.create,user_id,chat_id,market,target,quote)
+        row = await asyncio.to_thread(self.alerts.create,user_id,chat_id,market,target,quote,direction=direction)
         context = market if market.get('token') else None
         if not context:
             token = await asyncio.to_thread(self.contexts.create,chat_id,user_id,market)
             context = await asyncio.to_thread(self.contexts.get,chat_id,user_id,token)
         if context:
             context = await asyncio.to_thread(self.contexts.update,chat_id,user_id,context['token'],awaiting_alert=False)
-        return AgentReply(f'Alert set: {row["symbol"]} at {row["target"]} (your target).\nExpires {row["expires_at"][:10]}. One notification when reached. Manage it with /alerts.',context)
+        return AgentReply(f'Alert set: {row["symbol"]} {row["direction"]} {row["target"]} (your target).\nExpires {row["expires_at"][:10]}. One notification when reached. Manage it with /alerts.',context)
 
     @staticmethod
     def session_key(*, chat_id, user_id):

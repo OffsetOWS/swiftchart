@@ -82,6 +82,12 @@ def test_conversation_buttons_followups_deep_link_and_alert_once(tmp_path):
         assert await deliver_alerts(service,Bot())==0 and len(sent)==1
         linked=await service.open_signal(7,42,'crypto','123')
         assert linked.context['signal_id']=='123' and '/internal/agent/signal-context/crypto/123' in paths
+        followup=await service.handle_turn(chat_id=7,user_id=42,text='why?')
+        assert followup.context['signal_id']=='123'
+        detail=await service.interact(chat_id=7,user_id=42,token=linked.context['token'],action='detail')
+        assert detail.context['signal_id']=='123'
+        daily=await service.interact(chat_id=7,user_id=42,token=linked.context['token'],action='tf1d')
+        assert daily.context.get('signal_id') is None and daily.context['timeframe']=='1d'
         with pytest.raises(ValueError):
             await service.interact(chat_id=7,user_id=99,token=token,action='chart')
         await api.close()
@@ -109,3 +115,16 @@ def test_link_payload_is_canonical_and_bounded():
     assert signal_agent_url('crypto',123)=='https://t.me/swift_agent_bot?start=s_c_123'
     with pytest.raises(ValueError):signal_agent_url('forex','x'*61)
     with pytest.raises(ValueError):signal_agent_url('crypto','../token')
+
+
+def test_explicit_alert_direction_and_history_cannot_drop_active_alerts(tmp_path):
+    now=datetime.now(UTC);store=AlertStore(tmp_path/'alerts');market={'symbol':'BTCUSDT','market_type':'crypto','timeframe':'4h'}
+    quote={'price':'100','display_price':'100','observed_at':now.isoformat()}
+    below=store.create(1,1,market,110,quote,now=now,direction='below')
+    assert store.claim_hit(1,below['id'],quote,now=now)
+    keep=store.create(1,1,market,200,quote,now=now)
+    for _ in range(205):
+        row=store.create(1,1,market,100,quote,now=now)
+        assert store.claim_hit(1,row['id'],quote,now=now)
+        store.delivered(1,row['id'],success=True)
+    assert [row['id'] for row in store.list(1,now=now)]==[keep['id']]
