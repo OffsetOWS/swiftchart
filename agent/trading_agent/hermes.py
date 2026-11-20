@@ -74,6 +74,13 @@ class HermesOrchestrator:
         hermes_home = self.settings.hermes_home.expanduser().resolve()
         hermes_home.mkdir(parents=True, exist_ok=True)
         os.environ["HERMES_HOME"] = str(hermes_home)
+        # This service owns its ephemeral Hermes home. An explicit bounded
+        # window avoids Hermes sending oversized context-discovery requests.
+        config_path = hermes_home / "config.yaml"
+        fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as stream:
+            stream.write("model:\n  context_length: 64000\n")
+        config_path.chmod(0o600)
         hermes_path: Path | None = self.settings.hermes_agent_path
         if hermes_path is not None:
             resolved = str(hermes_path.resolve())

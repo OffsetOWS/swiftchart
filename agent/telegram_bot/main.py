@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from pathlib import Path
 import sys
 
@@ -24,6 +25,9 @@ from telegram_bot.logging_config import configure_logging  # noqa: E402
 
 
 async def post_init(application: Application) -> None:
+    # Load the pinned runtime before polling; cold imports are not a model call.
+    service = application.bot_data[SERVICE_KEY]
+    await asyncio.to_thread(service.orchestrator.register_tools)
     await application.bot.set_my_commands(
         [
             BotCommand("start", "Describe the read-only trading agent"),

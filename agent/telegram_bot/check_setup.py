@@ -24,6 +24,7 @@ async def check(args):
             result['telegram']=identity.username==args.expected_username
     if args.bedrock:
         orchestrator=HermesOrchestrator(selected,tools=tools)
+        await asyncio.to_thread(orchestrator.register_tools)
         response=await asyncio.wait_for(orchestrator.respond(
             message='Reply with the word Ready. Do not call any tool.',history=[],session_key='deployment-readiness-probe'),
             timeout=selected.hermes_timeout_seconds)

@@ -338,3 +338,41 @@ assert not Path('forbidden.db').exists()
 """
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1]))
     subprocess.run([sys.executable, '-c', script], cwd=tmp_path, env=env, check=True)
+
+
+def test_bot_warms_hermes_off_event_loop_before_polling_commands():
+    import threading
+    from telegram_bot.main import post_init
+    from telegram_bot.handlers import SERVICE_KEY
+    observed=[]
+    main_thread=threading.get_ident()
+    class Orchestrator:
+        def register_tools(self):
+            assert threading.get_ident()!=main_thread
+            observed.append('warm')
+    class Bot:
+        async def set_my_commands(self,commands):
+            assert observed==['warm']
+            observed.append('commands')
+    application=SimpleNamespace(bot_data={SERVICE_KEY:SimpleNamespace(orchestrator=Orchestrator())},bot=Bot())
+    asyncio.run(post_init(application))
+    assert observed==['warm','commands']
+
+
+def test_managed_hermes_home_pins_context_without_network_discovery(tmp_path,monkeypatch):
+    import sys
+    from types import ModuleType
+    import trading_agent.hermes as module
+    run_agent=ModuleType('run_agent');run_agent.AIAgent=object
+    package=ModuleType('tools');package.__path__=[]
+    registry=ModuleType('tools.registry');registry.registry=object()
+    monkeypatch.setitem(sys.modules,'run_agent',run_agent)
+    monkeypatch.setitem(sys.modules,'tools',package)
+    monkeypatch.setitem(sys.modules,'tools.registry',registry)
+    monkeypatch.setattr(module,'enforce_no_database',lambda:None)
+    selected=settings(tmp_path,hermes_home=tmp_path/'hermes')
+    orchestrator=HermesOrchestrator(selected)
+    orchestrator._load_hermes()
+    config=tmp_path/'hermes/config.yaml'
+    assert 'context_length: 64000' in config.read_text()
+    assert config.stat().st_mode & 0o077==0
