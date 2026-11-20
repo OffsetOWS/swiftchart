@@ -117,6 +117,14 @@ class StoredExchange:
     def __init__(self, candles):
         self.frames = {}
         self.requests = 0
+        self.precision = {}
+        if os.environ.get('SOAK_AGENT_CRYPTO_METADATA'):
+            metadata = json.loads(Path(os.environ['SOAK_AGENT_CRYPTO_METADATA']).read_text())
+            self.precision = {
+                row['name'].upper() + 'USDT': {'kind': 'hyperliquid-perp', 'size_decimals': row['szDecimals']}
+                for row in metadata['universe']
+                if isinstance(row.get('szDecimals'), int) and 0 <= row['szDecimals'] <= 6
+            }
         for path in sorted(candles.glob('*_4h.json')):
             data = json.loads(path.read_text())
             raw = data['candles']
@@ -140,7 +148,8 @@ class StoredExchange:
         await asyncio.sleep(0.002)
         # Fixed equal liquid volumes exercise the full real rotating scan window.
         # These are load inputs, never historical liquidity/performance evidence.
-        return [{'symbol': name, 'active': True, 'perpVolume24h': 1_000_000, 'volume': 1_000_000} for name in self.frames]
+        return [{'symbol': name, 'active': True, 'perpVolume24h': 1_000_000, 'volume': 1_000_000,
+                 'price_format': self.precision.get(name)} for name in self.frames]
 
     async def get_candles(self, symbol, timeframe, limit):
         await asyncio.sleep(0.002)

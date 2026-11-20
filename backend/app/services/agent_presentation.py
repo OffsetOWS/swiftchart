@@ -61,7 +61,7 @@ def plain_direction(value):
         return 'downward'
     if any(word in raw for word in ('BULLISH', 'UP', 'BREAKOUT', 'LONG')):
         return 'upward'
-    if raw in {'HTF_NEUTRAL', 'NEUTRAL', 'RANGE', 'RANGING', 'CHOPPY'}:
+    if raw in {'RANGE', 'RANGING', 'CHOPPY'}:
         return 'sideways'
     return 'unclear'
 

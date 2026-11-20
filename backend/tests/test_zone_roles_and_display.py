@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from app.models.schemas import Zone
-from app.services.agent_presentation import nearest_zones, presentation, price_text
+from app.services.agent_presentation import nearest_zones, plain_direction, presentation, price_text
 from app.strategy.support_resistance import find_support_resistance, nearest_range
 
 
@@ -55,6 +55,12 @@ def test_crypto_uses_provider_tick_rules(value,size_decimals,expected):
 def test_unknown_crypto_tick_never_gets_guessed():
     assert price_text(1.23456,'crypto','COIN',{}) is None
     assert price_text(1.23456,'crypto','COIN',{'tick_size':'.25'}) == '1.25'
+
+
+def test_neutral_higher_timeframe_does_not_assert_a_ranging_market():
+    assert plain_direction('HTF_NEUTRAL') == 'unclear'
+    assert plain_direction('NEUTRAL') == 'unclear'
+    assert plain_direction('RANGING') == 'sideways'
 
 
 def test_forex_wrong_side_or_terminal_zone_is_omitted_not_role_flipped():

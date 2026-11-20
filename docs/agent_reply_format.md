@@ -42,5 +42,8 @@ forming quote as a completed structural reversal.
 The offline release soak exercises the actual API and agent's provider-unavailable
 fallback with outbound networking blocked. Separate model previews verify real
 composition. An offline fallback pass is not a live-provider throughput test.
+Use `--agent-crypto-metadata` with a private captured Hyperliquid `meta` response
+when running `--agent-questions 100`. The load check requires formatted prices,
+so unknown precision or unavailable quotes cannot count as successful answers.
 Every deployment still requires the exact committed candidate's full gate in
 `docs/crypto_release_gate.md`, followed by explicit deployment approval.

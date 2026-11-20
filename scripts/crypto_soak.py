@@ -24,6 +24,8 @@ from scripts.crypto_soak_gate import source_identity, validate
 
 
 def run(args):
+    if getattr(args, 'agent_questions', 0) and not getattr(args, 'agent_crypto_metadata', None):
+        raise ValueError('Agent load requires private captured crypto precision metadata')
     source = args.database.resolve()
     identity = source_identity(args.code_root.resolve())
     if not args.diagnose:
@@ -61,6 +63,8 @@ def run(args):
     env['AGENT_INTERNAL_API_TOKEN'] = token
     if getattr(args, 'agent_forex_fixtures', None):
         env['SOAK_AGENT_FOREX_FIXTURES'] = str(args.agent_forex_fixtures.resolve())
+    if getattr(args, 'agent_crypto_metadata', None):
+        env['SOAK_AGENT_CRYPTO_METADATA'] = str(args.agent_crypto_metadata.resolve())
     logs = open(output / 'runtime.private.log', 'w')
     cpu_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     process = subprocess.Popen([sys.executable, str(ROOT / 'scripts/crypto_soak_runtime.py')], cwd=output, env=env, stdout=logs, stderr=logs)
@@ -198,6 +202,7 @@ if __name__ == '__main__':
     p.add_argument('--code-root', type=Path, default=ROOT)
     p.add_argument('--seconds', type=float, default=900)
     p.add_argument('--agent-forex-fixtures', type=Path, help='Private captured production Forex chart responses')
+    p.add_argument('--agent-crypto-metadata', type=Path, help='Private captured Hyperliquid precision metadata; no network access')
     p.add_argument('--agent-questions', type=int, default=0, help='Run concurrent real-agent factual turns against this isolated API')
     p.add_argument('--diagnose', action='store_true', help='Short diagnostic only; never qualifies as a release gate')
     p.add_argument('--archive', choices=['on','off'], default='on')
