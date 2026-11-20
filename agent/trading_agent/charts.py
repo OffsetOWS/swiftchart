@@ -54,7 +54,9 @@ class CandleCharts:
         previous=-100
         for level in sorted(data['levels'],key=lambda item:y(item['high'])):
             row=max(y(level['high']),previous+22);row=min(row,bottom+24);previous=row
-            label=level['text']
+            # Pillow's bundled font lacks an en dash. Keep API numbers verbatim
+            # while using an unambiguous separator supported by the image font.
+            label=level['text'].replace('–', ' - ')
             box=draw.textbbox((0,0),label,font=font(14))
             width=box[2]+16
             draw.rectangle((right-width-7,row-11,right-4,row+10),fill=palette['panel'])
