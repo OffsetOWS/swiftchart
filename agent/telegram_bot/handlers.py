@@ -124,7 +124,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     try:
         reply = await service.interact(chat_id=chat_id, user_id=user_id, token=match[1], action=match[2])
-        if match[2] == 'chart':
+        if match[2] == 'chart' and reply.data is not None:
             raw = await asyncio.to_thread(CHARTS.render, reply.data)
             photo = BytesIO(raw); photo.name='swiftchart.png'
             await query.message.reply_photo(photo, caption=telegram_html(f'{reply.data["symbol"]} {reply.data["timeframe"]} · Data: {reply.data["as_of"]}\nNot financial advice.'), reply_markup=market_keyboard(reply.context))

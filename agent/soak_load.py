@@ -21,7 +21,7 @@ from trading_agent.tools import SwiftChartReadOnlyTools
 def run_load(origin, token, output, count=100):
     async def run():
         settings = replace(TradingAgentSettings.from_env(), api_base_url=origin, api_token=token,
-                           allowed_user_ids=frozenset({1}), allowed_chat_ids=frozenset(),
+                           allowed_user_ids=frozenset(range(1,count+1)), allowed_chat_ids=frozenset(),
                            state_path=Path(output)/'agent-sessions')
         api = SwiftChartAPI(origin, token, timeout=30)
         tools = SwiftChartReadOnlyTools(api=api, settings=settings)
@@ -44,7 +44,7 @@ def run_load(origin, token, output, count=100):
             selected = symbols + forex
             symbol = selected[index % len(selected)]
             started=monotonic()
-            answer=await service.handle_message(chat_id=index+1,user_id=1,text=f'{symbol} levels')
+            answer=await service.handle_message(chat_id=index+1,user_id=index+1,text=f'{symbol} levels')
             durations.append(monotonic()-started)
             return (symbol in answer and 'Data:' in answer and 'Price:' in answer
                     and 'Price: unavailable' not in answer and len(answer.splitlines()) == 4)

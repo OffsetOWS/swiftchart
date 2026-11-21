@@ -200,8 +200,8 @@ def test_100_parallel_answers_coalesce_the_model_and_preserve_api_facts(tmp_path
         class Never:
             async def fetch(self,text):raise AssertionError('Factual questions must not request Grok')
         model=Model()
-        service = TradingAgentService(settings(tmp_path), tools=tools, orchestrator=model, grok=Never())
-        answers = await asyncio.gather(*(service.handle_message(chat_id=i, user_id=42, text='SOL levels') for i in range(100)))
+        service = TradingAgentService(settings(tmp_path, allowed_user_ids=frozenset(range(1,101))), tools=tools, orchestrator=model, grok=Never())
+        answers = await asyncio.gather(*(service.handle_message(chat_id=i, user_id=i+1, text='SOL levels') for i in range(100)))
         assert all('123.456789' in a and '120.111–121.222' in a and 'no active signal' in a and len(a.splitlines())==5 for a in answers)
         assert model.calls==1
         assert len(calls) == 2

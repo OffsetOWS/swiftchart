@@ -79,11 +79,15 @@ def load_env(path):
         if not separator or not re.fullmatch(r'[A-Z][A-Z0-9_]*',key) or value.startswith('YOUR_'):
             raise ValueError('Invalid runtime environment file')
         data[key]=value
-    required=['TRADING_AGENT_TELEGRAM_BOT_TOKEN','TRADING_AGENT_AWS_REGION','TRADING_AGENT_BEDROCK_MODEL_ID']
+    required=['TRADING_AGENT_TELEGRAM_BOT_TOKEN']
     if any(not data.get(key) for key in required) or not (data.get('TRADING_AGENT_ALLOWED_USER_IDS') or data.get('TRADING_AGENT_ALLOWED_CHAT_IDS')):
         raise ValueError('Runtime credentials/model/unchanged allowlist are required')
-    if not (role_credentials(data) or data.get('AWS_BEARER_TOKEN_BEDROCK') or (data.get('AWS_ACCESS_KEY_ID') and data.get('AWS_SECRET_ACCESS_KEY'))):
-        raise ValueError('A dedicated VPS Bedrock credential source is required; never copy the operator login session')
+    provider=data.get('TRADING_AGENT_WRITER_PROVIDER','xai')
+    if provider not in {'xai','bedrock'}:raise ValueError('Unknown writer provider')
+    if provider=='xai' and not data.get('XAI_API_KEY'):raise ValueError('Existing server XAI_API_KEY is required')
+    bedrock=provider=='bedrock' or data.get('TRADING_AGENT_BEDROCK_FALLBACK_ENABLED','false').lower()=='true'
+    if bedrock and (not data.get('TRADING_AGENT_AWS_REGION') or not data.get('TRADING_AGENT_BEDROCK_MODEL_ID') or not (role_credentials(data) or data.get('AWS_BEARER_TOKEN_BEDROCK') or (data.get('AWS_ACCESS_KEY_ID') and data.get('AWS_SECRET_ACCESS_KEY')))):
+        raise ValueError('A dedicated VPS Bedrock credential source is required for enabled Bedrock; never copy the operator login session')
     return data
 
 
@@ -251,7 +255,7 @@ def start_agent(args,state):
     if subprocess.run(['docker','inspect','swiftchart-agent'],capture_output=True).returncode==0:
         raise ValueError('An agent container already exists; refusing an overlapping poller')
     env=load_env(Path(state['runtime_env']))
-    auth_mount=['--mount',f'type=bind,src={WORKLOAD_AUTH_DIR},dst=/run/bedrock,readonly'] if role_credentials(env) else []
+    auth_mount=['--mount',f'type=bind,src={WORKLOAD_AUTH_DIR},dst=/run/bedrock,readonly'] if (env.get('TRADING_AGENT_WRITER_PROVIDER','xai')=='bedrock' or env.get('TRADING_AGENT_BEDROCK_FALLBACK_ENABLED','false').lower()=='true') and role_credentials(env) else []
     invoke(['docker','run','-d','--name','swiftchart-agent','--restart','unless-stopped',
             '--cpus','0.25','--memory','768m','--memory-swap','768m','--pids-limit','128',
             '--network','host','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=134217728',

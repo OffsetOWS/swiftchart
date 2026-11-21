@@ -13,7 +13,8 @@ from contextvars import ContextVar
 from trading_agent.api import APIUnavailable
 from trading_agent.config import TradingAgentSettings
 from trading_agent.grok import GrokContextClient, needs_current_context
-from trading_agent.hermes import HermesOrchestrator
+from trading_agent.writer import WriterRouter
+from trading_agent.usage import DailyQuota, QuestionUsage, _CURRENT
 from trading_agent.response_context import checked_reply, performance_request, render_signal, render_snapshot, reply_options, safe_narrative
 from trading_agent.private_state import MarketContexts
 from trading_agent.alerts import AlertStore, positive_price
@@ -37,7 +38,7 @@ class TradingAgentService:
     def __init__(self, settings: TradingAgentSettings, *, orchestrator=None, grok=None, sessions=None, tools=None):
         self.settings = settings
         self.tools = tools or SwiftChartReadOnlyTools(settings=settings)
-        self.orchestrator = orchestrator or HermesOrchestrator(settings, tools=self.tools)
+        self.orchestrator = orchestrator or WriterRouter(settings, tools=self.tools)
         self.grok = grok or GrokContextClient(settings)
         self.sessions = sessions or ConversationStore(settings.state_path, max_messages=settings.max_history_messages)
         self._locks = defaultdict(asyncio.Lock)
@@ -48,6 +49,26 @@ class TradingAgentService:
         self._model_written = {}
         self.contexts = MarketContexts(settings.state_path.parent / 'market-contexts')
         self.alerts = AlertStore(settings.state_path.parent / 'price-alerts')
+        self.quota = DailyQuota(settings.state_path.parent / 'daily-quotas', settings.daily_question_limit, settings.daily_limit_timezone)
+        self.usage_directory = settings.state_path.parent / 'usage'
+
+    async def _question(self, user_id, kind, operation, *, counted=True):
+        if _CURRENT.get() is not None:
+            return await operation()
+        trace = QuestionUsage(self.usage_directory, kind)
+        token = _CURRENT.set(trace)
+        outcome = 'failed'
+        try:
+            if counted and not await asyncio.to_thread(self.quota.take, user_id):
+                outcome = 'daily_limit'
+                return AgentReply(f'You have reached your daily limit of {self.settings.daily_question_limit} questions. It resets at midnight ({self.settings.daily_limit_timezone}). Chart and alert-management buttons remain available.')
+            result = await operation()
+            outcome = 'model_written' if getattr(result, 'model_written', False) else 'template_or_control'
+            return result
+        finally:
+            trace.finish(outcome)
+            _CURRENT.reset(token)
+
 
     async def _write_snapshot(self, data, *, detail=False, timeout=None):
         """Model composes the chosen view; API-only template covers any failure.
@@ -76,7 +97,7 @@ class TradingAgentService:
                 try:
                     result = await self.orchestrator.respond(
                         message=f'Output exactly {len(facts["line_options"])} plain text lines. For each position, choose one string from line_options at that position and copy it VERBATIM, including punctuation. Do not paraphrase, merge, label, introduce or explain. No markdown, calculations, tool calls or extra lines.\n\n' + render_snapshot(data, detail=detail),
-                        history=[], session_key='api-fact-writer', current_context=None,
+                        history=[], session_key='api-fact-writer', current_context=None, detail=detail,
                         smart_context='AUTHORITATIVE API DISPLAY FACTS (copy every number exactly; never expose internal codes): ' + key,
                     )
                     answer, accepted, reason = checked_reply(result.get('final_response'), data, detail=detail)
@@ -109,7 +130,10 @@ class TradingAgentService:
             return render_snapshot(data, detail=detail)
 
     async def warm_up(self):
-        """Warm provider credentials and a factual reply before accepting users."""
+        return await self._question(None, 'startup', self._warm_up, counted=False)
+
+    async def _warm_up(self):
+        """Warm a factual reply before accepting users; log its provider charge."""
         try:
             markets = await self.tools.get_markets()
             first = next((row for row in markets.get('crypto', []) if row.get('base_asset') == 'BTC'), None)
@@ -156,8 +180,11 @@ class TradingAgentService:
         if previous and previous.get('awaiting_alert') and re.fullmatch(r'\s*\$?[0-9][0-9,.]*\s*', text):
             return await self.create_alert(chat_id, user_id, previous, text.strip().lstrip('$'))
         if needs_current_context(text):
-            query = text + (f' about {previous["symbol"]}' if previous and previous['symbol'] not in text else '')
-            note = await self._explanation(query, history, key, news=True)
+            markets = await self.tools.get_markets()
+            selected = self._detect(text, markets)
+            coin = selected[1] if selected and selected[0] in {'crypto', 'forex'} else (previous or {}).get('symbol', 'MARKET')
+            query = 'Latest verified news about ' + coin
+            note = await self._explanation(query, [], 'market-news', news=True, coin=coin)
             return AgentReply('News context (informational)\n'+(note or 'I cannot verify current headlines right now.')+'\nNot financial advice.', previous)
         markets = await self.tools.get_markets()
         followup = bool(re.fullmatch(r'\s*(?:why\??|more detail[.!?]?|and (?:the )?daily\??|and (?:the )?hourly\??)\s*', text, re.I))
@@ -187,6 +214,11 @@ class TradingAgentService:
         return await self._market_reply(chat_id, user_id, market, detail=detail, budget=None if detail else 4.5)
 
     async def interact(self, *, chat_id, user_id, token, action):
+        if not self.settings.is_authorized(chat_id=chat_id, user_id=user_id):
+            raise ValueError('This trading-agent bot is private.')
+        return await self._question(user_id, 'button:' + action, lambda: self._interact_locked(chat_id=chat_id, user_id=user_id, token=token, action=action), counted=action in {'detail', 'tf1h', 'tf4h', 'tf1d', 'news'})
+
+    async def _interact_locked(self, *, chat_id, user_id, token, action):
         async with self._turns, self._locks[self.session_key(chat_id=chat_id,user_id=user_id)]:
             return await self._interact(chat_id=chat_id,user_id=user_id,token=token,action=action)
 
@@ -204,7 +236,7 @@ class TradingAgentService:
             data = await self.tools.get_chart(context)
             return AgentReply('Chart from SwiftChart API data.', context, data=data)
         if action == 'news':
-            note = await self._explanation(f'News about {context["symbol"]}. Give a short qualitative summary without figures or trading instructions.', [], self.session_key(chat_id=chat_id,user_id=user_id), news=True)
+            note = await self._explanation(f'News about {context["symbol"]}. Give a short qualitative summary without figures or trading instructions.', [], self.session_key(chat_id=chat_id,user_id=user_id), news=True, coin=context['symbol'])
             return AgentReply(f'News context for {context["symbol"]} (informational)\n'+(note or 'I cannot verify current headlines right now.')+'\nNot financial advice.', context)
         if action.startswith('tf'):
             timeframe = action[2:]
@@ -219,6 +251,11 @@ class TradingAgentService:
         return await self._market_reply(chat_id, user_id, context, token=token, detail=context.get('detail',False))
 
     async def open_signal(self, chat_id, user_id, kind, identity):
+        if not self.settings.is_authorized(chat_id=chat_id, user_id=user_id):
+            raise ValueError('This trading-agent bot is private.')
+        return await self._question(user_id, 'signal', lambda: self._open_signal(chat_id, user_id, kind, identity))
+
+    async def _open_signal(self, chat_id, user_id, kind, identity):
         if not self.settings.is_authorized(chat_id=chat_id,user_id=user_id):
             raise ValueError('This trading-agent bot is private.')
         data = await self.tools.get_signal_context({'market_type':kind,'signal_id':identity})
@@ -283,8 +320,13 @@ class TradingAgentService:
             return 'unknown', requested[1]
         return None
 
-    async def _explanation(self, text, history, key, *, news, facts=None):
-        context = await self.grok.fetch(text) if news else None
+    async def _explanation(self, text, history, key, *, news, facts=None, coin=None):
+        context = await self.grok.fetch(text, coin=coin) if news else None
+        if news and context:
+            note = safe_narrative(context.text, news=True)
+            if note and context.sources:
+                note += '\nSources: ' + ' '.join(context.sources[:2])
+            return note or 'Current news could not be safely verified.'
         if news and context is None:
             return 'Live news is unavailable. I cannot verify current headlines.'
         try:
@@ -292,7 +334,7 @@ class TradingAgentService:
         except TimeoutError:
             return ''
         task = asyncio.create_task(self.orchestrator.respond(
-            message=text, history=history[-self.settings.relevant_history_messages:], session_key=key, current_context=context,
+            message=text, history=[], session_key="market-explanation", current_context=context,
             smart_context='Use two short qualitative sentences. No numerical claims, amounts, percentages, dates, prices, counts, trading instructions or URLs. API market facts are rendered separately. AUTHORITATIVE API FACTS: ' + json.dumps(facts or {}, default=str),
         ))
         def finished(done):
@@ -371,6 +413,11 @@ class TradingAgentService:
         return 'Which supported symbol or signal would you like me to check?'
 
     async def handle_turn(self, *, chat_id, user_id, text):
+        if not self.settings.is_authorized(chat_id=chat_id, user_id=user_id):
+            return AgentReply('This trading-agent bot is private.')
+        return await self._question(user_id, 'text', lambda: self._handle_turn(chat_id=chat_id, user_id=user_id, text=text))
+
+    async def _handle_turn(self, *, chat_id, user_id, text):
         if not self.settings.is_authorized(chat_id=chat_id, user_id=user_id):
             return AgentReply('This trading-agent bot is private.')
         text = str(text).strip()[:4000]

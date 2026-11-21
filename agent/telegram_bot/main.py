@@ -92,9 +92,8 @@ def main() -> None:
     settings.validate_for_bot()
     configure_logging(settings)
     logging.getLogger("swiftchart.trading_agent").info(
-        "trading_agent_bot_starting bedrock_region=%s bedrock_model=%s",
-        settings.aws_region,
-        settings.bedrock_model_id,
+        "trading_agent_bot_starting writer=%s default_model=%s detail_model=%s bedrock_fallback=%s",
+        settings.writer_provider, settings.writer_default_model, settings.writer_detail_model, settings.bedrock_fallback_enabled,
     )
     application = build_application(settings=settings)
     application.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False)
