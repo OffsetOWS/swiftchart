@@ -121,6 +121,11 @@ class TradingAgentService:
 
     async def _market_reply(self, chat_id, user_id, market, *, token=None, detail=False, budget=None, data=None):
         started = perf_counter()
+        # Retain the requested market even if its live read times out. A follow-up
+        # must not silently switch back to the last successfully fetched coin.
+        if token is None:
+            token = await asyncio.to_thread(self.contexts.create, chat_id, user_id, market)
+        context = await asyncio.to_thread(self.contexts.update, chat_id, user_id, token, detail=detail)
         args = {k: market[k] for k in ('symbol', 'market_type', 'timeframe')}
         args['detail'] = detail
         if data is None:
@@ -129,9 +134,6 @@ class TradingAgentService:
             data = await asyncio.wait_for(fetch, max(0.1, budget-1.0)) if budget else await fetch
         remaining = max(.1, budget-(perf_counter()-started)) if budget else None
         text = await self._write_snapshot(data, detail=detail, timeout=remaining)
-        if token is None:
-            token = await asyncio.to_thread(self.contexts.create, chat_id, user_id, market)
-        context = await asyncio.to_thread(self.contexts.update, chat_id, user_id, token, detail=detail)
         model = _model_result.get()
         return AgentReply(text, context=context, data=data, model_written=model, seconds=perf_counter()-started)
 
@@ -182,7 +184,7 @@ class TradingAgentService:
             comparison = re.search(r'\b(above|below)\s*\$?'+re.escape(target[1]),text,re.I)
             return await self.create_alert(chat_id, user_id, market, target[1],direction=comparison[1].lower() if comparison else None)
         detail = bool(re.search(r'\b(more detail|detailed|explain|why|full)\b', text, re.I))
-        return await self._market_reply(chat_id, user_id, market, detail=detail, budget=None if detail else 4.0)
+        return await self._market_reply(chat_id, user_id, market, detail=detail, budget=None if detail else 4.5)
 
     async def interact(self, *, chat_id, user_id, token, action):
         async with self._turns, self._locks[self.session_key(chat_id=chat_id,user_id=user_id)]:
@@ -377,14 +379,15 @@ class TradingAgentService:
             history = await asyncio.to_thread(self.sessions.get_history, key)
             try:
                 turn = self._interactive_answer(chat_id,user_id,text,history,key)
-                slow_action = needs_current_context(text) or bool(re.search(r'\b(alert|more detail|detailed|explain|why|full|signal)\b',text,re.I))
-                answer = await turn if slow_action else await asyncio.wait_for(turn,4.2)
+                slow_action = needs_current_context(text) or bool(re.search(r'\b(alert|more detail|detailed|explain|why|full|signal)\b',text,re.I)) or bool(re.fullmatch(r'\s*\$?[0-9][0-9,.]*\s*',text))
+                answer = await turn if slow_action else await asyncio.wait_for(turn,4.7)
             except UnsupportedMarket as exc:
                 answer = str(exc)
             except ValueError as exc:
                 answer = str(exc)
             except (APIUnavailable, TimeoutError):
-                answer = 'SwiftChart data is temporarily unavailable. I cannot supply unverified prices or setups.'
+                context = await asyncio.to_thread(self.contexts.get, chat_id, user_id)
+                answer = AgentReply('SwiftChart data is temporarily unavailable. I cannot supply unverified prices or setups.', context=context)
             result = answer if isinstance(answer,AgentReply) else AgentReply(answer)
             await asyncio.to_thread(self.sessions.replace_history, key, history + [{'role': 'user', 'content': text}, {'role': 'assistant', 'content': result.text}])
             return result

@@ -117,6 +117,43 @@ def test_link_payload_is_canonical_and_bounded():
     with pytest.raises(ValueError):signal_agent_url('crypto','../token')
 
 
+def test_realistic_read_plus_model_budget_returns_model_reply_under_five_seconds(tmp_path):
+    class Tools:
+        async def get_markets(self):return {'crypto':[{'symbol':'BTCUSDT','base_asset':'BTC'}],'forex':[]}
+        async def get_market_snapshot(self,args):
+            await asyncio.sleep(2.9)
+            return snapshot(args['symbol'],args['timeframe'])
+    class SlowModel(Model):
+        async def respond(self,**kwargs):
+            await asyncio.sleep(1.2)
+            return await super().respond(**kwargs)
+    async def run():
+        from time import monotonic
+        service=TradingAgentService(settings(tmp_path),tools=Tools(),orchestrator=SlowModel())
+        started=monotonic();reply=await service.handle_turn(chat_id=7,user_id=42,text='BTC 4h levels')
+        assert reply.model_written and len(reply.text.splitlines())==4 and monotonic()-started<5
+    asyncio.run(run())
+
+
+def test_failed_market_read_preserves_requested_symbol_for_followup(tmp_path):
+    class Tools:
+        failed=False
+        async def get_markets(self):return {'crypto':[{'symbol':s+'USDT','base_asset':s}for s in ('BTC','ETH')],'forex':[]}
+        async def get_market_snapshot(self,args):
+            from trading_agent.api import APIUnavailable
+            if args['symbol']=='ETHUSDT'and not self.failed:
+                self.failed=True;raise APIUnavailable('temporary')
+            return snapshot(args['symbol'],args['timeframe'])
+    async def run():
+        service=TradingAgentService(settings(tmp_path),tools=Tools(),orchestrator=Model())
+        await service.handle_turn(chat_id=7,user_id=42,text='BTC 4h levels')
+        failed=await service.handle_turn(chat_id=7,user_id=42,text='what about ETH?')
+        assert failed.context['symbol']=='ETHUSDT'and 'unavailable'in failed.text
+        daily=await service.handle_turn(chat_id=7,user_id=42,text='and the daily?')
+        assert daily.context['symbol']=='ETHUSDT'and daily.context['timeframe']=='1d'and 'ETHUSDT'in daily.text
+    asyncio.run(run())
+
+
 def test_explicit_alert_direction_and_history_cannot_drop_active_alerts(tmp_path):
     now=datetime.now(UTC);store=AlertStore(tmp_path/'alerts');market={'symbol':'BTCUSDT','market_type':'crypto','timeframe':'4h'}
     quote={'price':'100','display_price':'100','observed_at':now.isoformat()}
