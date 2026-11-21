@@ -9,7 +9,7 @@ import time
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
-from app.services.crypto_work import run_crypto_work
+from app.services.crypto_work import run_crypto_work, interactive_crypto_reads
 from app.config import get_settings
 from app.forex.models import (
     DISPLAY_ACTIVE_FOREX_STATUSES,
@@ -103,6 +103,11 @@ async def forex_pair_chart(
     timeframe: str = Query(default="1H"),
     limit: int = Query(default=240, ge=60, le=500),
 ):
+    with interactive_crypto_reads():
+        return await _forex_pair_chart(symbol, timeframe, limit)
+
+
+async def _forex_pair_chart(symbol: str, timeframe: str, limit: int):
     normalized_symbol = "".join(character for character in symbol.upper() if character.isalnum())
     pair = SUPPORTED_FOREX_PAIRS.get(normalized_symbol)
     if pair is None:

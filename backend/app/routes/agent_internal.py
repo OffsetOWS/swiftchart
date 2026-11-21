@@ -6,7 +6,20 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
+from fastapi.routing import APIRoute
+
 from app.services import agent_data
+from app.services.crypto_work import interactive_crypto_reads
+
+
+class AgentReadRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def read(request: Request):
+            with interactive_crypto_reads():
+                return await handler(request)
+        return read
 
 
 async def authorize(request: Request, response: Response):
@@ -24,7 +37,7 @@ async def authorize(request: Request, response: Response):
     response.headers['Cache-Control'] = 'no-store'
 
 
-router = APIRouter(prefix='/internal/agent', dependencies=[Depends(authorize)], include_in_schema=False)
+router = APIRouter(prefix='/internal/agent', dependencies=[Depends(authorize)], include_in_schema=False, route_class=AgentReadRoute)
 Kind = Literal['crypto', 'forex']
 
 

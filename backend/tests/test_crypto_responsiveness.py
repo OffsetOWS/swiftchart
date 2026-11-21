@@ -73,6 +73,31 @@ def test_worker_preserves_context_and_api_loop_while_work_is_busy():
     assert len(thread_ids) == 2
 
 
+
+def test_reserved_read_capacity_is_available_while_both_scan_workers_are_busy():
+    from app.services.crypto_work import interactive_crypto_reads
+    release = threading.Event()
+    started = [threading.Event(), threading.Event()]
+    def scan(index):
+        started[index].set()
+        assert release.wait(3)
+    async def scenario():
+        jobs = [asyncio.create_task(run_crypto_work(scan, index)) for index in range(2)]
+        try:
+            for _ in range(100):
+                if all(event.is_set() for event in started):
+                    break
+                await asyncio.sleep(.005)
+            assert all(event.is_set() for event in started)
+            with interactive_crypto_reads():
+                name = await asyncio.wait_for(run_crypto_work(lambda: threading.current_thread().name), .25)
+            assert name.startswith('crypto-read')
+            assert not any(job.done() for job in jobs)
+        finally:
+            release.set()
+            await asyncio.gather(*jobs)
+    asyncio.run(scenario())
+
 def receipt():
     return {'release_gate': True, 'passed': True, 'source_commit': 'candidate',
             'source_fingerprint': 'fingerprint', 'elapsed_seconds': 901, 'requested_seconds': 900,
