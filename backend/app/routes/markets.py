@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 
 from app.config import SUPPORTED_TIMEFRAMES, get_settings
-from app.services.crypto_work import run_crypto_work
+from app.services.crypto_work import run_crypto_work, interactive_crypto_reads
 from app.exchanges.base import MarketDataUnavailable
 from app.models.schemas import Candle, Market, RiskSettings
 from app.services.alert_dedupe import setup_fingerprint
@@ -223,7 +223,8 @@ async def active_crypto_trades(
     limit: int = Query(default=50, ge=1, le=100),
     symbol: str | None = None,
 ):
-    trades = await run_crypto_work(list_active_crypto_trades, exchange=exchange, limit=limit, symbol=symbol)
+    with interactive_crypto_reads():
+        trades = await run_crypto_work(list_active_crypto_trades, exchange=exchange, limit=limit, symbol=symbol)
     return {"trades": trades, "count": len(trades), "source": "telegram-canonical"}
 
 
