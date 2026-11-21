@@ -58,7 +58,10 @@ class TradingAgentService:
         _model_result.set(False)
         if not data.get('reply'):
             return render_snapshot(data, detail=detail)
-        facts = {**data['reply'], 'line_options': reply_options(data, detail=detail)}
+        # Give the writer only the requested view. Supplying both views invited
+        # paraphrases/merged lines that correctly failed the semantic guard.
+        facts = {**{k: v for k, v in data['reply'].items() if k != 'views'},
+                 'line_options': reply_options(data, detail=detail)}
         key = json.dumps(facts, sort_keys=True)
         hit = self._written.get(key)
         if hit and monotonic() - hit[0] < 20:
@@ -72,7 +75,7 @@ class TradingAgentService:
             async def write():
                 try:
                     result = await self.orchestrator.respond(
-                        message=f'Write this market reply in {len(facts["line_options"])} lines, keeping the supplied factual detail and order. You may use alternative allowed wording. Plain English, no internal codes, introduction, markdown, calculations or tool calls.\n\n' + render_snapshot(data, detail=detail),
+                        message=f'Output exactly {len(facts["line_options"])} plain text lines. For each position, choose one string from line_options at that position and copy it VERBATIM, including punctuation. Do not paraphrase, merge, label, introduce or explain. No markdown, calculations, tool calls or extra lines.\n\n' + render_snapshot(data, detail=detail),
                         history=[], session_key='api-fact-writer', current_context=None,
                         smart_context='AUTHORITATIVE API DISPLAY FACTS (copy every number exactly; never expose internal codes): ' + key,
                     )
