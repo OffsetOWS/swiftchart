@@ -99,6 +99,7 @@ def test_news_is_coalesced_and_cached_per_coin_with_eight_retained_x_posts(tmp_p
         async def handle(request):
             payload=json.loads(request.content);calls.append(payload)
             assert 'limit=8'in payload['instructions'] and payload['store']is False
+            assert payload['reasoning']=={'effort':'low'}
             await asyncio.sleep(.005)
             return httpx.Response(200,json={'output_text':'Market sentiment remains cautious.','citations':[{'url':f'https://x.com/feed/status/{i}'}for i in range(12)]})
         def factory(**kw):return httpx.AsyncClient(transport=httpx.MockTransport(handle),**kw)
@@ -119,3 +120,17 @@ def test_xai_only_bot_settings_do_not_require_bedrock_credentials(tmp_path):
     selected=settings(tmp_path,aws_region='',bedrock_model_id='')
     selected.validate_for_bot()
     with pytest.raises(RuntimeError):replace(selected,bedrock_fallback_enabled=True).validate_for_bot()
+
+
+def test_unsafe_news_prose_is_rewritten_qualitatively_without_search_or_history(tmp_path):
+    from trading_agent.grok import GrokContext
+    class News:
+        async def fetch(self,*args,**kwargs):return GrokContext('A report mentions 123 and a confirmed setup.',sources=('https://example.invalid/news',))
+    class Model:
+        async def respond(self,**kwargs):
+            assert kwargs['news_summary'] and kwargs['history']==[]
+            assert 'UNTRUSTED EXTERNAL NEWS EVIDENCE'in kwargs['smart_context']
+            return {'final_response':'Sentiment remains cautious. Reports point to continuing market uncertainty.'}
+    service=TradingAgentService(settings(tmp_path),orchestrator=Model(),grok=News())
+    text=run(service._explanation('BTC news',[],'synthetic',news=True,coin='BTCUSDT'))
+    assert '123'not in text and 'Sentiment remains cautious.'in text

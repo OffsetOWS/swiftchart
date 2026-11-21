@@ -332,7 +332,7 @@ def test_grok_timeout_is_bounded_and_does_not_raise(tmp_path):
     def factory(**kwargs):return httpx.AsyncClient(transport=httpx.MockTransport(handle),**kwargs)
     client=GrokContextClient(settings(tmp_path),client_factory=factory)
     assert run(client.fetch('latest news')) is None
-    assert len(calls)==2
+    assert len(calls)==1
 
 
 def test_database_guard_rejects_real_sqlite_including_memory(tmp_path):

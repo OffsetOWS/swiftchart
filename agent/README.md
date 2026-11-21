@@ -77,6 +77,7 @@ Writer and usage settings (service environment; restart only the agent to apply)
 | TRADING_AGENT_DAILY_QUESTION_LIMIT | 30 |
 | TRADING_AGENT_DAILY_LIMIT_TIMEZONE | Africa/Lagos |
 | TRADING_AGENT_NEWS_CACHE_SECONDS | 900 |
+| TRADING_AGENT_NEWS_REASONING_EFFORT | low (empty omits the field) |
 | TRADING_AGENT_X_SEARCH_POST_LIMIT | 8 (cannot exceed 8) |
 
 `TRADING_AGENT_GROK_MODEL` selects the news model independently. News summaries
@@ -99,3 +100,5 @@ The xAI `usage.cost_in_usd_ticks` receipt includes tools and caching; divide by
 zero. No-provider/cache hits cost zero. A shielded call completing after a reply
 gets a `question_usage_update` with its eventual cost rather than losing the bill.
 Private daily logs rotate at five MB; conversation/usage/quota state stays out of Git.
+
+News defaults to low reasoning on the existing news model, avoiding its high-reasoning default. Timeouts are not retried because the first attempt may already be billed. If search prose fails the qualitative guard, the tool-free default Grok writer summarizes it once, and the same guard checks that summary before display. Both calls are included in that question’s cost.

@@ -74,6 +74,7 @@ class TradingAgentSettings:
     daily_question_limit: int = 30
     daily_limit_timezone: str = 'Africa/Lagos'
     news_cache_seconds: float = 900.0
+    news_reasoning_effort: str = 'low'
     x_search_post_limit: int = 8
 
     @classmethod
@@ -98,6 +99,7 @@ class TradingAgentSettings:
             daily_question_limit=_positive_int('TRADING_AGENT_DAILY_QUESTION_LIMIT', 30),
             daily_limit_timezone=os.getenv('TRADING_AGENT_DAILY_LIMIT_TIMEZONE', 'Africa/Lagos'),
             news_cache_seconds=_positive_float('TRADING_AGENT_NEWS_CACHE_SECONDS', 900.0),
+            news_reasoning_effort=os.getenv('TRADING_AGENT_NEWS_REASONING_EFFORT', 'low').strip(),
             x_search_post_limit=min(8, _positive_int('TRADING_AGENT_X_SEARCH_POST_LIMIT', 8)),
             api_base_url=os.getenv("SWIFTCHART_API_BASE_URL", "http://127.0.0.1:8000"),
             api_token=os.getenv("AGENT_INTERNAL_API_TOKEN", ""),

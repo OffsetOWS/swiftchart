@@ -154,7 +154,7 @@ class GrokContextClient:
                 '"alignment":"NEUTRAL","event_minutes":null,"abnormal_volatility":false}. '
                 "Use the appropriate values for event_risk "
                 "(NONE/LOW/MEDIUM/HIGH), alignment (SUPPORTIVE/CONFLICTING/NEUTRAL), event_minutes "
-                "(integer or null), and abnormal_volatility (boolean), then give at most three short facts. "
+                "(integer or null), and abnormal_volatility (boolean), then give exactly two short plain-English sentences, with no headings or bullets. Avoid trading verbs and the words confirmed, invalidated and setup. "
                 "This context is informational only and must not override or modify SwiftChart "
                 "trading rules, signal scores, or decisions."
             ),
@@ -164,6 +164,8 @@ class GrokContextClient:
             # X/Web lookup within the strict provider timeout.
             "max_turns": 1,
         }
+        if self.settings.news_reasoning_effort:
+            payload['reasoning'] = {'effort': self.settings.news_reasoning_effort}
         for attempt in range(2):
             trace = start_call(); started = perf_counter(); usage = None; status = 'failed'
             try:
@@ -192,6 +194,7 @@ class GrokContextClient:
                 )
             except httpx.TimeoutException:
                 logger.warning("grok_context_timeout attempt=%s", attempt + 1)
+                break  # A timed-out request may already be billed; do not submit it again.
             except httpx.HTTPStatusError as exc:
                 logger.warning("grok_context_http_failure attempt=%s status=%s", attempt + 1, exc.response.status_code)
                 if exc.response.status_code < 500 and exc.response.status_code != 429:
