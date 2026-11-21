@@ -1322,6 +1322,7 @@ def _analyze_dataframe_impl(
         timeframe=timeframe,
         exchange=exchange,
         current_price=round(float(df["close"].iloc[-1]), 6),
+        price_format=df.attrs.get('market_metadata', {}).get('price_format'),
         market_condition=regime,
         support_zones=supports,
         resistance_zones=resistances,

@@ -90,6 +90,8 @@ async def _exclude_tp1_hits(ideas: list) -> tuple[list, int]:
 @router.get("/markets", response_model=list[Market])
 async def markets(exchange: str = Query(default="hyperliquid")):
     selected_exchange = _selected_exchange(exchange)
+    if selected_exchange == 'variational' and not get_settings().variational_candles_verified:
+        return []
     try:
         if selected_exchange == "all":
             markets = []

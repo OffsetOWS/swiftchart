@@ -109,10 +109,12 @@ def test_forex_snapshot_preserves_website_zone_and_setup_facts(monkeypatch):
     monkeypatch.setattr(agent_data,'active',active)
     monkeypatch.setattr(agent_data,'forex_pair_chart',chart)
     data=asyncio.run(agent_data.snapshot('forex','EURUSD','1H'))['data']
-    assert data['levels']==original['levels']
+    assert 'levels' not in data
     assert data['decision']==original['decision']
     assert data['current_price']==original['current_price']
     assert data['buy_zones']==[{'low':1.121,'high':1.122,'state':'RETESTING'}]
+    assert data['reply']['price']=='1.12346'
+    assert data['reply']['signal']=='no active signal'
 
 
 @pytest.mark.parametrize('raw,expected',[('active','OPEN'),('tp1_hit','TP1_HIT_TP2_RUNNING'),('SL_HIT','STOPPED'),('CLOSED_AFTER_TP1','STOPPED'),('TIME_EXIT','TIME_EXIT'),('UNRESOLVED','UNRESOLVED')])

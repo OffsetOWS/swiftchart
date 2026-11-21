@@ -110,10 +110,13 @@ def normalize_exchange(exchange: str | None) -> str:
 
 def selected_exchanges(exchange: str | None) -> list[str]:
     normalized = normalize_exchange(exchange)
+    verified_variational = get_settings().variational_enabled and get_settings().variational_candles_verified
+    if normalized == 'variational' and not verified_variational:
+        return []
     if normalized != "all":
         return [normalized]
     exchanges = ["hyperliquid"]
-    if get_settings().variational_enabled:
+    if verified_variational:
         exchanges.append("variational")
     return exchanges
 

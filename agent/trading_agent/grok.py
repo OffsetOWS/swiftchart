@@ -115,6 +115,8 @@ class GrokContextClient:
             "model": self.settings.grok_model,
             "instructions": (
                 "Return concise, factual market context. Use X Search and Web Search. "
+                "Use qualitative prose only: no prices, amounts, percentages, counts, dates, times, rankings or numerical quantities. "
+                "Do not include numerical headlines or trading levels. Return source URLs in tool citations, not the prose. "
                 "Separate confirmed facts from rumors and do not make trade decisions. "
                 'Start with one line exactly formatted as CONTEXT_META: {"event_risk":"NONE",'
                 '"alignment":"NEUTRAL","event_minutes":null,"abnormal_volatility":false}. '

@@ -83,6 +83,8 @@ class HyperliquidClient(ExchangeClient):
                     "active": not item.get("isDelisted", False),
                     "volume": context.get("dayNtlVlm"),
                     "perpVolume24h": context.get("dayNtlVlm"),
+                    "price_format": {"kind": "hyperliquid-perp", "size_decimals": item["szDecimals"]}
+                    if isinstance(item.get("szDecimals"), int) and 0 <= item["szDecimals"] <= 6 else None,
                 }
             )
         return markets
@@ -108,4 +110,21 @@ class HyperliquidClient(ExchangeClient):
             df.loc[:, column] = pd.to_numeric(df[column], errors="coerce")
         result = df[["timestamp", "open", "high", "low", "close", "volume"]].dropna()
         result.attrs["source_snapshot"] = {"provider": "hyperliquid", "request": payload, "candles": rows}
+        return result
+
+    async def get_quotes(self):
+        data = await self._post_info({'type': 'metaAndAssetCtxs'})
+        if not isinstance(data, list) or len(data) < 2:
+            raise MarketDataUnavailable('Live quotes are unavailable')
+        result = {}
+        for item, context in zip(data[0].get('universe', []), data[1]):
+            if item.get('isDelisted') or not isinstance(context, dict):
+                continue
+            precision = item.get('szDecimals')
+            if not isinstance(precision, int) or not 0 <= precision <= 6:
+                continue
+            result[item['name'].upper()+'USDT'] = {
+                'price': context.get('markPx'),
+                'price_format': {'kind': 'hyperliquid-perp', 'size_decimals': precision},
+            }
         return result

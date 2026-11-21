@@ -16,10 +16,11 @@ from app.forex.storage import list_signals, get_signal as get_forex_signal
 from app.routes.forex import forex_pair_chart, forex_currency_strength, _enabled_signals
 from app.services.crypto_work import run_crypto_work
 from app.services.market_analysis import analyze_market_read_only, symbol_for_exchange
-from app.services.market_data import get_candles_cached
+from app.services.market_data import get_candles_cached, read_cached_candles
 from app.services.scanner import discover_all_scan_markets, read_cached_top_ideas
 from app.services.trade_history import get_trade_history, list_active_crypto_trades
 from app.models.schemas import RiskSettings
+from app.services.agent_presentation import presentation
 
 
 SIGNAL_FIELDS = {
@@ -51,6 +52,10 @@ def signal_projection(value, market_type=None):
             elif raw in {'AMBIGUOUS','UNRESOLVED','EXPIRED_POSITION','EXPIRED_RUNNER'}:
                 raw = 'UNRESOLVED'
         result['display_status'] = raw
+    if market_type:
+        display = {**result, 'market_type': market_type, 'bias': result.get('direction'),
+                   'single_signal': result}
+        result['reply'] = presentation(display, observed_at=datetime.now(UTC).isoformat())
     return result
 
 
@@ -63,11 +68,11 @@ def envelope(data, source):
             'observed_at': datetime.now(UTC).isoformat()}
 
 
-async def cached(key, produce):
+async def cached(key, produce, *, ttl=20):
     """Coalesce identical requests; bound work before admitting different keys."""
     state = _states.setdefault(asyncio.get_running_loop(), {'cache': {}, 'pending': {}})
     hit = state['cache'].get(key)
-    if hit and monotonic() - hit[0] < 20:
+    if hit and monotonic() - hit[0] < min(20, ttl):
         return hit[1]
     task = state['pending'].get(key)
     if task is None:
@@ -105,7 +110,8 @@ async def markets():
     rows = await discover_all_scan_markets('all')
     crypto = [{'symbol': row['symbol'], 'base_asset': row['symbol'].removesuffix('USDT'), 'exchange': row['exchange']} for row in rows]
     forex = [{'symbol': symbol, 'base_asset': symbol, 'exchange': 'forex'} for symbol in SUPPORTED_FOREX_PAIRS]
-    return envelope({'crypto': crypto, 'forex': forex}, '/api/markets and canonical scanner eligibility')
+    notes = [] if get_settings().variational_candles_verified else ['Variational historical candles are not verified; excluded from analysis and chart coverage.']
+    return envelope({'crypto': crypto, 'forex': forex, 'coverage_notes': notes}, '/api/markets and canonical scanner eligibility')
 
 
 async def require_symbol(kind, symbol):
@@ -174,7 +180,7 @@ async def active(kind='all', symbol=None):
     return envelope(data, 'canonical active-trade projections used by the website and signal bot')
 
 
-async def snapshot(kind, symbol, timeframe):
+async def snapshot(kind, symbol, timeframe, *, detail=False):
     symbol = await require_symbol(kind, symbol)
     timeframe = timeframe_for(kind, timeframe)
     if kind == 'forex':
@@ -182,6 +188,7 @@ async def snapshot(kind, symbol, timeframe):
         data = {key: chart.get(key) for key in ('symbol', 'timeframe', 'bias', 'htf_context', 'regime', 'decision', 'current_price', 'levels', 'updated_at')}
         data['buy_zones'] = zone_projection(chart.get('buy_zones', []))
         data['sell_zones'] = zone_projection(chart.get('sell_zones', []))
+        data['chart_candles'] = chart.get('candles', [])[-100:]
         published = await active('forex', symbol)
         data['signals'] = [row for row in published['data']['forex'] if str(row.get('timeframe','')).upper() == timeframe.upper()]
         source = '/api/forex/pairs/{symbol}/chart + persisted Forex signals'
@@ -193,17 +200,92 @@ async def snapshot(kind, symbol, timeframe):
                               risk_per_trade_pct=settings.default_risk_per_trade,
                               min_rr=settings.default_min_rr, max_open_trades=settings.default_max_open_trades,
                               preferred_timeframe=timeframe), supplemental_timeout_seconds=8,
+            cached_context_only=not detail,
         ))
-        data = {key: analysis.get(key) for key in ('symbol', 'exchange', 'timeframe', 'current_price', 'market_condition', 'higher_timeframe_bias')}
+        data = {key: analysis.get(key) for key in ('symbol', 'exchange', 'timeframe', 'current_price', 'price_format', 'market_condition', 'higher_timeframe_bias')}
         data['support_zones'] = zone_projection(analysis.get('support_zones', []))
         data['resistance_zones'] = zone_projection(analysis.get('resistance_zones', []))
+        data['structure'] = (analysis.get('market_regime_data') or {}).get('structure')
         # Reanalysed candidate plans never become a claimed published signal.
         published = await active('crypto', symbol)
         data['signals'] = [row for row in published['data']['crypto'] if str(row.get('timeframe','')).lower() == timeframe.lower()]
         data['setup_status'] = 'PUBLISHED_SIGNAL' if data['signals'] else 'NO_PUBLISHED_SIGNAL'
+        frame = read_cached_candles(data.get('exchange') or settings.default_exchange, symbol, timeframe, 100)
+        data['chart_candles'] = jsonable_encoder(frame.tail(100).to_dict('records')) if frame is not None else []
         source = '/api/analyze read-only analysis + /api/active-crypto-trades canonical statuses'
     data['market_type'] = kind
-    return envelope(data, source)
+    if detail:
+        companion = {'1h': '4h', '4h': '1d', '1d': '4h'}.get(timeframe.lower(), '1d')
+        try:
+            other = await cached(('snapshot', kind, symbol, companion, False), lambda: snapshot(kind, symbol, companion))
+            data['companion'] = {'reply': other['data']['reply']}
+        except Exception:
+            data['companion'] = {'available': False}
+    # Hypothetical Forex chart levels are not an executable/published signal.
+    # Retain canonical chart decision and raw zones for parity, but never return
+    # candidate entry/stop/target numbers to the language model on a no-trade.
+    if not data.get('signals') or data.get('decision') not in {'LONG', 'SHORT'}:
+        data.pop('levels', None)
+    result = envelope(data, source)
+    result['data']['reply'] = presentation(result['data'], observed_at=result['observed_at'])
+    return result
+
+
+async def prices(kind, symbols):
+    from app.services.agent_presentation import decimal, price_text
+    symbols = list(dict.fromkeys(symbols))
+    if not 1 <= len(symbols) <= 100:
+        raise HTTPException(422, 'Request between one and one hundred supported symbols')
+    symbols = [await require_symbol(kind, symbol) for symbol in symbols]
+    async def all_crypto():
+        from app.exchanges.factory import get_exchange
+        rows = await get_exchange('hyperliquid').get_quotes()
+        observed = datetime.now(UTC).isoformat()
+        return {symbol: dict(row, observed_at=observed) for symbol,row in rows.items()}
+    async def forex_quote(symbol):
+        from app.forex.market_data import get_forex_market_data_service
+        pair = SUPPORTED_FOREX_PAIRS[symbol]
+        value = await get_forex_market_data_service().live_candle(pair, '1H', completed_through=datetime(1970,1,1,tzinfo=UTC))
+        if not value:
+            return None
+        opened = datetime.fromisoformat(str(value['timestamp']).replace('Z','+00:00'))
+        if not 0 <= (datetime.now(UTC)-opened).total_seconds() <= 5400:
+            return None
+        return {'price': value['close'], 'price_format': {}, 'observed_at':datetime.now(UTC).isoformat()}
+    if kind == 'crypto':
+        raw = await cached(('live-crypto-quotes',), all_crypto, ttl=3)
+    else:
+        raw = {}
+        for symbol in symbols:
+            try:
+                raw[symbol] = await cached(('live-forex-quote',symbol), lambda symbol=symbol: forex_quote(symbol), ttl=3)
+            except Exception:
+                raw[symbol] = None
+    quotes = {}
+    for symbol in symbols:
+        row = raw.get(symbol)
+        if row and decimal(row.get('price')) is not None:
+            display = price_text(row['price'], kind, symbol, row.get('price_format') or {})
+            if display:
+                quotes[symbol] = {'price': str(row['price']), 'display_price': display,
+                                  'observed_at': row['observed_at'], 'price_format': row.get('price_format')}
+    return envelope({'quotes': quotes, 'market_type': kind}, 'Live Hyperliquid mark prices' if kind=='crypto' else 'Live Forex forming-candle quotes')
+
+
+async def chart(kind, symbol, timeframe):
+    from app.services.agent_presentation import chart_projection
+    result = await cached(('snapshot',kind,symbol,timeframe,False),lambda: snapshot(kind,symbol,timeframe))
+    return envelope(chart_projection(result['data'], observed_at=result['observed_at']), result['source'])
+
+
+async def signal_context(kind, identity):
+    record = (await signal(kind,identity))['data']
+    result = await snapshot(kind, record['symbol'], record['timeframe'], detail=True)
+    data = result['data']
+    data['linked_signal'] = record
+    data['single_signal'] = record
+    data['reply'] = presentation(data,observed_at=result['observed_at'])
+    return result
 
 
 async def strength(horizon):
