@@ -35,3 +35,19 @@ def test_production_cap_keeps_shadow_and_pending_retest_cohorts(monkeypatch):
     rows=[first,shadow,second,pending]
     assert cap_production_cohorts(rows)==[first,shadow,pending]
     get_settings.cache_clear()
+
+
+def test_bounce_long_cannot_displace_an_existing_short(monkeypatch):
+    monkeypatch.setenv("CRYPTO_MAX_SIGNALS_PER_SCAN", "3")
+    monkeypatch.setenv("CRYPTO_MAX_SIGNALS_PER_DIRECTION", "2")
+    get_settings.cache_clear()
+    shorts = [idea(symbol="CCCUSDT", direction="Short"), idea(symbol="DDDUSDT", direction="Short")]
+    other_longs = [idea(symbol="BBBUSDT"), idea(symbol="EEEUSDT")]
+    bounce = idea(symbol="AAAUSDT")
+    bounce.setup_family = "bounce_long"
+    rows = [*shorts, *other_longs, bounce]
+    baseline_short_ids = {id(row) for row in cap_signals_per_scan([row for row in rows if row is not bounce]) if row.direction == "Short"}
+    selected = cap_signals_per_scan(rows)
+    assert baseline_short_ids <= {id(row) for row in selected if row.direction == "Short"}
+    assert bounce not in selected
+    get_settings.cache_clear()

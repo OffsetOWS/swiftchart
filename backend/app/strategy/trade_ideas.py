@@ -1315,6 +1315,30 @@ def _analyze_dataframe_impl(
         htf_bias,
         market_regime_data,
     )
+    # Independent bounce edge: append only after the existing strategies have
+    # finished, leaving all long/short gates and decisions untouched.
+    from app.strategy.bounce_long import detect_bounce_long
+    four_hour_ema50 = None
+    if str(timeframe).lower() == "4h":
+        four_hour_ema50 = float(df["close"].astype(float).ewm(span=50, adjust=False).mean().iloc[-1])
+    else:
+        for htf_df in htf_dfs or []:
+            if len(htf_df):
+                values = htf_df["close"].astype(float)
+                four_hour_ema50 = float(values.ewm(span=50, adjust=False).mean().iloc[-1])
+                break
+    try:
+        bounce = detect_bounce_long(
+            symbol=symbol, timeframe=timeframe, exchange=exchange, df=df,
+            regime=regime, market_regime=market_regime_data, settings=settings,
+            resistances=resistances, four_hour_ema50=four_hour_ema50,
+            short_active=any(i.direction == "Short" and i.strategy_decision == "TRADE" for i in ideas),
+        )
+    except Exception:
+        logger.exception("bounce_long detector failed; preserving existing strategy outputs symbol=%s timeframe=%s", symbol, timeframe)
+        bounce = None
+    if bounce is not None:
+        ideas.append(bounce)
     warning = no_trade_reason if not ideas else None
 
     return AnalysisResponse(

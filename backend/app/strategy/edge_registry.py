@@ -137,6 +137,22 @@ _REGISTRY: tuple[StrategyEdge, ...] = (
         validation_source="pre_v2_historical_audit",
         validation_reason="Transition setups have not demonstrated a validated positive edge and default to NO_TRADE.",
     ),
+    StrategyEdge(
+        strategy_family="bounce_long",
+        strategy_version="v1",
+        regime="ANY",
+        direction="LONG",
+        timeframe=None,
+        status="VALIDATED",
+        sample_size=None,
+        completed_sample_size=None,
+        win_rate=None,
+        expectancy_r=None,
+        total_r=None,
+        last_evaluated_at="2026-11-22T00:00:00+00:00",
+        validation_source="explicit_directional_production_promotion",
+        validation_reason="Explicitly promoted bounce_long/v1; its independent sweep, reclaim, pivot, limit-entry, risk, exhaustion, conflict, and kill-switch gates remain required.",
+    ),
 )
 
 

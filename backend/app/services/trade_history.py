@@ -42,6 +42,50 @@ def canonical_crypto_symbol(symbol: str) -> str:
     return f"{normalized}USDT" if normalized else ""
 
 
+def has_active_short_signal(symbol: str, timeframe: str, exchange: str | None = None) -> bool:
+    """Check the canonical active crypto ledger before staging an opposite idea."""
+    with get_connection() as connection:
+        row = connection.execute(
+            """SELECT 1 FROM trade_ideas WHERE strategy_decision='TRADE'
+               AND UPPER(direction)='SHORT' AND UPPER(symbol)=UPPER(?)
+               AND LOWER(timeframe)=LOWER(?) AND lifecycle_status='active'
+               AND (expires_at IS NULL OR datetime(expires_at)>datetime(?))
+               AND tp1_hit_at IS NULL AND sl_hit_at IS NULL AND closed_at IS NULL
+               AND (? IS NULL OR LOWER(exchange)=LOWER(?)) LIMIT 1""",
+            (symbol, timeframe, _now_iso(), exchange, exchange),
+        ).fetchone()
+    return row is not None
+
+
+def bounce_long_kill_switch_tripped() -> bool:
+    """Trip after 15 completed bounce trades have negative before-cost expectancy."""
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS bounce_long_kill_state (
+                   id INTEGER PRIMARY KEY CHECK(id=1), tripped_at TEXT NOT NULL,
+                   completed_count INTEGER NOT NULL, expectancy_r REAL NOT NULL)"""
+        )
+        latched = connection.execute("SELECT 1 FROM bounce_long_kill_state WHERE id=1").fetchone()
+        if latched:
+            return True
+        rows = connection.execute(
+            """SELECT pnl_r_multiple FROM trade_ideas WHERE setup_family='bounce_long'
+               AND result IN ('WIN','PARTIAL_WIN','PARTIAL_LOSS','LOSS','BREAK_EVEN')
+               AND pnl_r_multiple IS NOT NULL"""
+        ).fetchall()
+        if len(rows) < 15:
+            return False
+        expectancy = sum(float(row[0]) for row in rows) / len(rows)
+        if expectancy >= 0:
+            return False
+        connection.execute(
+            "INSERT OR IGNORE INTO bounce_long_kill_state(id,tripped_at,completed_count,expectancy_r) VALUES(1,?,?,?)",
+            (_now_iso(), len(rows), expectancy),
+        )
+        return True
+
+
 def _active_trade_signal_id(row: dict) -> str:
     opportunity_key = str(row.get("opportunity_key") or "").strip()
     if opportunity_key:
@@ -253,6 +297,12 @@ def same_direction_sl_cooldown_review(idea: TradeIdea, *, candles: int = 6, now:
 
 def _signal_expires_at(idea: TradeIdea) -> str:
     candle_time = idea.signal_candle_time
+    if idea.setup_family == "bounce_long" and idea.entry_status == "WAIT_FOR_RETEST" and candle_time is not None:
+        normalized = candle_time if candle_time.tzinfo else candle_time.replace(tzinfo=UTC)
+        return (normalized + timedelta(minutes=TIMEFRAME_MINUTES.get(idea.timeframe.lower(), 60) * 6)).replace(microsecond=0).isoformat()
+    if idea.setup_family == "bounce_long" and candle_time is not None:
+        normalized = candle_time if candle_time.tzinfo else candle_time.replace(tzinfo=UTC)
+        return (normalized + timedelta(hours=48)).replace(microsecond=0).isoformat()
     if candle_time is None:
         return (datetime.now(UTC) + timedelta(minutes=get_settings().signal_max_age_minutes)).replace(microsecond=0).isoformat()
     normalized = candle_time if candle_time.tzinfo else candle_time.replace(tzinfo=UTC)

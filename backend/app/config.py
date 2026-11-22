@@ -105,6 +105,9 @@ class Settings(BaseSettings):
     forex_close_entire_position_at_tp1: bool = False
 
     crypto_score_archive_enabled: bool = False
+    bounce_long_enabled: bool = False
+    bounce_long_allow_chop: bool = False
+    bounce_long_skip_rsi_filter: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

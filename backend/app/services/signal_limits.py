@@ -8,9 +8,10 @@ from app.models.schemas import TradeIdea
 
 def cap_signals_per_scan(ideas: Iterable[TradeIdea]) -> list[TradeIdea]:
     settings = get_settings()
+    rows = list(ideas)
     counts: Counter[str] = Counter()
     selected = []
-    for idea in rank_by_volume(ideas):
+    for idea in rank_by_volume(rows):
         if len(selected) >= settings.crypto_max_signals_per_scan:
             break
         direction = str(idea.direction).upper()
@@ -18,6 +19,15 @@ def cap_signals_per_scan(ideas: Iterable[TradeIdea]) -> list[TradeIdea]:
             continue
         selected.append(idea)
         counts[direction] += 1
+    # The new counter-trend long edge may not take a slot from a short that
+    # would have been admitted before bounce_long existed.
+    bounce_rows = [idea for idea in rows if idea.setup_family == "bounce_long"]
+    if bounce_rows:
+        baseline = cap_signals_per_scan([idea for idea in rows if idea.setup_family != "bounce_long"])
+        baseline_short_ids = {id(idea) for idea in baseline if str(idea.direction).upper() == "SHORT"}
+        selected_short_ids = {id(idea) for idea in selected if str(idea.direction).upper() == "SHORT"}
+        if not baseline_short_ids.issubset(selected_short_ids):
+            return baseline
     return selected
 
 

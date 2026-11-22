@@ -213,6 +213,29 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     from datetime import UTC,datetime
     from app.services.crypto_exit_policy import deadline
     when=idea.tracking_deadline or deadline(idea.history_created_at or datetime.now(UTC),idea.timeframe)
+    if idea.setup_family == "bounce_long":
+        return (
+            f"🔵 BOUNCE LONG — {alert_symbol(idea.symbol)} {idea.timeframe.upper()}\n\n"
+            f"{public_reason_summary(idea.reason, max_sentences=2)}\n\n"
+            f"Entry (limit): {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
+            f"TP: {fmt(idea.take_profit_1)}\n⏱ Short hold — 48-hour tracking window."
+        )
+    if idea.setup_family == "trend_continuation" and idea.direction == "Long":
+        return (
+            f"🟢 TREND LONG — {alert_symbol(idea.symbol)} {idea.timeframe.upper()}\n\n"
+            f"{public_reason_summary(idea.reason, max_sentences=2)}\n\n"
+            f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
+            f"TP1: {fmt(idea.take_profit_1)}\nTP2: {fmt(idea.take_profit_2)}\n"
+            f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
+        )
+    if idea.setup_family == "trend_continuation" and idea.direction == "Short":
+        return (
+            f"🔴 TREND SHORT — {alert_symbol(idea.symbol)} {idea.timeframe.upper()}\n\n"
+            f"{public_reason_summary(idea.reason, max_sentences=2)}\n\n"
+            f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
+            f"TP1: {fmt(idea.take_profit_1)}\nTP2: {fmt(idea.take_profit_2)}\n"
+            f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
+        )
     return (
         f"{alert_symbol(idea.symbol)} · {idea.timeframe.upper()} · {idea.direction.upper()}\n\n"
         f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
@@ -226,6 +249,14 @@ def format_outcome_event(event: dict) -> str:
     from decimal import Decimal
     labels={"TP1":"TP1 hit — partial taken (50%).","TP2":"TP2 hit — final target reached.","STOP_LOSS":"Stop-loss hit.","TIME_EXIT":"48-hour tracking window ended — trade closed."}
     price=format(Decimal(str(event["price"])),"f").rstrip("0").rstrip(".") if "." in str(event["price"]) else str(event["price"])
+    if event.get("setup_family") == "bounce_long" and event["event_kind"] in {"TP1", "TP2"}:
+        label = "TP1" if event["event_kind"] == "TP1" else "TP2"
+        return f"🔵 Bounce long on {alert_symbol(event['symbol'])} hit {label} ✅\nPrice: {price}"
+    if event.get("setup_family") == "trend_continuation" and event["event_kind"] in {"TP1", "TP2"}:
+        label = "TP1" if event["event_kind"] == "TP1" else "TP2"
+        side = str(event.get("direction") or "").upper()
+        tag = "🟢 Trend long" if side == "LONG" else "🔴 Trend short"
+        return f"{tag} on {alert_symbol(event['symbol'])} hit {label} ✅\nPrice: {price}"
     return f"{alert_symbol(event['symbol'])} · {event['direction']}\n{labels[event['event_kind']]}\nPrice: {price}"
 
 

@@ -9,6 +9,7 @@ SetupFamily = Literal[
     "trend_continuation",
     "range_mean_reversion",
     "regime_transition",
+    "bounce_long",
 ]
 
 
