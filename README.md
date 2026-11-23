@@ -1,5 +1,7 @@
 # SwiftChart
 
+[![CI](https://github.com/OffsetOWS/swiftchart/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OffsetOWS/swiftchart/actions/workflows/ci.yml)
+
 > Regime-aware crypto signal infrastructure that turns noisy perpetual-futures market data into ranked, risk-defined trade ideas.
 
 SwiftChart is a mobile-first market intelligence platform for crypto traders. It continuously scans liquid perpetual markets, classifies the current market regime, evaluates long and short candidates, and publishes only setups that satisfy its quality and risk/reward controls.

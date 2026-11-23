@@ -1,1 +1,8 @@
-# Intentionally empty: committed secrets must be removed, not ignored.
+# Committed secrets must be removed and rotated, never ignored here.
+# Only verified false positives belong in this file, one fingerprint each,
+# with the reason on the line above.
+
+# SHA-256 digest of backend/app/integrations/okx_asp/auth.py in the release
+# baseline manifest; the "auth.py" key makes generic-api-key flag the file hash.
+a5d113e8d8d6079ced215b114a558be8182336f9:docs/stage1_vps_baseline.json:generic-api-key:33
+docs/stage1_vps_baseline.json:generic-api-key:33
