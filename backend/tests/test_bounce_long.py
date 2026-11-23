@@ -135,7 +135,7 @@ def test_bounce_tags_on_entry_and_existing_tp_outcome_path(monkeypatch):
     message = format_outcome_event({"setup_family": "bounce_long", "event_kind": "TP1",
         "symbol": "HYPE", "direction": "LONG", "price": 64.5, "quantity": .5,
         "entry_zone_low": 60.9, "entry_zone_high": 60.9, "stop_loss": 59.97})
-    assert message.startswith("🔵 Bounce long HYPE hit TP1 ✅ +1.9R")
+    assert message.startswith("🔵 Bounce long HYPE hit TP1 ✅ +3.9R on half the position (+1.9R banked).")
     message = format_outcome_event({"setup_family": "bounce_long", "event_kind": "TP2",
         "symbol": "HYPE", "direction": "LONG", "price": 64.5})
     assert message.startswith("🔵 Bounce long HYPE hit TP2 ✅")

@@ -174,7 +174,7 @@ def detect_bounce_long(
                 risk_reward_ratio=round(rr, 2), reason=(
                     f"Price swept prior support at {swing:g} and printed a low of {sweep_low:g}, "
                     f"then reclaimed {swing:g} with a close at {float(candles.close.iloc[reclaim_i]):g}. "
-                    f"Since then it held a higher low at {higher_low:g} and closed above the "
+                    f"After the reclaim, price held a higher low at {higher_low:g} and closed above the "
                     f"{bounce_high:g} bounce high, suggesting buyers have taken short-term control."
                 ), confidence_score=85.0,
                 invalid_condition=f"Invalid if a {timeframe.upper()} candle closes below {stop:.6g}.",

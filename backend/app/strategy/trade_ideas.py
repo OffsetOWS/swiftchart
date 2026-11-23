@@ -321,50 +321,47 @@ def _signal_quality_control(
 def _reason(
     regime: str, direction: str, sweep: LiquiditySweep | None,
     zone: Zone | None = None, vol_ok: bool = False, mom_ok: bool = False,
+    entry_low: float | None = None, entry_high: float | None = None,
+    stop: float | None = None,
 ) -> str:
-    """Build a plain-language note from the completed-candle evidence."""
+    """Build controlled trigger and evidence sentences from computed fields."""
     pieces = []
-    if regime == "RANGE_BOUND":
-        pieces.append("Price is ranging, and this setup is forming near the edge of that range.")
-    elif regime in {"TRENDING_UP", "TRENDING_DOWN"}:
-        pieces.append("Price is in an uptrend." if regime == "TRENDING_UP" else "Price is in a downtrend.")
-    elif regime == "BREAKOUT":
-        pieces.append("Price has moved above prior resistance and is testing whether buyers can hold it.")
-    elif regime == "BREAKDOWN":
-        pieces.append("Price has moved below prior support and sellers are testing continuation.")
-    elif regime == "TRANSITION_TO_BEARISH":
-        pieces.append("The market is shifting toward a downtrend, with sellers testing follow-through.")
-    elif regime == "TRANSITION_TO_BULLISH":
-        pieces.append("The market is shifting toward an uptrend, with buyers testing follow-through.")
-
-    if zone is not None:
-        label = "prior support" if direction == "Long" else "prior resistance"
-        variants = (
-            (f"The latest pullback tested {label} between {zone.lower:g} and {zone.upper:g} and held."
-             if direction == "Long" else
-             f"The latest rally tested {label} between {zone.lower:g} and {zone.upper:g} and was rejected."),
-            (f"Price found buyers at {label} from {zone.lower:g} to {zone.upper:g}."
-             if direction == "Long" else
-             f"Price ran into {label} at {zone.lower:g}–{zone.upper:g} and closed back below it."),
-        )
-        pieces.append(variants[int(abs(zone.lower) * 100) % 2])
+    short_fallback = False
     if sweep:
         swept_name = "support" if direction == "Long" else "resistance"
-        variants = (
-            f"Price traded through {swept_name} at {sweep.swept_level:g}, then reclaimed it near {sweep.reclaim_price:g}, flushing out late entries.",
-            f"A move beyond {swept_name} at {sweep.swept_level:g} was quickly reversed, with price back near {sweep.reclaim_price:g}; that weakens the breakout attempt.",
+        pieces.append(
+            f"Price swept {swept_name} at {sweep.swept_level:g}, then reclaimed the level near {sweep.reclaim_price:g}."
         )
-        pieces.append(variants[int(abs(sweep.swept_level) * 100) % 2])
+    elif zone is not None:
+        entry_mid = (entry_low + entry_high) / 2 if entry_low is not None and entry_high is not None else None
+        anchored_zone = (
+            entry_mid is None or stop is None
+            or (entry_mid <= zone.upper <= stop if direction == "Short"
+                else stop <= zone.lower <= entry_mid)
+        )
+        if direction == "Short" and not anchored_zone:
+            # The fallback continuation short is priced near current price; the
+            # support zone is a scoring input, not the rejected zone or stop anchor.
+            short_fallback = True
+            pieces.append("Sellers kept pressure on price, and the short entry is placed near current price.")
+        elif direction == "Short":
+            pieces.append(
+                f"The latest rally tested prior resistance between {zone.lower:g} and {zone.upper:g}, then sellers rejected it."
+            )
+        elif anchored_zone:
+            pieces.append(
+                f"The latest pullback tested prior support between {zone.lower:g} and {zone.upper:g}, then buyers held it."
+            )
+        else:
+            pieces.append("Buyers defended the current price area, and the long entry is positioned near support.")
     if vol_ok:
-        volume_variants = (("Volume backed the rejection.", "Selling increased as the rally failed at resistance.")
-                           if direction == "Short" else
-                           ("Volume backed the response from support.", "Trading activity expanded as buyers defended the level."))
-        pieces.append(volume_variants[int(abs(zone.lower if zone else 0) * 100) % 2])
+        pieces.append(
+            "Volume supported the selling pressure." if short_fallback
+            else "Volume backed the rejection." if direction == "Short"
+            else "Volume backed the response from support."
+        )
     if mom_ok:
-        momentum_variants = (("Momentum confirms the latest move.", "Price momentum continues to favor buyers.")
-                             if direction == "Long" else
-                             ("Downside momentum remains present.", "The latest momentum reading still favors sellers."))
-        pieces.append(momentum_variants[int(abs(zone.upper if zone else 0) * 100) % 2])
+        pieces.append("Downside momentum remains present." if direction == "Short" else "Price momentum continues to favor buyers.")
     return " ".join(pieces)
 
 
@@ -803,7 +800,7 @@ def _build_idea(
     size, risk_amount = _risk_size(settings, entry, stop)
     invalid_timeframe = timeframe.upper()
     invalid = f"Invalid if a {invalid_timeframe} candle closes {'below' if direction == 'Long' else 'above'} {round(stop, 6)}."
-    reason = _reason(regime, direction, sweep, zone, vol_ok, mom_ok)
+    reason = _reason(regime, direction, sweep, zone, vol_ok, mom_ok, entry_low, entry_high, stop)
     if regime_note:
         reason = f"{reason} {regime_note}"
     if quality_reasons:
@@ -1398,8 +1395,7 @@ def _analyze_dataframe_impl(
     }.get(btc_regime)
     for idea in ideas:
         if btc_sentence and idea.reason:
-            first, separator, rest = idea.reason.partition(". ")
-            idea.reason = f"{first}. {btc_sentence}" + (f" {rest}" if separator else "")
+            idea.reason = f"{idea.reason} {btc_sentence}"
         if idea.price_decimals is None:
             idea.price_decimals = _price_decimals_for_signal(idea, market_metadata)
     warning = no_trade_reason if not ideas else None
