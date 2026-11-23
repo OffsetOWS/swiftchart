@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+  GITLEAKS_VERSION: "8.28.0"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  backend:
+    name: Backend + execution bot tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            execution_bot/requirements.txt
+            bot/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r execution_bot/requirements.txt -r bot/requirements.txt pytest==8.3.4
+      - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend:${{ github.workspace }}
+        run: python -m pytest backend/tests execution_bot/tests -q -p no:cacheprovider
+      - name: Compile check (bot, execution bot, api)
+        run: python -m compileall -q bot execution_bot api
+
+  agent:
+    name: Agent tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: agent/requirements.txt
+      - name: Install dependencies
+        # The agent pins a newer python-dotenv than the backend, so it gets its
+        # own environment plus the backend libraries its bot-isolation test imports.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r agent/requirements.txt pytest==8.3.4 \
+            pydantic-settings==2.7.1 pandas==2.2.3 numpy==2.2.1 fastapi==0.115.6
+      - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend:${{ github.workspace }}/agent:${{ github.workspace }}
+        run: python -m pytest agent/tests -q -p no:cacheprovider
+
+  frontend:
+    name: Frontend tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Build
+        # No VITE_* values are set, so nothing private can reach the bundle.
+        run: npm run build
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Tracked-file checks (private files, env templates)
+        run: python scripts/check_staged_security.py --tracked
+      - name: Install Gitleaks
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan full git history
+        run: |
+          gitleaks git --redact=100 --no-banner --exit-code 1 \
+            --config .gitleaks.toml \
+            --gitleaks-ignore-path .gitleaksignore \
+            --max-archive-depth=3 --max-decode-depth=3 .
