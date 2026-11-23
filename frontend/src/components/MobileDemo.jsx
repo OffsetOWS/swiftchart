@@ -1142,6 +1142,11 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
   const isForex = signal.market === MARKET_TYPES.forex;
   const activeTradeSaveState = tradeSaveState?.symbol === signal.symbol ? tradeSaveState : { status: "idle" };
   const terminalForexStatus = ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(String(signal.status).toUpperCase());
+  const trackingDeadline = signal.trackingDeadline || signal.rawIdea?.tracking_deadline;
+  const trackingDeadlineDate = trackingDeadline ? new Date(trackingDeadline) : null;
+  const trackingDeadlineLabel = trackingDeadlineDate && Number.isFinite(trackingDeadlineDate.getTime())
+    ? `${trackingDeadlineDate.toISOString().slice(0, 16).replace("T", " ")} UTC`
+    : null;
   return (
     <main className="graphite-detail-screen" aria-label={`${signal.symbol} trade analysis`}>
       <article className="graphite-detail">
@@ -1162,9 +1167,9 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
 
 
         {!isForex ? <section className="graphite-reasoning">
-          <span>48-hour tracking exit</span>
-          <p>The trade closes after its 48-hour tracking window if neither the stop-loss nor the final target has been hit.</p>
-          {signal.trackingDeadline || signal.rawIdea?.tracking_deadline ? <p>Tracking close: {new Date(signal.trackingDeadline || signal.rawIdea.tracking_deadline).toLocaleString(undefined, { timeZone: "UTC" })} UTC</p> : <p>The window starts at the first tracking candle after signal creation.</p>}
+          <span>Signal validity</span>
+          <p>Valid for 48 hours.</p>
+          {trackingDeadlineLabel ? <p>Valid until: {trackingDeadlineLabel}</p> : <p>The 48-hour window starts at the first tracking candle.</p>}
         </section> : null}
         <ExecutionLadder signal={signal} />
 
