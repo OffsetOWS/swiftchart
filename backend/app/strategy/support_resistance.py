@@ -103,19 +103,22 @@ def find_support_resistance(df: pd.DataFrame, lookback: int = 220) -> tuple[list
     supports = [_score_zone(recent, cluster, "support", tolerance, atr) for cluster in _cluster_candidates(support_candidates, tolerance)]
     resistances = [_score_zone(recent, cluster, "resistance", tolerance, atr) for cluster in _cluster_candidates(resistance_candidates, tolerance)]
 
+    # A swing's original role is historical evidence, not its current role.
+    # Drop fully broken bands rather than inventing a confirmed retest. Bands
+    # containing price remain legitimate touch/retest structure.
+    # Filter BEFORE the strength cap so obsolete strong zones cannot crowd out
+    # usable structure. The scanner, website and agent all use this function.
+    supports = [zone for zone in supports if zone.lower <= current_price]
+    resistances = [zone for zone in resistances if zone.upper >= current_price]
     supports = sorted(supports, key=lambda zone: (zone.strength, zone.touches), reverse=True)
     resistances = sorted(resistances, key=lambda zone: (zone.strength, zone.touches), reverse=True)
     return supports[:6], resistances[:6]
 
 
 def nearest_range(current_price: float, supports: list[Zone], resistances: list[Zone]) -> tuple[Zone | None, Zone | None]:
-    below = [zone for zone in supports if zone.upper <= current_price * 1.015]
-    above = [zone for zone in resistances if zone.lower >= current_price * 0.985]
-    support = min(below, key=lambda zone: abs(current_price - zone.upper), default=None)
-    resistance = min(above, key=lambda zone: abs(zone.lower - current_price), default=None)
+    below = [zone for zone in supports if zone.lower <= current_price]
+    above = [zone for zone in resistances if zone.upper >= current_price]
+    support = min(below, key=lambda zone: max(0, current_price - zone.upper), default=None)
+    resistance = min(above, key=lambda zone: max(0, zone.lower - current_price), default=None)
 
-    if support is None and supports:
-        support = min(supports, key=lambda zone: abs(current_price - (zone.lower + zone.upper) / 2))
-    if resistance is None and resistances:
-        resistance = min(resistances, key=lambda zone: abs(current_price - (zone.lower + zone.upper) / 2))
     return support, resistance

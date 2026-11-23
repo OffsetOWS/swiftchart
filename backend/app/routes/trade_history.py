@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
-from app.services.crypto_work import run_crypto_work
+from app.services.crypto_work import run_crypto_work, interactive_crypto_reads
 
 from app.models.schemas import TradeHistoryPage, TradeHistoryRecord, TradeIdea, TradeStats
 from app.services.strategy_experiments import strict_trend_short_shadow_report
@@ -23,21 +23,22 @@ async def trade_history(
     limit: int = Query(default=20, ge=1, le=250),
     sort: str = Query(default="desc", pattern="^(asc|desc)$"),
 ):
-    return await run_crypto_work(query_trade_history,
-        {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "exchange": None if exchange == "all" else exchange,
-            "direction": direction,
-            "status": status,
-            "result": result,
-            "date_from": date_from,
-            "date_to": date_to,
-        },
-        page=page,
-        limit=limit,
-        sort=sort,
-    )
+    with interactive_crypto_reads():
+        return await run_crypto_work(query_trade_history,
+            {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "exchange": None if exchange == "all" else exchange,
+                "direction": direction,
+                "status": status,
+                "result": result,
+                "date_from": date_from,
+                "date_to": date_to,
+            },
+            page=page,
+            limit=limit,
+            sort=sort,
+        )
 
 
 @router.post("/trade-history")
@@ -48,7 +49,8 @@ async def trade_history_save(idea: TradeIdea):
 
 @router.get("/trade-history/{trade_id}", response_model=TradeHistoryRecord)
 async def trade_history_detail(trade_id: int):
-    record = await run_crypto_work(get_trade_history, trade_id)
+    with interactive_crypto_reads():
+        record = await run_crypto_work(get_trade_history, trade_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Trade idea not found.")
     return record
@@ -66,7 +68,8 @@ async def trade_history_replay(days: int = Query(default=30, ge=1, le=365)):
 
 @router.get("/trade-stats", response_model=TradeStats)
 async def trade_stats():
-    return await run_crypto_work(stats)
+    with interactive_crypto_reads():
+        return await run_crypto_work(stats)
 
 
 @router.get("/trade-stats/experiments/strict-trend-short")

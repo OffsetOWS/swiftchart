@@ -4,6 +4,8 @@ import html
 import json
 import logging
 import os
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from app.services.agent_links import signal_agent_url
 from pathlib import Path
 
 from app.forex.config import SUPPORTED_FOREX_PAIRS
@@ -246,6 +248,7 @@ async def dispatch_pending_forex(bot, *, app_url: str | None = None) -> dict[str
                 text=format_forex_signal(signal, app_url),
                 parse_mode="HTML",
                 disable_web_page_preview=True,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Ask Agent Swift', url=signal_agent_url('forex',signal.id))]]),
             )
             mark_dispatch_attempt(dispatch["id"], delivered=True)
             delivered += 1

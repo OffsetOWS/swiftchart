@@ -73,6 +73,31 @@ def test_worker_preserves_context_and_api_loop_while_work_is_busy():
     assert len(thread_ids) == 2
 
 
+
+def test_reserved_read_capacity_is_available_while_both_scan_workers_are_busy():
+    from app.services.crypto_work import interactive_crypto_reads
+    release = threading.Event()
+    started = [threading.Event(), threading.Event()]
+    def scan(index):
+        started[index].set()
+        assert release.wait(3)
+    async def scenario():
+        jobs = [asyncio.create_task(run_crypto_work(scan, index)) for index in range(2)]
+        try:
+            for _ in range(100):
+                if all(event.is_set() for event in started):
+                    break
+                await asyncio.sleep(.005)
+            assert all(event.is_set() for event in started)
+            with interactive_crypto_reads():
+                name = await asyncio.wait_for(run_crypto_work(lambda: threading.current_thread().name), .25)
+            assert name.startswith('crypto-read')
+            assert not any(job.done() for job in jobs)
+        finally:
+            release.set()
+            await asyncio.gather(*jobs)
+    asyncio.run(scenario())
+
 def receipt():
     return {'release_gate': True, 'passed': True, 'source_commit': 'candidate',
             'source_fingerprint': 'fingerprint', 'elapsed_seconds': 901, 'requested_seconds': 900,
@@ -180,3 +205,40 @@ def test_shipped_soak_validator_imports_without_local_packing_modules(tmp_path):
                             cwd=tmp_path, env={**os.environ, 'PYTHONPATH': str(tmp_path), 'PYTHONDONTWRITEBYTECODE': '1'},
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('route', ['active', 'history', 'detail', 'stats'])
+def test_public_crypto_reads_do_not_queue_behind_scan_or_lifecycle_workers(monkeypatch, route):
+    from app.routes import markets, trade_history
+    release = threading.Event()
+    started = [threading.Event(), threading.Event()]
+    def scan(index):
+        started[index].set()
+        assert release.wait(3)
+    def read(*args, **kwargs):
+        assert threading.current_thread().name.startswith('crypto-read')
+        return [] if route == 'active' else {}
+    functions = {'active': (markets, 'list_active_crypto_trades'),
+                 'history': (trade_history, 'query_trade_history'),
+                 'detail': (trade_history, 'get_trade_history'),
+                 'stats': (trade_history, 'stats')}
+    module, name = functions[route]
+    monkeypatch.setattr(module, name, read)
+    async def scenario():
+        jobs = [asyncio.create_task(run_crypto_work(scan, index)) for index in range(2)]
+        try:
+            for _ in range(100):
+                if all(event.is_set() for event in started): break
+                await asyncio.sleep(.005)
+            assert all(event.is_set() for event in started)
+            if route == 'active': call = markets.active_crypto_trades(exchange='all', limit=50, symbol=None)
+            elif route == 'history':
+                call = trade_history.trade_history(symbol=None,timeframe=None,exchange='all',direction=None,status=None,result=None,date_from=None,date_to=None,page=1,limit=20,sort='desc')
+            elif route == 'detail': call = trade_history.trade_history_detail(1)
+            else: call = trade_history.trade_stats()
+            await asyncio.wait_for(call, .25)
+            assert not any(job.done() for job in jobs)
+        finally:
+            release.set()
+            await asyncio.gather(*jobs)
+    asyncio.run(scenario())

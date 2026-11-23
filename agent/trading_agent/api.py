@@ -26,7 +26,7 @@ PERFORMANCE_KEY = re.compile(
 
 def without_performance(value):
     if isinstance(value, dict):
-        return {k: without_performance(v) for k, v in value.items() if k in {'take_profit_1', 'take_profit_2'} or not PERFORMANCE_KEY.search(k)}
+        return {k: without_performance(v) for k, v in value.items() if k in {'take_profit_1', 'take_profit_2', 'candle_count'} or not PERFORMANCE_KEY.search(k)}
     if isinstance(value, list):
         return [without_performance(v) for v in value]
     return value
@@ -74,13 +74,13 @@ class SwiftChartAPI:
                 except (httpx.HTTPError, ValueError) as exc:
                     raise APIUnavailable('SwiftChart data is temporarily unavailable') from None
 
-    async def get(self, path, **params):
+    async def get(self, path, *, max_age=None, **params):
         if not re.fullmatch(r'/[A-Za-z0-9_/-]+', path) or '..' in path:
             raise ValueError('Invalid read-only API path')
         params = {k: v for k, v in params.items() if v is not None}
         key = (path, json.dumps(params, sort_keys=True))
         cached = self._cache.get(key)
-        if cached and monotonic() - cached[0] < self.ttl:
+        if cached and monotonic() - cached[0] < min(self.ttl, self.ttl if max_age is None else max_age):
             return deepcopy(cached[1])
         task = self._pending.get(key)
         if task is None:

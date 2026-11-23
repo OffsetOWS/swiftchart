@@ -34,6 +34,15 @@ def payload(data):
     return {'schema_version': 'agent-v1', 'data': data, 'observed_at': datetime.now(UTC).isoformat(), 'source': 'canonical-test-api'}
 
 
+def display_facts(price='123.456789'):
+    return {'price': price, 'line_options': [
+        ['SOLUSDT · 4H · downward bias · no active signal'],
+        [f'Price: {price}. Trend: downward. Higher timeframe: sideways.'],
+        ['Support: 120.111–121.222 at or below price; resistance: none confirmed above price.'],
+        ['Now: Wait for a confirmed signal.'],
+        ['Data: 2026-11-20 20:00 UTC. Not financial advice.']]}
+
+
 def transport(handler):
     async def process(request):
         assert request.method == 'GET'
@@ -158,7 +167,7 @@ def test_performance_questions_never_invoke_tools_or_models(tmp_path, message):
             raise AssertionError('No external dependency should be used')
     service = TradingAgentService(settings(tmp_path), tools=Never(), orchestrator=Never(), grok=Never())
     answer = run(service.handle_message(chat_id=1, user_id=42, text=message))
-    assert 'unavailable' in answer
+    assert answer == "I don't share performance stats. Ask me about a specific coin or signal."
 
 
 def test_denied_user_does_not_touch_api_or_models(tmp_path):
@@ -169,7 +178,7 @@ def test_denied_user_does_not_touch_api_or_models(tmp_path):
     assert run(service.handle_message(chat_id=1, user_id=99, text='BTC price')) == 'This trading-agent bot is private.'
 
 
-def test_100_parallel_answers_preserve_api_facts_and_do_not_invoke_models(tmp_path):
+def test_100_parallel_answers_coalesce_the_model_and_preserve_api_facts(tmp_path):
     async def check():
         calls = []
         async def serve(request):
@@ -177,15 +186,24 @@ def test_100_parallel_answers_preserve_api_facts_and_do_not_invoke_models(tmp_pa
             if request.url.path.endswith('/markets'):
                 return {'crypto': [{'symbol':'SOLUSDT', 'base_asset':'SOL'}], 'forex':[]}
             return {'symbol':'SOLUSDT', 'current_price':123.456789, 'setup_status':'NO_PUBLISHED_SIGNAL',
-                    'support_zones':[{'lower':120.111,'upper':121.222}], 'signals':[]}
+                    'support_zones':[{'lower':120.111,'upper':121.222}], 'signals':[], 'reply':display_facts()}
         api = api_for(serve)
         tools = SwiftChartReadOnlyTools(api=api, settings=settings(tmp_path))
+        class Model:
+            calls=0
+            async def respond(self, **kwargs):
+                self.calls+=1
+                assert kwargs['history']==[] and kwargs['current_context'] is None
+                await asyncio.sleep(0.01)
+                facts=json.loads(kwargs['smart_context'].split(': ',1)[1])
+                return {'final_response':'\n'.join(row[0] for row in facts['line_options'])}
         class Never:
-            def __getattr__(self, name):
-                raise AssertionError('Factual fast path must not request a model or Grok')
-        service = TradingAgentService(settings(tmp_path), tools=tools, orchestrator=Never(), grok=Never())
-        answers = await asyncio.gather(*(service.handle_message(chat_id=i, user_id=42, text='SOL levels') for i in range(100)))
-        assert all('123.456789' in a and '120.111–121.222' in a and 'NO_PUBLISHED_SIGNAL' in a for a in answers)
+            async def fetch(self,text):raise AssertionError('Factual questions must not request Grok')
+        model=Model()
+        service = TradingAgentService(settings(tmp_path, allowed_user_ids=frozenset(range(1,101))), tools=tools, orchestrator=model, grok=Never())
+        answers = await asyncio.gather(*(service.handle_message(chat_id=i, user_id=i+1, text='SOL levels') for i in range(100)))
+        assert all('123.456789' in a and '120.111–121.222' in a and 'no active signal' in a and len(a.splitlines())==5 for a in answers)
+        assert model.calls==1
         assert len(calls) == 2
         await api.close()
     run(check())
@@ -260,7 +278,7 @@ def test_detailed_analysis_uses_hermes_with_api_context_but_never_grok_or_model_
         async def serve(request):
             if request.url.path.endswith('/markets'):
                 return {'crypto':[{'symbol':'SOLUSDT','base_asset':'SOL'}],'forex':[]}
-            return {'symbol':'SOLUSDT','current_price':123.4,'support_zones':[{'lower':120,'upper':121}],'setup_status':'NO_PUBLISHED_SIGNAL','signals':[]}
+            return {'symbol':'SOLUSDT','current_price':123.4,'support_zones':[{'lower':120,'upper':121}],'setup_status':'NO_PUBLISHED_SIGNAL','signals':[], 'reply':display_facts('123.4')}
         api=api_for(serve)
         tools=SwiftChartReadOnlyTools(api=api,settings=settings(tmp_path))
         class Model:
@@ -314,7 +332,7 @@ def test_grok_timeout_is_bounded_and_does_not_raise(tmp_path):
     def factory(**kwargs):return httpx.AsyncClient(transport=httpx.MockTransport(handle),**kwargs)
     client=GrokContextClient(settings(tmp_path),client_factory=factory)
     assert run(client.fetch('latest news')) is None
-    assert len(calls)==2
+    assert len(calls)==1
 
 
 def test_database_guard_rejects_real_sqlite_including_memory(tmp_path):
@@ -342,7 +360,7 @@ assert not Path('forbidden.db').exists()
 
 def test_bot_warms_hermes_off_event_loop_before_polling_commands():
     import threading
-    from telegram_bot.main import post_init
+    from telegram_bot.main import post_init, post_shutdown
     from telegram_bot.handlers import SERVICE_KEY
     observed=[]
     main_thread=threading.get_ident()
@@ -352,11 +370,16 @@ def test_bot_warms_hermes_off_event_loop_before_polling_commands():
             observed.append('warm')
     class Bot:
         async def set_my_commands(self,commands):
-            assert observed==['warm']
+            assert observed==['warm','provider']
             observed.append('commands')
-    application=SimpleNamespace(bot_data={SERVICE_KEY:SimpleNamespace(orchestrator=Orchestrator())},bot=Bot())
-    asyncio.run(post_init(application))
-    assert observed==['warm','commands']
+    async def warm_up(): observed.append('provider')
+    application=SimpleNamespace(bot_data={SERVICE_KEY:SimpleNamespace(orchestrator=Orchestrator(),warm_up=warm_up)},bot=Bot())
+    async def check():
+        await post_init(application)
+        assert 'alert_worker' in application.bot_data
+        await post_shutdown(application)
+    asyncio.run(check())
+    assert observed==['warm','provider','commands']
 
 
 def test_managed_hermes_home_pins_context_without_network_discovery(tmp_path,monkeypatch):

@@ -39,7 +39,7 @@ def test_release_cli_refuses_mutation_without_approval(tmp_path):
 
 def test_runtime_env_must_be_private_non_placeholder_and_have_workload_auth(tmp_path):
     path=tmp_path/'runtime.env'
-    path.write_text('TRADING_AGENT_TELEGRAM_BOT_TOKEN=test-token\nTRADING_AGENT_ALLOWED_USER_IDS=42\nTRADING_AGENT_AWS_REGION=selected-region\nTRADING_AGENT_BEDROCK_MODEL_ID=configured-model\n')
+    path.write_text('TRADING_AGENT_TELEGRAM_BOT_TOKEN=test-token\nTRADING_AGENT_ALLOWED_USER_IDS=42\nTRADING_AGENT_WRITER_PROVIDER=bedrock\nTRADING_AGENT_AWS_REGION=selected-region\nTRADING_AGENT_BEDROCK_MODEL_ID=configured-model\n')
     path.chmod(0o644)
     with pytest.raises(ValueError,match='private'):
         load_env(path)
@@ -112,3 +112,15 @@ def test_api_readiness_wait_fails_at_deadline_without_restarting(monkeypatch):
     monkeypatch.setattr(release,'invoke',lambda *a:pytest.fail('Readiness must not restart processes'))
     with pytest.raises(ValueError,match='readiness deadline'):
         release.wait_api_ready()
+
+
+def test_xai_release_uses_existing_key_without_requiring_or_reading_aws_identity(tmp_path, monkeypatch):
+    from scripts import agent_vps_release as release
+    path=tmp_path/'runtime.env'
+    path.write_text('TRADING_AGENT_TELEGRAM_BOT_TOKEN=test-token\nTRADING_AGENT_ALLOWED_USER_IDS=42\n')
+    path.chmod(0o600)
+    with pytest.raises(ValueError, match='XAI_API_KEY'):
+        load_env(path)
+    path.write_text(path.read_text()+'XAI_API_KEY=test-xai-key\n')
+    monkeypatch.setattr(release,'role_credentials',lambda _:pytest.fail('Disabled fallback must not read AWS credentials'))
+    assert load_env(path)['XAI_API_KEY']=='test-xai-key'

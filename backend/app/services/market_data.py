@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
+from contextlib import contextmanager
+import heapq
+import itertools
 import fcntl
 import logging
 import time
@@ -17,7 +21,63 @@ logger = logging.getLogger(__name__)
 _candle_cache: dict[tuple[str, str, str, int], tuple[float, pd.DataFrame]] = {}
 _market_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _locks: dict[str, asyncio.Lock] = {}
-_candle_semaphores: dict[str, asyncio.Semaphore] = {}
+_candle_semaphores: dict[str, CandleSlots] = {}
+_interactive = ContextVar('interactive_candles', default=False)
+
+
+@contextmanager
+def interactive_candles():
+    token = _interactive.set(True)
+    try:
+        yield
+    finally:
+        _interactive.reset(token)
+
+
+class CandleSlots:
+    """Preserve provider concurrency/pacing; interactive reads avoid scan queues.
+
+    After three interactive admissions, an already waiting scanner gets a turn.
+    Cancellation never consumes a slot.
+    """
+    def __init__(self, limit):
+        self.limit, self.used, self.streak = limit, 0, 0
+        self.waiters = []
+        self.sequence = itertools.count()
+
+    async def __aenter__(self):
+        future = asyncio.get_running_loop().create_future()
+        heapq.heappush(self.waiters, (0 if _interactive.get() else 1, next(self.sequence), future))
+        self._admit()
+        try:
+            await future
+        except BaseException:
+            if future.done() and not future.cancelled():
+                self.used -= 1
+            else:
+                future.cancel()
+            self._admit()
+            raise
+        return self
+
+    async def __aexit__(self, *_):
+        self.used -= 1
+        self._admit()
+
+    def _admit(self):
+        self.waiters = [row for row in self.waiters if not row[2].cancelled()]
+        heapq.heapify(self.waiters)
+        while self.used < self.limit and self.waiters:
+            background = next((row for row in sorted(self.waiters) if row[0] == 1), None)
+            if self.streak >= 3 and background:
+                self.waiters.remove(background)
+                heapq.heapify(self.waiters)
+                priority, _, future = background
+            else:
+                priority, _, future = heapq.heappop(self.waiters)
+            self.streak = self.streak + 1 if priority == 0 else 0
+            self.used += 1
+            future.set_result(None)
 
 
 def _lock(name: str) -> asyncio.Lock:
@@ -26,11 +86,11 @@ def _lock(name: str) -> asyncio.Lock:
     return _locks[name]
 
 
-def _candle_semaphore(exchange: str) -> asyncio.Semaphore:
+def _candle_semaphore(exchange: str) -> CandleSlots:
     normalized = exchange.lower()
     if normalized not in _candle_semaphores:
         limit = get_settings().hyperliquid_candle_concurrency if normalized == "hyperliquid" else 8
-        _candle_semaphores[normalized] = asyncio.Semaphore(limit)
+        _candle_semaphores[normalized] = CandleSlots(limit)
     return _candle_semaphores[normalized]
 
 
@@ -43,7 +103,14 @@ async def _pace_candle_request(exchange: str) -> None:
         return
     lock_path = "/tmp/swiftchart_hyperliquid_candle_pace.lock"
     with open(lock_path, "a+", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        # Another process may hold this lock while pacing. A blocking flock
+        # here freezes the API event loop, including /health.
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                await asyncio.sleep(0.01)
         lock_file.seek(0)
         raw = lock_file.read().strip()
         try:
@@ -87,6 +154,16 @@ async def _fetch_candles_with_retries(exchange: str, symbol: str, timeframe: str
     attempts = settings.hyperliquid_candle_fetch_attempts if exchange == "hyperliquid" else 3
     base_delay = settings.hyperliquid_candle_fetch_backoff_seconds if exchange == "hyperliquid" else 0.35
     last_error: Exception | None = None
+    provider_symbol = symbol
+    if exchange == 'hyperliquid':
+        # Normalised catalogue symbols are uppercase; provider identifiers such
+        # as kPEPE are case-sensitive. Resolve the original identifier once.
+        try:
+            catalogue = await get_markets_cached(exchange)
+            provider_symbol = next((row.get('exchange_symbol', row['symbol']) for row in catalogue
+                                    if row['symbol'].upper() == symbol.upper()), symbol)
+        except Exception:
+            pass
     for attempt in range(1, attempts + 1):
         try:
             async with _candle_semaphore(exchange):
@@ -94,7 +171,7 @@ async def _fetch_candles_with_retries(exchange: str, symbol: str, timeframe: str
                 from datetime import UTC, datetime
                 from app.services.tracking_rules import timeframe_duration
                 requested_at = datetime.now(UTC)
-                df = await get_exchange(exchange).get_candles(symbol, timeframe, limit)
+                df = await get_exchange(exchange).get_candles(provider_symbol, timeframe, limit)
                 step = timeframe_duration(timeframe)
                 df = df.copy()
                 df["complete"] = [(value.to_pydatetime() if hasattr(value, "to_pydatetime") else value) + step <= requested_at for value in df["timestamp"]]
@@ -168,3 +245,15 @@ async def get_candles_cached(exchange: str, symbol: str, timeframe: str, limit: 
         df = await _fetch_candles_with_retries(normalized_exchange, normalized_symbol, normalized_timeframe, int(limit))
         _candle_cache[key] = (monotonic(), df.copy())
         return df
+
+
+def read_cached_candles(exchange, symbol, timeframe, limit):
+    """Peek only: fast context reads never queue new provider requests."""
+    now = monotonic()
+    candidates = [(stamp, frame) for (venue, asset, interval, _), (stamp, frame) in _candle_cache.items()
+                  if (venue, asset, interval) == (exchange.lower(), symbol.upper(), timeframe.lower())
+                  and now-stamp < candle_ttl(timeframe) and len(frame) >= limit]
+    if not candidates:
+        return None
+    _, frame = max(candidates, key=lambda item: item[0])
+    return frame.tail(limit).copy()

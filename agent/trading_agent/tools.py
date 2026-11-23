@@ -63,7 +63,7 @@ class SwiftChartReadOnlyTools:
         if not data.get('crypto') and market_type != 'forex':
             from trading_agent.api import APIUnavailable
             raise APIUnavailable('SwiftChart crypto coverage is temporarily unavailable')
-        covered = ', '.join(item['symbol'] for kind in ('crypto', 'forex') for item in data.get(kind, []))
+        covered = ', '.join(dict.fromkeys(item['symbol'] for kind in ('crypto', 'forex') for item in data.get(kind, [])))
         raise UnsupportedMarket(f'{value or "That symbol"} is not covered. Supported symbols: {covered or "temporarily unavailable"}.')
 
     async def scan_crypto(self, args):
@@ -84,7 +84,21 @@ class SwiftChartReadOnlyTools:
     async def get_market_snapshot(self, args):
         kind, symbol = await self.resolve(args.get('symbol'), args.get('market_type'))
         return await self.api.get(f'/snapshot/{symbol}', market_type=kind,
-                                  timeframe=args.get('timeframe', '1H' if kind == 'forex' else '4h'))
+                                  timeframe=args.get('timeframe', '1H' if kind == 'forex' else '4h'), detail=args.get('detail', False))
+
+    async def get_chart(self, args):
+        kind, symbol = await self.resolve(args.get('symbol'), args.get('market_type'))
+        return await self.api.get(f'/chart/{symbol}', market_type=kind, timeframe=args.get('timeframe', '4h'))
+
+    async def get_prices(self, args):
+        return await self.api.get('/prices', max_age=3, market_type=args.get('market_type', 'crypto'), symbols=','.join(args['symbols']))
+
+    async def get_signal_context(self, args):
+        kind = args.get('market_type', 'crypto')
+        identity = str(args['signal_id'])
+        if kind not in ('crypto', 'forex') or not re.fullmatch(r'[A-Za-z0-9_-]{1,60}', identity):
+            raise ValueError('Invalid signal link')
+        return await self.api.get(f'/signal-context/{kind}/{identity}')
 
     async def get_currency_strength(self, args):
         return await self.api.get('/currency-strength', horizon=args.get('horizon', '24H'))

@@ -65,6 +65,17 @@ class TradingAgentSettings:
 
     api_base_url: str = "http://127.0.0.1:8000"
     api_token: str = ""
+    writer_provider: str = 'xai'
+    writer_default_model: str = 'grok-4.20-0309-non-reasoning'
+    writer_detail_model: str = 'grok-4.3'
+    writer_detail_reasoning_effort: str = 'none'
+    detail_response_tokens: int = 1024
+    bedrock_fallback_enabled: bool = False
+    daily_question_limit: int = 30
+    daily_limit_timezone: str = 'Africa/Lagos'
+    news_cache_seconds: float = 900.0
+    news_reasoning_effort: str = 'low'
+    x_search_post_limit: int = 8
 
     @classmethod
     def from_env(cls) -> "TradingAgentSettings":
@@ -79,6 +90,17 @@ class TradingAgentSettings:
             endpoint = f"https://bedrock-runtime.{aws_region}.amazonaws.com"
         hermes_path = os.getenv("HERMES_AGENT_PATH", "").strip()
         return cls(
+            writer_provider=os.getenv('TRADING_AGENT_WRITER_PROVIDER', 'xai').strip().lower(),
+            writer_default_model=os.getenv('TRADING_AGENT_WRITER_DEFAULT_MODEL', 'grok-4.20-0309-non-reasoning').strip(),
+            writer_detail_model=os.getenv('TRADING_AGENT_WRITER_DETAIL_MODEL', 'grok-4.3').strip(),
+            writer_detail_reasoning_effort=os.getenv('TRADING_AGENT_WRITER_DETAIL_REASONING_EFFORT', 'none').strip(),
+            detail_response_tokens=_positive_int('TRADING_AGENT_DETAIL_RESPONSE_TOKENS', 1024),
+            bedrock_fallback_enabled=os.getenv('TRADING_AGENT_BEDROCK_FALLBACK_ENABLED', 'false').lower() == 'true',
+            daily_question_limit=_positive_int('TRADING_AGENT_DAILY_QUESTION_LIMIT', 30),
+            daily_limit_timezone=os.getenv('TRADING_AGENT_DAILY_LIMIT_TIMEZONE', 'Africa/Lagos'),
+            news_cache_seconds=_positive_float('TRADING_AGENT_NEWS_CACHE_SECONDS', 900.0),
+            news_reasoning_effort=os.getenv('TRADING_AGENT_NEWS_REASONING_EFFORT', 'low').strip(),
+            x_search_post_limit=min(8, _positive_int('TRADING_AGENT_X_SEARCH_POST_LIMIT', 8)),
             api_base_url=os.getenv("SWIFTCHART_API_BASE_URL", "http://127.0.0.1:8000"),
             api_token=os.getenv("AGENT_INTERNAL_API_TOKEN", ""),
             telegram_bot_token=os.getenv("TRADING_AGENT_TELEGRAM_BOT_TOKEN", "").strip(),
@@ -122,8 +144,14 @@ class TradingAgentSettings:
                 "Configure TRADING_AGENT_ALLOWED_USER_IDS or TRADING_AGENT_ALLOWED_CHAT_IDS; "
                 "the trading-agent bot denies access by default."
             )
-        if not self.aws_region or not self.bedrock_model_id:
-            raise RuntimeError("AWS region and TRADING_AGENT_BEDROCK_MODEL_ID are required.")
+        if self.writer_provider not in {'xai', 'bedrock'}:
+            raise RuntimeError('TRADING_AGENT_WRITER_PROVIDER must be xai or bedrock.')
+        if self.writer_provider == 'xai' and (not self.xai_api_key or not self.writer_default_model or not self.writer_detail_model):
+            raise RuntimeError('XAI_API_KEY and Grok writer models are required.')
+        if (self.writer_provider == 'bedrock' or self.bedrock_fallback_enabled) and (not self.aws_region or not self.bedrock_model_id):
+            raise RuntimeError('AWS region and TRADING_AGENT_BEDROCK_MODEL_ID are required for enabled Bedrock.')
+        from zoneinfo import ZoneInfo
+        ZoneInfo(self.daily_limit_timezone)
 
     def is_authorized(self, *, user_id: int | None, chat_id: int | None) -> bool:
         return bool(

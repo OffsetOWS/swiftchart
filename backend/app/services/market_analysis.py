@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.services.crypto_work import run_crypto_work
 from app.models.schemas import AnalysisResponse, RiskSettings
 from app.services.liquidity_filter import skip_low_volume_market
-from app.services.market_data import get_candles_cached, get_markets_cached
+from app.services.market_data import get_candles_cached, get_markets_cached, read_cached_candles
 from app.services.scanner import selected_exchanges as scan_selected_exchanges
 from app.strategy.market_regime import regime_score_from_dataframe
 from app.strategy.trade_ideas import analyze_dataframe
@@ -84,6 +84,7 @@ async def analyze_market_read_only(
     timeframe: str,
     risk: RiskSettings,
     supplemental_timeout_seconds: float | None = None,
+    cached_context_only: bool = False,
 ) -> AnalysisResponse:
     """Run SwiftChart's existing single-market analysis without persistence or delivery side effects."""
     from app.services.score_archive import EXTERNAL_CONTEXT
@@ -120,7 +121,16 @@ async def analyze_market_read_only(
                 return htf_dfs, regime_score
 
             try:
-                if supplemental_timeout_seconds is None:
+                if cached_context_only:
+                    htf_dfs = [frame for tf in higher_timeframes_for(timeframe)
+                               if (frame := read_cached_candles(current_exchange, selected_symbol, tf, 240)) is not None]
+                    scores = []
+                    for asset in ('BTCUSDT', 'ETHUSDT'):
+                        context = read_cached_candles(current_exchange, asset, timeframe, 260)
+                        if context is not None:
+                            scores.append(await run_crypto_work(regime_score_from_dataframe, context))
+                    regime_score = round(sum(scores)/len(scores), 1) if scores else None
+                elif supplemental_timeout_seconds is None:
                     htf_dfs, regime_score = await supplemental_data()
                 else:
                     async with asyncio.timeout(supplemental_timeout_seconds):
