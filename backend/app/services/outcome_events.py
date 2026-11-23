@@ -204,7 +204,9 @@ def claim(*, now=None, limit=100):
             ((now - timedelta(minutes=5)).isoformat(),),
         )
         candidates = c.execute(
-            """SELECT r.id AS recipient_id,e.*,o.chat_id,o.telegram_message_id AS reply_to_message_id,t.symbol,t.direction,t.setup_family
+            """SELECT r.id AS recipient_id,e.*,o.chat_id,o.telegram_message_id AS reply_to_message_id,
+          t.symbol,t.direction,t.setup_family,t.timeframe,t.price_decimals,t.entry_zone_low,t.entry_zone_high,
+          t.stop_loss,t.take_profit_1,t.take_profit_2,t.risk_reward
           FROM telegram_dispatch_event_recipients r JOIN telegram_dispatch_events e ON e.id=r.event_id
           JOIN telegram_dispatch_recipients o ON o.id=r.original_recipient_id
           JOIN telegram_dispatches d ON d.id=e.dispatch_id JOIN trade_ideas t ON t.id=d.trade_idea_id

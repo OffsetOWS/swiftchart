@@ -76,6 +76,7 @@ def _idea_from_row(row: dict) -> TradeIdea:
         history_created_at=_parse_dt(row.get("created_at")),
         tracking_deadline=__import__("app.services.crypto_exit_policy", fromlist=["deadline"]).deadline(row["created_at"],row["timeframe"]),
         market_volume_24h=row.get("market_volume_24h"),
+        price_decimals=row.get("price_decimals"),
         setup_score=row.get("setup_score"),
         setup_grade=row.get("setup_grade"),
         entry_zone=(float(row["entry_zone_low"]), float(row["entry_zone_high"])),

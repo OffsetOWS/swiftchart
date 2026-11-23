@@ -108,6 +108,8 @@ class Settings(BaseSettings):
     bounce_long_enabled: bool = False
     bounce_long_allow_chop: bool = False
     bounce_long_skip_rsi_filter: bool = False
+    bounce_long_market_filter: bool = False
+    bounce_long_market_filter_mode: str = "F1"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

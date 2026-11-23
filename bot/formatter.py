@@ -30,6 +30,19 @@ def fmt_zone(zone: tuple[float, float] | None) -> str:
     return f"{fmt(zone[0])} — {fmt(zone[1])}"
 
 
+def _format_reason_prices(reason: str, decimals: int | None) -> str:
+    """Format evidence levels using the same tick precision as the trade plan."""
+    if decimals is None:
+        return reason
+    import re
+
+    def replace(match):
+        value = float(match.group(0).replace(",", ""))
+        return f"{value:,.{decimals}f}"
+
+    return re.sub(r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w.])", replace, reason)
+
+
 def public_reason_summary(reason: str | None, max_sentences: int | None = None) -> str:
     if not reason:
         return "-"
@@ -39,7 +52,7 @@ def public_reason_summary(reason: str | None, max_sentences: int | None = None) 
         sentence = part.strip().rstrip(".")
         if not sentence:
             continue
-        if any(word in sentence.lower() for word in ("score", "grade", "confidence", "profit", "win rate", "performance", "streak", "expectancy")) or any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
+        if any(word in sentence.lower() for word in ("score", "grade", "confidence", "profit", "win rate", "performance", "streak", "expectancy", "downgraded", "atr")) or any(label in sentence for label in REMOVED_PUBLIC_FIELD_LABELS):
             continue
         cleaned_parts.append(sentence)
         if max_sentences is not None and len(cleaned_parts) >= max_sentences:
@@ -210,54 +223,100 @@ def alert_symbol(symbol: str) -> str:
 
 
 def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -> str:
-    from datetime import UTC,datetime
-    from app.services.crypto_exit_policy import deadline
-    when=idea.tracking_deadline or deadline(idea.history_created_at or datetime.now(UTC),idea.timeframe)
-    if idea.setup_family == "bounce_long":
-        return (
-            f"🔵 BOUNCE LONG — {alert_symbol(idea.symbol)} {idea.timeframe.upper()}\n\n"
-            f"{public_reason_summary(idea.reason, max_sentences=2)}\n\n"
-            f"Entry (limit): {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
-            f"TP: {fmt(idea.take_profit_1)}\n⏱ Short hold — 48-hour tracking window."
-        )
-    if idea.setup_family == "trend_continuation" and idea.direction == "Long":
-        return (
-            f"🟢 TREND LONG — {alert_symbol(idea.symbol)} {idea.timeframe.upper()}\n\n"
-            f"{public_reason_summary(idea.reason, max_sentences=2)}\n\n"
-            f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
-            f"TP1: {fmt(idea.take_profit_1)}\nTP2: {fmt(idea.take_profit_2)}\n"
-            f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
-        )
-    if idea.setup_family == "trend_continuation" and idea.direction == "Short":
-        return (
-            f"🔴 TREND SHORT — {alert_symbol(idea.symbol)} {idea.timeframe.upper()}\n\n"
-            f"{public_reason_summary(idea.reason, max_sentences=2)}\n\n"
-            f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
-            f"TP1: {fmt(idea.take_profit_1)}\nTP2: {fmt(idea.take_profit_2)}\n"
-            f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
-        )
-    return (
-        f"{alert_symbol(idea.symbol)} · {idea.timeframe.upper()} · {idea.direction.upper()}\n\n"
-        f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
-        f"TP1: {fmt(idea.take_profit_1)}\nTP2 (final target): {fmt(idea.take_profit_2)}\n\n"
-        "The trade closes after its 48-hour tracking window if neither the stop-loss nor the final target has been hit.\n"
-        f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
-    )
+    from html import escape
 
+    is_bounce = idea.setup_family == "bounce_long"
+    is_trend = idea.setup_family == "trend_continuation"
+    if is_bounce:
+        tag, color = "BOUNCE LONG", "🔵"
+        lead = "Counter-trend trade: a quick move back toward resistance."
+    elif is_trend and idea.direction == "Long":
+        tag, color = "TREND LONG", "🟢"
+        lead = "With-trend trade: the broader structure supports continuation higher."
+    elif is_trend and idea.direction == "Short":
+        tag, color = "TREND SHORT", "🔴"
+        lead = "With-trend trade: the broader structure keeps sellers in control."
+    else:
+        tag, color = idea.direction.upper(), ""
+        lead = "The signal follows the available market structure and confirmation."
+    decimals = idea.price_decimals
+    safe_symbol = escape(alert_symbol(idea.symbol), quote=False)
+    price_fmt = lambda value: fmt(value) if decimals is None else f"{value:,.{decimals}f}"
+    entry = (price_fmt(idea.entry_zone[0]) if idea.entry_zone[0] == idea.entry_zone[1]
+             else " — ".join(price_fmt(value) for value in idea.entry_zone))
+    stop, tp1, tp2 = price_fmt(idea.stop_loss), price_fmt(idea.take_profit_1), price_fmt(idea.take_profit_2)
+    why = public_reason_summary(idea.reason, max_sentences=5) if idea.reason else ""
+    why = escape(_format_reason_prices(why, decimals), quote=False)
+    if why == "-":
+        why = ""
+    regime_sentences = {
+        "TRENDING_DOWN": "The market is in a downtrend.",
+        "TRENDING_UP": "The market is in an uptrend.",
+        "RANGE_BOUND": "The market is ranging.",
+        "CHOP": "The market is choppy.",
+        "BREAKDOWN": "The market has broken below support.",
+        "BREAKOUT": "The market is breaking above resistance.",
+        "TRANSITION_TO_BEARISH": "The market is shifting toward a downtrend.",
+        "TRANSITION_TO_BULLISH": "The market is shifting toward an uptrend.",
+    }
+    regime_sentence = regime_sentences.get(str(idea.regime_type or "").upper(), "")
+    lower_why = why.lower()
+    if ((idea.regime_type == "TRENDING_DOWN" and "downtrend" in lower_why)
+            or (idea.regime_type == "TRENDING_UP" and "uptrend" in lower_why)
+            or (idea.regime_type == "RANGE_BOUND" and "ranging" in lower_why)):
+        regime_sentence = ""
+    htf = {"HTF_BEARISH": "The higher-timeframe bias is bearish.",
+           "HTF_BULLISH": "The higher-timeframe bias is bullish.",
+           "HTF_NEUTRAL": "The higher-timeframe bias is neutral."}.get(idea.higher_timeframe_bias, "")
+    if "higher-timeframe bias" in lower_why:
+        htf = ""
+    narrative = " ".join(part for part in (lead, why, regime_sentence, htf) if part)
+    if is_bounce and idea.entry_status == "WAIT_FOR_RETEST":
+        # The canonical Telegram outbox intentionally does not dispatch this
+        # state; this rendering remains accurate wherever a pending setup is shown.
+        return (f"{color} {tag} · {safe_symbol} · {idea.timeframe.upper()}\n\n"
+                f"{narrative}\n\nPending setup\nLimit entry: {entry}\nStop: {stop}\n"
+                "Valid for 6 candles. The alert is sent only after the retest fills.")
+    entry_mid = sum(idea.entry_zone) / 2
+    risk = abs(entry_mid - idea.stop_loss)
+    rr1 = abs((idea.take_profit_1 - entry_mid) / risk) if risk else idea.risk_reward_ratio
+    rr2 = abs((idea.take_profit_2 - entry_mid) / risk) if risk else idea.risk_reward_ratio
+    side = "below" if idea.direction == "Long" else "above"
+    if is_bounce:
+        plan = (f"Plan\nEntry: {entry} (limit retest filled)\nStop: {stop}\nTarget: {tp1} (TP1 and TP2, split 50/50)\n"
+                f"Risk/reward: 1 : {rr1:.1f}\n\nThe stop is hit if a {idea.timeframe.upper()} candle trades {side} {stop}. "
+                "As a counter-trend trade, the aim is the target, not a trend reversal. Expires in the 48-hour window.")
+    else:
+        plan = (f"Plan\nEntry: {entry}\nStop: {stop}\nTP1: {tp1} (50%) · TP2: {tp2} (remaining 50%)\n"
+                f"Risk/reward: 1 : {rr1:.1f} (TP1) · 1 : {rr2:.1f} (TP2)\n\n"
+                f"The stop is hit if a {idea.timeframe.upper()} candle trades {side} {stop}. Expires in the 48-hour window.")
+    heading = (f"{color} {tag} · {safe_symbol} · {idea.timeframe.upper()}" if is_bounce or is_trend
+               else f"{safe_symbol} · {idea.timeframe.upper()} · {tag}")
+    return f"{heading}\n\n{narrative}\n\n{plan}"
 
 def format_outcome_event(event: dict) -> str:
     from decimal import Decimal
+    from html import escape
     labels={"TP1":"TP1 hit — partial taken (50%).","TP2":"TP2 hit — final target reached.","STOP_LOSS":"Stop-loss hit.","TIME_EXIT":"48-hour tracking window ended — trade closed."}
-    price=format(Decimal(str(event["price"])),"f").rstrip("0").rstrip(".") if "." in str(event["price"]) else str(event["price"])
+    decimals = event.get("price_decimals")
+    price = (f"{float(event['price']):,.{int(decimals)}f}" if decimals is not None else
+             (format(Decimal(str(event["price"])),"f").rstrip("0").rstrip(".") if "." in str(event["price"]) else str(event["price"])))
+    entry = (float(event.get("entry_zone_low") or 0) + float(event.get("entry_zone_high") or 0)) / 2
+    stop = float(event.get("stop_loss") or 0)
+    risk = abs(entry - stop)
+    direction = str(event.get("direction") or "LONG").upper()
+    sign = 1 if direction == "LONG" else -1
+    gained = max(0.0, (float(event["price"]) - entry) * sign / risk) * float(event.get("quantity") or 1) if risk else 0.0
+    symbol = escape(alert_symbol(event["symbol"]), quote=False)
     if event.get("setup_family") == "bounce_long" and event["event_kind"] in {"TP1", "TP2"}:
         label = "TP1" if event["event_kind"] == "TP1" else "TP2"
-        return f"🔵 Bounce long on {alert_symbol(event['symbol'])} hit {label} ✅\nPrice: {price}"
+        return f"🔵 Bounce long {symbol} hit {label} ✅ +{gained:.1f}R\nPrice: {price}"
     if event.get("setup_family") == "trend_continuation" and event["event_kind"] in {"TP1", "TP2"}:
         label = "TP1" if event["event_kind"] == "TP1" else "TP2"
         side = str(event.get("direction") or "").upper()
         tag = "🟢 Trend long" if side == "LONG" else "🔴 Trend short"
-        return f"{tag} on {alert_symbol(event['symbol'])} hit {label} ✅\nPrice: {price}"
-    return f"{alert_symbol(event['symbol'])} · {event['direction']}\n{labels[event['event_kind']]}\nPrice: {price}"
+        return f"{tag} {symbol} hit {label} ✅ +{gained:.1f}R\nPrice: {price}"
+    return f"{symbol} · {escape(str(event['direction']), quote=False)}\n{labels[event['event_kind']]}\nPrice: {price}"
 
 
 def format_forex_alert(signal: dict) -> str:

@@ -1,5 +1,7 @@
 from app.config import get_settings
 import logging
+from decimal import Decimal
+import math
 
 import pandas as pd
 
@@ -21,6 +23,24 @@ from app.strategy.market_regime import detect_market_regime
 MIN_SETUP_SCORE = 65
 
 logger = logging.getLogger(__name__)
+
+
+def _price_decimals_for_signal(idea: TradeIdea, metadata: dict | None) -> int | None:
+    metadata = metadata or {}
+    tick = metadata.get("tick_size") or metadata.get("tickSize") or metadata.get("price_increment")
+    if tick:
+        try:
+            return max(0, min(12, -Decimal(str(tick)).normalize().as_tuple().exponent))
+        except Exception:
+            pass
+    if idea.exchange.lower() == "hyperliquid" and metadata.get("szDecimals") is not None:
+        price = abs(sum(idea.entry_zone) / 2)
+        if price <= 0:
+            return None
+        max_decimals = max(0, 6 - int(metadata["szDecimals"]))
+        significant_decimals = max(0, 4 - math.floor(math.log10(price)))
+        return min(max_decimals, significant_decimals)
+    return None
 
 
 def _rsi(close: pd.Series, period: int = 14) -> float:
@@ -298,29 +318,53 @@ def _signal_quality_control(
     }
 
 
-def _reason(regime: str, direction: str, sweep: LiquiditySweep | None, htf_bias: str, alignment: str) -> str:
+def _reason(
+    regime: str, direction: str, sweep: LiquiditySweep | None,
+    zone: Zone | None = None, vol_ok: bool = False, mom_ok: bool = False,
+) -> str:
+    """Build a plain-language note from the completed-candle evidence."""
     pieces = []
     if regime == "RANGE_BOUND":
-        pieces.append("Price is trading at a clean range extreme instead of the middle.")
+        pieces.append("Price is ranging, and this setup is forming near the edge of that range.")
     elif regime in {"TRENDING_UP", "TRENDING_DOWN"}:
-        pieces.append("Market structure favors trend-continuation pullbacks.")
+        pieces.append("Price is in an uptrend." if regime == "TRENDING_UP" else "Price is in a downtrend.")
     elif regime == "BREAKOUT":
-        pieces.append("Price is holding above resistance with continuation confirmation.")
+        pieces.append("Price has moved above prior resistance and is testing whether buyers can hold it.")
     elif regime == "BREAKDOWN":
-        pieces.append("Price is holding below support with continuation confirmation.")
+        pieces.append("Price has moved below prior support and sellers are testing continuation.")
     elif regime == "TRANSITION_TO_BEARISH":
-        pieces.append("Market structure is transitioning bearish and short confirmation is being tested.")
+        pieces.append("The market is shifting toward a downtrend, with sellers testing follow-through.")
     elif regime == "TRANSITION_TO_BULLISH":
-        pieces.append("Market structure is transitioning bullish and long confirmation is being tested.")
+        pieces.append("The market is shifting toward an uptrend, with buyers testing follow-through.")
 
-    if sweep:
-        pieces.append(
-            f"{direction} idea has a confirmed liquidity sweep/reclaim with quality score {sweep.sweep_quality_score or round(sweep.strength * 100, 1)}."
+    if zone is not None:
+        label = "prior support" if direction == "Long" else "prior resistance"
+        variants = (
+            (f"The latest pullback tested {label} between {zone.lower:g} and {zone.upper:g} and held."
+             if direction == "Long" else
+             f"The latest rally tested {label} between {zone.lower:g} and {zone.upper:g} and was rejected."),
+            (f"Price found buyers at {label} from {zone.lower:g} to {zone.upper:g}."
+             if direction == "Long" else
+             f"Price ran into {label} at {zone.lower:g}–{zone.upper:g} and closed back below it."),
         )
-    if alignment == "aligned":
-        pieces.append(f"Higher timeframe bias is aligned ({htf_bias}).")
-    elif alignment == "against":
-        pieces.append(f"Higher timeframe bias conflicts with this setup ({htf_bias}), so confidence is reduced.")
+        pieces.append(variants[int(abs(zone.lower) * 100) % 2])
+    if sweep:
+        swept_name = "support" if direction == "Long" else "resistance"
+        variants = (
+            f"Price traded through {swept_name} at {sweep.swept_level:g}, then reclaimed it near {sweep.reclaim_price:g}, flushing out late entries.",
+            f"A move beyond {swept_name} at {sweep.swept_level:g} was quickly reversed, with price back near {sweep.reclaim_price:g}; that weakens the breakout attempt.",
+        )
+        pieces.append(variants[int(abs(sweep.swept_level) * 100) % 2])
+    if vol_ok:
+        volume_variants = (("Volume backed the rejection.", "Selling increased as the rally failed at resistance.")
+                           if direction == "Short" else
+                           ("Volume backed the response from support.", "Trading activity expanded as buyers defended the level."))
+        pieces.append(volume_variants[int(abs(zone.lower if zone else 0) * 100) % 2])
+    if mom_ok:
+        momentum_variants = (("Momentum confirms the latest move.", "Price momentum continues to favor buyers.")
+                             if direction == "Long" else
+                             ("Downside momentum remains present.", "The latest momentum reading still favors sellers."))
+        pieces.append(momentum_variants[int(abs(zone.upper if zone else 0) * 100) % 2])
     return " ".join(pieces)
 
 
@@ -759,12 +803,11 @@ def _build_idea(
     size, risk_amount = _risk_size(settings, entry, stop)
     invalid_timeframe = timeframe.upper()
     invalid = f"Invalid if a {invalid_timeframe} candle closes {'below' if direction == 'Long' else 'above'} {round(stop, 6)}."
-    reason = _reason(regime, direction, sweep, htf_bias, str(parts["alignment"]))
+    reason = _reason(regime, direction, sweep, zone, vol_ok, mom_ok)
     if regime_note:
         reason = f"{reason} {regime_note}"
     if quality_reasons:
         reason = f"{reason} {' '.join(quality_reasons)} Entry Status: {entry_status}."
-    reason = f"{reason} Market Regime: {market_regime_data.label} ({market_regime_data.score:+.0f}); trade is {trend_alignment}; confidence adjustment {confidence_adjustment:+.0f}."
 
     signal_candle_time = df["timestamp"].iloc[-1]
     setup_family = setup_family_from_regime(regime)
@@ -1333,12 +1376,32 @@ def _analyze_dataframe_impl(
             regime=regime, market_regime=market_regime_data, settings=settings,
             resistances=resistances, four_hour_ema50=four_hour_ema50,
             short_active=any(i.direction == "Short" and i.strategy_decision == "TRADE" for i in ideas),
+            btc_market_context=df.attrs.get("btc_market_context"),
         )
     except Exception:
         logger.exception("bounce_long detector failed; preserving existing strategy outputs symbol=%s timeframe=%s", symbol, timeframe)
         bounce = None
     if bounce is not None:
         ideas.append(bounce)
+    market_metadata = df.attrs.get("market_metadata") or {}
+    btc_context = df.attrs.get("btc_market_context") or {}
+    btc_regime = str(btc_context.get("btc_4h_regime") or "").upper()
+    btc_sentence = {
+        "TRENDING_DOWN": "BTC is in a downtrend on the 4H, adding a broad-market headwind.",
+        "BREAKDOWN": "BTC has broken below support on the 4H, adding a broad-market headwind.",
+        "TRENDING_UP": "BTC is in an uptrend on the 4H, which supports the broader market.",
+        "BREAKOUT": "BTC is breaking above resistance on the 4H, which supports the broader market.",
+        "RANGE_BOUND": "BTC is ranging on the 4H, so its direction is not pressing against this setup.",
+        "CHOP": "BTC is moving choppily on the 4H, with no clear broad-market direction.",
+        "TRANSITION_TO_BULLISH": "BTC is shifting toward an uptrend on the 4H.",
+        "TRANSITION_TO_BEARISH": "BTC is shifting toward a downtrend on the 4H.",
+    }.get(btc_regime)
+    for idea in ideas:
+        if btc_sentence and idea.reason:
+            first, separator, rest = idea.reason.partition(". ")
+            idea.reason = f"{first}. {btc_sentence}" + (f" {rest}" if separator else "")
+        if idea.price_decimals is None:
+            idea.price_decimals = _price_decimals_for_signal(idea, market_metadata)
     warning = no_trade_reason if not ideas else None
 
     return AnalysisResponse(

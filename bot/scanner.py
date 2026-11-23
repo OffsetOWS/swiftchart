@@ -84,19 +84,31 @@ async def _get_alert_candles(exchange: str, symbol: str, timeframe: str, limit: 
 
 
 async def _btc_context(exchange: str) -> dict | None:
-    score_4h: float | None = None
-    score_1d: float | None = None
+    btc_4h = btc_1d = eth_4h = None
     try:
-        score_4h = regime_score_from_dataframe(await get_candles_cached(exchange, "BTCUSDT", "4h", 220))
+        btc_4h = await get_candles_cached(exchange, "BTCUSDT", "4h", 220)
     except Exception as exc:
         logger.info("Telegram BTC 4H context unavailable exchange=%s error=%s", exchange, exc)
     try:
-        score_1d = regime_score_from_dataframe(await get_candles_cached(exchange, "BTCUSDT", "1d", 220))
+        btc_1d = await get_candles_cached(exchange, "BTCUSDT", "1d", 220)
     except Exception as exc:
         logger.info("Telegram BTC 1D context unavailable exchange=%s error=%s", exchange, exc)
-    if score_4h is None and score_1d is None:
+    eth_4h = None
+    if get_settings().bounce_long_market_filter_mode.upper() == "F2":
+        try:
+            eth_4h = await get_candles_cached(exchange, "ETHUSDT", "4h", 220)
+        except Exception as exc:
+            logger.info("Telegram ETH 4H context unavailable exchange=%s error=%s", exchange, exc)
+    from app.strategy.bounce_market_filter import build_btc_market_context, completed_candles
+    if btc_4h is None or btc_1d is None:
         return None
-    return btc_regime_from_scores(score_4h, score_1d)
+    context = build_btc_market_context(
+        completed_candles(btc_4h, "4h"), completed_candles(btc_1d, "1d"),
+        completed_candles(eth_4h, "4h") if eth_4h is not None else None,
+    )
+    score_4h = regime_score_from_dataframe(completed_candles(btc_4h, "4h"))
+    score_1d = regime_score_from_dataframe(completed_candles(btc_1d, "1d"))
+    return {**btc_regime_from_scores(score_4h, score_1d), **context}
 
 
 async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[list[TradeIdea], str, dict]:
@@ -130,6 +142,8 @@ async def scan_top_ideas(timeframe: str, exchange: str | None = None) -> tuple[l
                 rejection_reasons["insufficient candles"] = rejection_reasons.get("insufficient candles", 0) + 1
                 continue
             df.attrs["market_metadata"] = market_metadata.get(symbol,{})
+            if btc_context is not None:
+                df.attrs["btc_market_context"] = btc_context
             analysis = analyze_dataframe(symbol, timeframe, selected_exchange, df, risk)
             for idea in analysis.trade_ideas: idea.market_volume_24h = perp_volume_24h(market_metadata.get(symbol,{}))
             from app.services.trade_history import save_signal_reviews

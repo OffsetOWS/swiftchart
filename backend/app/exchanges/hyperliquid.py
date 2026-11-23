@@ -81,6 +81,7 @@ class HyperliquidClient(ExchangeClient):
                     "quote_asset": "USDT",
                     "exchange": self.name,
                     "active": not item.get("isDelisted", False),
+                    "szDecimals": item.get("szDecimals"),
                     "volume": context.get("dayNtlVlm"),
                     "perpVolume24h": context.get("dayNtlVlm"),
                 }

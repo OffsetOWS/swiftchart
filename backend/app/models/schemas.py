@@ -137,6 +137,7 @@ class TradeIdea(BaseModel):
     warning: str = "Not financial advice. Manage risk."
     score_evaluation: dict | None = Field(default=None, exclude=True)
     market_volume_24h: float | None = None
+    price_decimals: int | None = None
     history_created_at: datetime | None = None
     tracking_deadline: datetime | None = None
     rank_score: float = 0

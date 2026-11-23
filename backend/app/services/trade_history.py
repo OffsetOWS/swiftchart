@@ -464,7 +464,7 @@ def _update_opportunity(
             executable_at = ?,
             production_rule_accepted = ?, strict_trend_short_eligible = ?,
             strict_trigger_type = ?, strict_confirmation_type = ?,
-            strict_trigger_candle_time = ?, strict_trigger_candle_completed = ?
+            strict_trigger_candle_time = ?, strict_trigger_candle_completed = ?, price_decimals = ?
         WHERE id = ?
         """,
         (
@@ -510,6 +510,7 @@ def _update_opportunity(
             idea.strict_confirmation_type,
             canonical_candle_time(idea.strict_trigger_candle_time),
             int(idea.strict_trigger_candle_completed) if idea.strict_trigger_candle_completed is not None else None,
+            idea.price_decimals,
             existing["id"],
         ),
     )
@@ -692,9 +693,9 @@ def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | No
                         entry_quality_reason, outcome_tracking_mode, v2_evaluated_at,
                         production_rule_accepted, strict_trend_short_eligible,
                         strict_trigger_type, strict_confirmation_type,
-                        strict_trigger_candle_time, strict_trigger_candle_completed
+                        strict_trigger_candle_time, strict_trigger_candle_completed, price_decimals
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         idea.symbol.upper(),
@@ -754,6 +755,7 @@ def save_trade_ideas(ideas: Iterable[TradeIdea], *, diagnostics: list[dict] | No
                         idea.strict_confirmation_type,
                         canonical_candle_time(idea.strict_trigger_candle_time),
                         int(idea.strict_trigger_candle_completed) if idea.strict_trigger_candle_completed is not None else None,
+                        idea.price_decimals,
                     ),
                 )
                 trade_id = int(cursor.lastrowid)

@@ -123,19 +123,22 @@ def test_bounce_tags_on_entry_and_existing_tp_outcome_path(monkeypatch):
     idea = _detect(monkeypatch, _hype_fixture())
     assert idea is not None
     bounce_message = format_trade_alert(idea)
-    assert bounce_message.startswith("🔵 BOUNCE LONG — HYPE 1H")
+    assert bounce_message.startswith("🔵 BOUNCE LONG · HYPE · 1H")
+    assert "Counter-trend" in bounce_message and "Plan" in bounce_message
+    assert "Price swept prior support" in bounce_message
     assert "85" not in bounce_message
     trend_long = idea.model_copy(update={"setup_family": "trend_continuation", "setup_score": 87.0})
     trend_long_message = format_trade_alert(trend_long)
-    assert trend_long_message.startswith("🟢 TREND LONG — HYPE 1H") and "87" not in trend_long_message
+    assert trend_long_message.startswith("🟢 TREND LONG · HYPE · 1H") and "87" not in trend_long_message
     trend_short = idea.model_copy(update={"setup_family": "trend_continuation", "direction": "Short"})
-    assert format_trade_alert(trend_short).startswith("🔴 TREND SHORT — HYPE 1H")
+    assert format_trade_alert(trend_short).startswith("🔴 TREND SHORT · HYPE · 1H")
     message = format_outcome_event({"setup_family": "bounce_long", "event_kind": "TP1",
-        "symbol": "HYPE", "direction": "LONG", "price": 64.5})
-    assert message.startswith("🔵 Bounce long on HYPE hit TP1 ✅")
+        "symbol": "HYPE", "direction": "LONG", "price": 64.5, "quantity": .5,
+        "entry_zone_low": 60.9, "entry_zone_high": 60.9, "stop_loss": 59.97})
+    assert message.startswith("🔵 Bounce long HYPE hit TP1 ✅ +1.9R")
     message = format_outcome_event({"setup_family": "bounce_long", "event_kind": "TP2",
         "symbol": "HYPE", "direction": "LONG", "price": 64.5})
-    assert message.startswith("🔵 Bounce long on HYPE hit TP2 ✅")
+    assert message.startswith("🔵 Bounce long HYPE hit TP2 ✅")
     trend_tp = format_outcome_event({"setup_family": "trend_continuation", "event_kind": "TP1",
         "symbol": "HYPE", "direction": "SHORT", "price": 64.5})
-    assert trend_tp.startswith("🔴 Trend short on HYPE hit TP1 ✅")
+    assert trend_tp.startswith("🔴 Trend short HYPE hit TP1 ✅")

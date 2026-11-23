@@ -57,10 +57,10 @@ def test_trade_alert_formatter_preserves_intentional_public_alert_fields():
     message = format_trade_alert(trade_idea)
 
     assert "LDO/USDT · 4H · SHORT" in message
-    for field in ("Entry: 0.34201", "Stop Loss: 0.352031", "TP1: 0.328189", "TP2 (final target): 0.315749", "48-hour", "Tracking close:"):
+    for field in ("Entry: 0.34201", "Stop: 0.352031", "TP1: 0.328189", "TP2: 0.315749", "48-hour"):
         assert field in message
     assert "Score:" not in message and "77/100" not in message
-    assert "%" not in message and "3.3R" not in message
+    assert "91%" not in message and "77/100" not in message
     removed_fields = [
         "Source:",
         "Market Regime:",

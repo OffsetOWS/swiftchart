@@ -225,6 +225,30 @@ async def _scan_candles(exchange: str, symbol: str, timeframe: str, limit: int, 
         raise
 
 
+async def _bounce_market_context(exchange: str, mode: str, stats: ScanFetchStats) -> dict:
+    """Fetch each BTC/ETH context frame once and share it for this scan."""
+    from app.strategy.bounce_market_filter import build_btc_market_context, completed_candles
+
+    selected_exchange = "hyperliquid" if normalize_exchange(exchange) == "all" else normalize_exchange(exchange)
+    frames: dict[tuple[str, str], pd.DataFrame] = {}
+    requested = [("BTCUSDT", "4h"), ("BTCUSDT", "1d")]
+    if str(mode).upper() == "F2":
+        requested.append(("ETHUSDT", "4h"))
+    async def fetch(symbol: str, timeframe: str):
+        try:
+            raw = await _scan_candles(selected_exchange, symbol, timeframe, 220, stats)
+            frames[(symbol, timeframe)] = completed_candles(raw, timeframe)
+        except Exception as exc:
+            logger.warning("Bounce market filter context unavailable symbol=%s timeframe=%s error=%s", symbol, timeframe, exc)
+            frames[(symbol, timeframe)] = pd.DataFrame()
+    await asyncio.gather(*(fetch(symbol, timeframe) for symbol, timeframe in requested))
+    return build_btc_market_context(
+        frames.get(("BTCUSDT", "4h"), pd.DataFrame()),
+        frames.get(("BTCUSDT", "1d"), pd.DataFrame()),
+        frames.get(("ETHUSDT", "4h")) if str(mode).upper() == "F2" else None,
+    )
+
+
 def btc_regime_from_scores(score_4h: float | None, score_1d: float | None) -> dict:
     scores = [score for score in (score_4h, score_1d) if score is not None]
     if not scores:
@@ -327,12 +351,14 @@ def _scan_context(candidates, timeframe):
     return snapshots, breadth, score
 
 
-def _analyze_with_scan_context(candidate, timeframe, risk, htf_dfs, global_score, breadth, market, snapshots):
+def _analyze_with_scan_context(candidate, timeframe, risk, htf_dfs, global_score, breadth, market, snapshots, btc_market_context=None):
     from app.services.score_archive import EXTERNAL_CONTEXT
     from app.services.liquidity_filter import perp_volume_24h
     token = EXTERNAL_CONTEXT.set(snapshots)
     try:
         df = candidate.candles
+        if btc_market_context is not None:
+            df.attrs["btc_market_context"] = btc_market_context
         analysis = analyze_dataframe(candidate.symbol, timeframe, candidate.exchange, df, risk, htf_dfs,
                                      global_regime_score=global_score, breadth_above_ma_pct=breadth)
         for idea in analysis.trade_ideas:
@@ -407,6 +433,12 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
         candidates = [candidate for candidate in candidates_raw if candidate is not None]
         candidates = sorted(candidates, key=lambda item: (item.distance_score, item.volume_quality), reverse=True)[:candidate_limit]
         external_context_snapshots, breadth_above_ma_pct, global_score = await run_crypto_work(_scan_context, candidates, timeframe)
+        settings = get_settings()
+        # This scan-scoped context is also used for signal wording. The market
+        # gate itself remains inert unless its explicit flag is enabled.
+        btc_market_context = await _bounce_market_context(
+            selected_exchange, settings.bounce_long_market_filter_mode, fetch_stats
+        )
         risk = _risk(timeframe)
 
         async def analyze_with_context(candidate: Candidate) -> tuple[list[TradeIdea], PendingSetup | None]:
@@ -425,7 +457,7 @@ async def run_scan(exchange: str = "hyperliquid", timeframe: str = "4h", *, forc
                     df.attrs["market_metadata"] = market_metadata
                     return await run_crypto_work(
                         _analyze_with_scan_context, candidate, timeframe, risk, htf_dfs,
-                        global_score, breadth_above_ma_pct, market_metadata, external_context_snapshots,
+                        global_score, breadth_above_ma_pct, market_metadata, external_context_snapshots, btc_market_context,
                     )
                 except Exception as exc:
                     logger.debug("Full scan skipped %s %s: %s", candidate.exchange, candidate.symbol, exc)

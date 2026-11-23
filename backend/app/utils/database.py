@@ -144,6 +144,7 @@ def init_db() -> None:
             "ALTER TABLE trade_ideas ADD COLUMN strict_confirmation_type TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_candle_time TEXT",
             "ALTER TABLE trade_ideas ADD COLUMN strict_trigger_candle_completed INTEGER",
+            "ALTER TABLE trade_ideas ADD COLUMN price_decimals INTEGER",
         ):
             try:
                 connection.execute(statement)

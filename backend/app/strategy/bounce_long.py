@@ -64,6 +64,7 @@ def detect_bounce_long(
     regime: str, market_regime: MarketRegimeSnapshot, settings: RiskSettings,
     resistances: list[Zone], four_hour_ema50: float | None = None,
     short_active: bool = False, as_of: datetime | None = None,
+    btc_market_context: dict | None = None,
 ) -> TradeIdea | None:
     """Detect completed sweep/reclaim/pivot/break and stage a six-bar limit retest."""
     if not {"timestamp", "open", "high", "low", "close"}.issubset(df.columns):
@@ -80,6 +81,10 @@ def detect_bounce_long(
     eligible_regimes = ELIGIBLE_REGIMES | ({"CHOP"} if app_settings.bounce_long_allow_chop else set())
     if not app_settings.bounce_long_enabled or regime not in eligible_regimes or short_active:
         return None
+    if app_settings.bounce_long_market_filter:
+        from app.strategy.bounce_market_filter import blocks_bounce_long
+        if blocks_bounce_long(app_settings.bounce_long_market_filter_mode, btc_market_context):
+            return None
     global _KILL_SWITCH_LOGGED
     try:
         from app.services.trade_history import bounce_long_kill_switch_tripped, has_active_short_signal
@@ -167,8 +172,10 @@ def detect_bounce_long(
                 entry_zone=(round(entry, 6), round(entry, 6)), stop_loss=round(stop, 6),
                 take_profit_1=round(target, 6), take_profit_2=round(target, 6),
                 risk_reward_ratio=round(rr, 2), reason=(
-                    f"Downtrend remains active. Price swept the {swing:g} low, reclaimed it, "
-                    f"held a higher low at {higher_low:g}, then closed above {bounce_high:g}."
+                    f"Price swept prior support at {swing:g} and printed a low of {sweep_low:g}, "
+                    f"then reclaimed {swing:g} with a close at {float(candles.close.iloc[reclaim_i]):g}. "
+                    f"Since then it held a higher low at {higher_low:g} and closed above the "
+                    f"{bounce_high:g} bounce high, suggesting buyers have taken short-term control."
                 ), confidence_score=85.0,
                 invalid_condition=f"Invalid if a {timeframe.upper()} candle closes below {stop:.6g}.",
                 rank_score=85.0, position_size_units=round(risk_amount / risk, 6),
