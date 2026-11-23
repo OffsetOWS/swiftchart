@@ -13,7 +13,8 @@ def make_idea(**updates):
         stop_loss=59.97, take_profit_1=65.32, take_profit_2=65.32,
         risk_reward_ratio=4.94, reason=("Price swept prior support at 59.71 and printed a low of 55.78, "
         "then reclaimed 59.71 with a close at 60.01. Since then it held a higher low at 60.22 "
-        "and closed above the 61.52 bounce high, suggesting buyers have taken short-term control."),
+        "and closed above the 61.52 bounce high, suggesting buyers have taken short-term control. "
+        "Stop anchor swing level: 60.22. Target basis: resistance."),
         confidence_score=85, setup_score=85, invalid_condition="", price_decimals=2,
         regime_type="TRENDING_DOWN", higher_timeframe_bias="HTF_BEARISH",
     )
@@ -45,15 +46,16 @@ def test_bounce_template_order_numbers_and_trade_management():
         "Price swept prior support at 59.71 and printed a low of 55.78, then reclaimed "
         "59.71 with a close at 60.01. After the reclaim, price held a higher low at 60.22 and closed "
         "above the 61.52 bounce high, suggesting buyers have taken short-term control. "
-        "BTC is in a downtrend on the 4H, adding a broad-market headwind.")))
+        "BTC is in a downtrend on the 4H, adding a broad-market headwind. "
+        "Stop anchor swing level: 60.22. Target basis: resistance.")))
     assert message == (
         "🔵 BOUNCE LONG · HYPE · 1H\n\n"
-        "Counter-trend long: a short-term recovery attempt toward resistance. "
-        "HYPE is in a downtrend on the 1H. Price swept prior support at 59.71 and printed a low of 55.78, then reclaimed "
+        "Counter-trend long. The higher-timeframe trend is bearish. HYPE is in a downtrend on the 1H. "
+        "Price swept prior support at 59.71 and printed a low of 55.78, then reclaimed "
         "59.71 with a close at 60.01. After the reclaim, price held a higher low at 60.22 and closed above the 61.52 bounce high, "
-        "suggesting buyers have taken short-term control. The higher-timeframe bias is bearish. "
+        "suggesting buyers have taken short-term control. "
         "BTC is in a downtrend on the 4H, a headwind for this long.\n\n"
-        "Plan\nEntry: 60.87 (limit retest filled)\nStop: 59.97 (below the higher low)\nTarget: 65.32\n"
+        "Plan\nEntry: 60.87 (limit retest filled)\nStop: 59.97 (below swing low at 60.22)\nTarget: 65.32 (resistance)\n"
         "Risk/reward: 1 : 4.9\n\nValid for 48 hours."
     )
     assert "85" not in message
@@ -68,13 +70,14 @@ def test_trend_short_rejects_internal_reason_and_uses_trade_zone_and_stop_reason
         take_profit_1=0.107043, take_profit_2=0.10475, price_decimals=5,
         reason=("Price is in a downtrend. The latest rally tested prior resistance between 0.10534 and 0.10608 and was rejected. "
                 "Signal is with the active market regime. Entry Status: READY. score=91. "
-                "logger.warning('raw reason field'). BTC is in a downtrend on the 4H, adding a broad-market headwind."),
+                "logger.warning('raw reason field'). Stop distance: 0.8 ATR above entry. "
+                "BTC is in a downtrend on the 4H, adding a broad-market headwind."),
         regime_type="TRENDING_DOWN", higher_timeframe_bias="HTF_BEARISH",
     )
     message = format_trade_alert(short)
     assert "0.10534" not in message and "0.10608" not in message
-    assert "Sellers kept pressure on price, and the short entry is placed near current price." in message
-    assert "Stop: 0.11144 (above recent price structure)" in message
+    assert "The trend structure is bearish, with lower highs and lower lows." in message
+    assert "Stop: 0.11144 (0.8 ATR above entry)" in message
     assert "a tailwind for this short" in message
     assert "Signal is with the active market regime" not in message
     assert "Entry Status" not in message and "score=91" not in message and "logger.warning" not in message
@@ -88,29 +91,63 @@ def test_short_fallback_reason_does_not_mislabel_scoring_support_as_rejected_res
 
     scoring_support = Zone(type="support", lower=0.10534, upper=0.10608, strength=.8, touches=4)
     reason = _reason("TRENDING_DOWN", "Short", None, scoring_support, True, False,
-                     entry_low=0.10959, entry_high=0.10991, stop=0.111437)
+                     entry_low=0.10959, entry_high=0.10991, stop=0.111437,
+                     trigger_sentence="Price is trading below the 21 EMA and below the 55 EMA.",
+                     stop_atr_multiple=0.8)
     assert "prior resistance" not in reason
-    assert "Sellers kept pressure on price" in reason
-    assert "Volume supported the selling pressure" in reason
+    assert "Price is trading below the 21 EMA" in reason
+    assert "Volume supported the bearish move" in reason
 
 
 def test_real_rejected_zone_drives_short_trigger_and_stop_explanation():
     short = make_idea(
         setup_family="trend_continuation", direction="Short", entry_zone=(3120, 3135),
         stop_loss=3185, take_profit_1=3010, take_profit_2=2940, price_decimals=0,
-        reason="The latest rally tested prior resistance between 3150 and 3180, then sellers rejected it.",
+        reason="The latest rally tested prior resistance between 3150 and 3180, then sellers rejected it. Stop anchor swing level: 3180.",
         regime_type="TRENDING_DOWN", higher_timeframe_bias="HTF_BEARISH",
     )
     message = format_trade_alert(short)
     assert "The latest rally tested prior resistance between 3,150 and 3,180" in message
-    assert "Stop: 3,185 (above the rejected zone)" in message
+    assert "Stop: 3,185 (above swing level 3,180)" in message
     assert "TP1: 3,010 (50%) · TP2: 2,940 (remaining 50%)" in message
+
+
+@pytest.mark.parametrize(
+    ("direction", "reason", "expected"),
+    [
+        ("Short", "Price rallied into resistance at 0.111 and was rejected.", "resistance at 0.111"),
+        ("Short", "Price retested broken support at 0.108 and failed to reclaim it.", "failed to reclaim"),
+        ("Short", "Price swept resistance at 0.111, then sellers rejected the move.", "swept resistance at 0.111"),
+        ("Short", "Price broke below support at 0.108.", "broke below support at 0.108"),
+        ("Long", "Price tested support at 0.108, and buyers defended support at 0.108.", "buyers defended support at 0.108"),
+        ("Long", "Price retested broken resistance at 0.111 and held above resistance at 0.111.", "retested broken resistance at 0.111"),
+        ("Long", "Price swept support at 0.108 and reclaimed support at 0.109.", "swept support at 0.108"),
+        ("Long", "Price reclaimed resistance at 0.111 and held above resistance at 0.111.", "reclaimed resistance at 0.111"),
+        ("Short", "Price is trading below the 21 EMA and below the 55 EMA.", "trading below the 21 EMA"),
+    ],
+)
+def test_every_trend_message_names_the_fired_trigger_or_structure_fallback(direction, reason, expected):
+    idea = make_idea(
+        setup_family="trend_continuation", direction=direction,
+        entry_zone=(0.109, 0.110) if direction == "Short" else (0.110, 0.111),
+        stop_loss=0.112 if direction == "Short" else 0.108,
+        take_profit_1=0.107 if direction == "Short" else 0.113,
+        take_profit_2=0.105 if direction == "Short" else 0.115,
+        reason=f"{reason} Stop distance: 1.0 ATR {'above' if direction == 'Short' else 'below'} entry.",
+        regime_type="TRENDING_DOWN" if direction == "Short" else "TRENDING_UP",
+        higher_timeframe_bias="HTF_BEARISH" if direction == "Short" else "HTF_BULLISH",
+        price_decimals=3,
+    )
+    message = format_trade_alert(idea)
+    assert expected in message
+    assert "short entry is placed near current price" not in message
 
 
 def test_trend_long_single_target_and_chop_label_are_honest():
     idea = make_idea(setup_family="trend_continuation", direction="Long", regime_type="CHOP",
                      market_regime="CHOP", higher_timeframe_bias="HTF_BULLISH",
-                     reason="The latest pullback tested prior support between 60 and 61, then buyers held it.")
+                     reason="The latest pullback tested prior support between 60 and 61, then buyers held it. "
+                     "Stop anchor swing level: 59.97. Target basis: resistance.")
     message = format_trade_alert(idea)
     assert "Long setup in a ranging market; this is not a clear trend trade." in message
     assert "HYPE is ranging on the 1H." in message
@@ -122,13 +159,13 @@ def test_trend_long_single_target_and_chop_label_are_honest():
 def test_missing_evidence_drops_cleanly_and_pending_waits_for_fill():
     from app.strategy.decision_engine import evaluate_strategy_decision
 
-    idea = make_idea(reason="", regime_type=None, higher_timeframe_bias="HTF_NEUTRAL",
+    idea = make_idea(reason="Stop anchor swing level: 60.22.", regime_type=None, higher_timeframe_bias="HTF_NEUTRAL",
                      entry_status="WAIT_FOR_RETEST")
     assert evaluate_strategy_decision(idea) == "WAIT_FOR_RETEST"
     message = format_trade_alert(idea)
-    assert "Counter-trend long:" in message
+    assert "Counter-trend long." in message
     assert "HYPE is in a" not in message
-    assert "Limit entry: 60.87\nStop: 59.97 (below the higher low)" in message
+    assert "Limit entry: 60.87\nStop: 59.97 (below swing low at 60.22)" in message
     assert "Valid for 6 candles. The alert is sent only after the retest fills." in message
     assert "Valid for 48 hours" not in message
     assert idea.entry_status != "READY" and idea.strategy_decision != "TRADE"

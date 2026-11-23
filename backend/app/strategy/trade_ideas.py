@@ -322,46 +322,21 @@ def _reason(
     regime: str, direction: str, sweep: LiquiditySweep | None,
     zone: Zone | None = None, vol_ok: bool = False, mom_ok: bool = False,
     entry_low: float | None = None, entry_high: float | None = None,
-    stop: float | None = None,
+    stop: float | None = None, trigger_sentence: str | None = None,
+    stop_swing_level: float | None = None,
+    stop_atr_multiple: float | None = None,
 ) -> str:
-    """Build controlled trigger and evidence sentences from computed fields."""
-    pieces = []
-    short_fallback = False
-    if sweep:
-        swept_name = "support" if direction == "Long" else "resistance"
-        pieces.append(
-            f"Price swept {swept_name} at {sweep.swept_level:g}, then reclaimed the level near {sweep.reclaim_price:g}."
-        )
-    elif zone is not None:
-        entry_mid = (entry_low + entry_high) / 2 if entry_low is not None and entry_high is not None else None
-        anchored_zone = (
-            entry_mid is None or stop is None
-            or (entry_mid <= zone.upper <= stop if direction == "Short"
-                else stop <= zone.lower <= entry_mid)
-        )
-        if direction == "Short" and not anchored_zone:
-            # The fallback continuation short is priced near current price; the
-            # support zone is a scoring input, not the rejected zone or stop anchor.
-            short_fallback = True
-            pieces.append("Sellers kept pressure on price, and the short entry is placed near current price.")
-        elif direction == "Short":
-            pieces.append(
-                f"The latest rally tested prior resistance between {zone.lower:g} and {zone.upper:g}, then sellers rejected it."
-            )
-        elif anchored_zone:
-            pieces.append(
-                f"The latest pullback tested prior support between {zone.lower:g} and {zone.upper:g}, then buyers held it."
-            )
-        else:
-            pieces.append("Buyers defended the current price area, and the long entry is positioned near support.")
+    """Build controlled trigger/evidence text and carry stop facts for the renderer."""
+    pieces = [trigger_sentence] if trigger_sentence else []
     if vol_ok:
-        pieces.append(
-            "Volume supported the selling pressure." if short_fallback
-            else "Volume backed the rejection." if direction == "Short"
-            else "Volume backed the response from support."
-        )
+        pieces.append("Volume supported the bearish move." if direction == "Short" else "Volume supported the bullish move.")
     if mom_ok:
         pieces.append("Downside momentum remains present." if direction == "Short" else "Price momentum continues to favor buyers.")
+    if stop_swing_level is not None:
+        pieces.append(f"Stop anchor swing level: {stop_swing_level:g}.")
+    elif stop_atr_multiple is not None:
+        side = "above" if direction == "Short" else "below"
+        pieces.append(f"Stop distance: {stop_atr_multiple:.1f} ATR {side} entry.")
     return " ".join(pieces)
 
 
@@ -675,6 +650,8 @@ def _build_idea(
     resistance: Zone | None,
     bullish_sweep: LiquiditySweep | None,
     bearish_sweep: LiquiditySweep | None,
+    trigger_sentence: str | None = None,
+    stop_swing_level: float | None = None,
 ) -> tuple[TradeIdea | None, SignalReview | None]:
     from app.services.score_archive import make_evidence
     entry = (entry_low + entry_high) / 2
@@ -800,7 +777,18 @@ def _build_idea(
     size, risk_amount = _risk_size(settings, entry, stop)
     invalid_timeframe = timeframe.upper()
     invalid = f"Invalid if a {invalid_timeframe} candle closes {'below' if direction == 'Long' else 'above'} {round(stop, 6)}."
-    reason = _reason(regime, direction, sweep, zone, vol_ok, mom_ok, entry_low, entry_high, stop)
+    if not trigger_sentence:
+        closes = df["close"].astype(float)
+        ema21 = float(closes.ewm(span=21, adjust=False).mean().iloc[-1])
+        ema55 = float(closes.ewm(span=55, adjust=False).mean().iloc[-1])
+        relation = lambda level: "above" if entry >= level else "below"
+        trigger_sentence = f"Price is trading {relation(ema21)} the 21 EMA and {relation(ema55)} the 55 EMA."
+    stop_atr_multiple = (abs(stop - entry) / average_true_range(df)
+                         if stop_swing_level is None and average_true_range(df) > 0 else None)
+    reason = _reason(
+        regime, direction, sweep, zone, vol_ok, mom_ok, entry_low, entry_high, stop,
+        trigger_sentence, stop_swing_level, stop_atr_multiple,
+    )
     if regime_note:
         reason = f"{reason} {regime_note}"
     if quality_reasons:
@@ -995,6 +983,37 @@ def build_trade_ideas(
     support_rejection = support is not None and float(last["low"]) <= support.upper + atr * 0.35 and price > support.upper
     short_trigger_ready = any([resistance_rejection, failed_reclaim, bearish_retest, bearish_sweep is not None, support_break])
     long_trigger_ready = any([support_rejection, bullish_retest, bullish_sweep is not None, resistance_reclaim])
+
+    def trigger_story(direction: str) -> str:
+        if direction == "Short":
+            if failed_reclaim and support is not None:
+                return f"Price retested broken support at {support.lower:g} and failed to reclaim it."
+            if bearish_retest and support is not None:
+                return f"Price retested broken support at {support.lower:g} and failed to reclaim it."
+            if resistance_rejection and resistance is not None:
+                return f"Price rallied into resistance at {resistance.lower:g} and was rejected."
+            if bearish_sweep is not None:
+                return f"Price swept resistance at {bearish_sweep.swept_level:g}, then sellers rejected the move."
+            if support_break and support is not None:
+                return f"Price broke below support at {support.lower:g}."
+        else:
+            if support_rejection and support is not None:
+                return f"Price tested support at {support.upper:g}, and buyers defended support at {support.upper:g}."
+            if bullish_retest and resistance is not None:
+                return f"Price retested broken resistance at {resistance.lower:g} and held above resistance at {resistance.lower:g}."
+            if bullish_sweep is not None:
+                return f"Price swept support at {bullish_sweep.swept_level:g} and reclaimed support at {bullish_sweep.reclaim_price:g}."
+            if resistance_reclaim and resistance is not None:
+                return f"Price reclaimed resistance at {resistance.upper:g} and held above resistance at {resistance.upper:g}."
+
+        closes = df["close"].astype(float)
+        ema21 = float(closes.ewm(span=21, adjust=False).mean().iloc[-1])
+        ema55 = float(closes.ewm(span=55, adjust=False).mean().iloc[-1])
+        relation = lambda level: "above" if price >= level else "below"
+        return f"Price is trading {relation(ema21)} the 21 EMA and {relation(ema55)} the 55 EMA."
+
+    short_trigger_sentence = trigger_story("Short")
+    long_trigger_sentence = trigger_story("Long")
     short_confirmation_ready = bearish_momentum or vol_ok or support_break
     long_confirmation_ready = bullish_momentum or vol_ok or resistance_reclaim
     normal_volatility = 0.002 <= atr / max(price, 1e-9) <= 0.12
@@ -1142,6 +1161,8 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    trigger_sentence=long_trigger_sentence,
+                    stop_swing_level=min(support.lower, sweep_low),
                 )
             )
         elif position is not None and position >= 0.65 and short_evidence_ready:
@@ -1171,6 +1192,8 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    trigger_sentence=short_trigger_sentence,
+                    stop_swing_level=max(resistance.upper, sweep_high),
                 )
             )
 
@@ -1204,6 +1227,8 @@ def build_trade_ideas(
                 resistance=resistance,
                 bullish_sweep=bullish_sweep,
                 bearish_sweep=bearish_sweep,
+                trigger_sentence=long_trigger_sentence,
+                stop_swing_level=support.lower,
             )
         )
 
@@ -1243,6 +1268,8 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    trigger_sentence=short_trigger_sentence,
+                    stop_swing_level=resistance.upper if resistance_rejection and resistance is not None else None,
                 )
             )
         else:
@@ -1281,6 +1308,8 @@ def build_trade_ideas(
                 resistance=resistance,
                 bullish_sweep=bullish_sweep,
                 bearish_sweep=bearish_sweep,
+                trigger_sentence=long_trigger_sentence,
+                stop_swing_level=resistance.lower,
             )
         )
 
@@ -1311,6 +1340,8 @@ def build_trade_ideas(
                     resistance=resistance,
                     bullish_sweep=bullish_sweep,
                     bearish_sweep=bearish_sweep,
+                    trigger_sentence=short_trigger_sentence,
+                    stop_swing_level=support.upper,
                 )
             )
         else:

@@ -249,7 +249,7 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     bullish = regime in {"TRENDING_UP", "BREAKOUT", "TRANSITION_TO_BULLISH"}
     ranging = regime in {"RANGE_BOUND", "CHOP"}
     if is_bounce:
-        lead = "Counter-trend long: a short-term recovery attempt toward resistance."
+        lead = "Counter-trend long."
     elif is_trend and ((is_long and bullish) or (not is_long and bearish)):
         lead = ("With-trend long: the broader structure favors buyers."
                 if is_long else "With-trend short: the broader structure favors sellers.")
@@ -274,14 +274,23 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     trigger_sentences: list[str] = []
     volume_present = momentum_present = False
     btc_regime = ""
+    stop_swing_level: float | None = None
+    stop_atr_multiple: float | None = None
+    target_basis = ""
     reason = str(idea.reason or "")
     reason_sentences = [part.strip() for part in reason.replace("\n", " ").split(". ") if part.strip()]
     for raw in reason_sentences:
         sentence = raw.rstrip(".")
         lower = sentence.lower()
         # Only these computed evidence templates can enter a public message.
-        if lower.startswith(("price swept support at ", "price swept resistance at ",
-                             "after the reclaim, price held a higher low at ")):
+        if lower.startswith((
+            "price swept support at ", "price swept resistance at ",
+            "after the reclaim, price held a higher low at ",
+            "price rallied into resistance at ", "price retested broken support at ",
+            "price broke below support at ", "price tested support at ",
+            "price retested broken resistance at ", "price reclaimed resistance at ",
+            "price is trading above the ", "price is trading below the ",
+        )):
             trigger_sentences.append(sentence + ".")
         elif lower.startswith("the latest rally tested prior resistance between "):
             import re
@@ -291,8 +300,6 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
                 entry_mid = sum(idea.entry_zone) / 2
                 if entry_mid <= zone_high <= idea.stop_loss:
                     trigger_sentences.append(sentence + ".")
-                else:
-                    trigger_sentences.append("Sellers kept pressure on price, and the short entry is placed near current price.")
         elif lower.startswith("the latest pullback tested prior support between "):
             import re
             levels = re.search(r"between\s+([\d,.]+)\s+and\s+([\d,.]+)", sentence, re.IGNORECASE)
@@ -301,13 +308,7 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
                 entry_mid = sum(idea.entry_zone) / 2
                 if idea.stop_loss <= zone_low <= entry_mid:
                     trigger_sentences.append(sentence + ".")
-                else:
-                    trigger_sentences.append("Buyers defended the current price area, and the long entry is positioned near support.")
-        elif lower.startswith("sellers kept pressure on price, and the short entry is placed near current price."):
-            trigger_sentences.append(sentence + ".")
-        elif lower.startswith("buyers defended the current price area, and the long entry is positioned near support."):
-            trigger_sentences.append(sentence + ".")
-        elif lower.startswith("volume backed "):
+        elif lower.startswith("volume "):
             volume_present = True
         elif lower.startswith(("downside momentum remains present", "price momentum continues to favor buyers")):
             momentum_present = True
@@ -325,6 +326,19 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
             btc_regime = "TRANSITION_TO_BEARISH"
         elif lower.startswith("btc is shifting toward an uptrend"):
             btc_regime = "TRANSITION_TO_BULLISH"
+        elif lower.startswith("stop anchor swing level: "):
+            import re
+            match = re.search(r"([\d,.]+)", sentence.split(":", 1)[1])
+            if match:
+                stop_swing_level = float(match.group(1).replace(",", ""))
+        elif lower.startswith("stop distance: "):
+            import re
+            match = re.search(r"([\d,.]+)\s+atr\s+(above|below)\s+entry", sentence, re.IGNORECASE)
+            if match:
+                stop_atr_multiple = float(match.group(1).replace(",", ""))
+        elif lower.startswith("target basis: "):
+            basis = sentence.split(":", 1)[1].strip().rstrip(".").lower()
+            target_basis = "4H EMA50" if basis == "4h ema50" else "resistance" if basis == "resistance" else ""
 
     # Bounce trigger text is a deterministic template with measured structure
     # fields. It is retained as two sentences in its trigger-story position.
@@ -336,18 +350,28 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
                 second = "After the reclaim, price held" + second[len("Since then it held"):]
             trigger_sentences = [first + "."] + ([second + "."] if second.lower().startswith("after the reclaim, price held a higher low at ") else [])
 
+    if is_trend and not trigger_sentences:
+        structure = str(idea.regime_structure or "").lower()
+        if "lower high" in structure or "lower low" in structure:
+            trigger_sentences.append("Price structure is forming lower highs and lower lows.")
+        elif "higher high" in structure or "higher low" in structure:
+            trigger_sentences.append("Price structure is forming higher highs and higher lows.")
+        elif bearish:
+            trigger_sentences.append("The trend structure is bearish, with lower highs and lower lows.")
+        elif bullish:
+            trigger_sentences.append("The trend structure is bullish, with higher highs and higher lows.")
+        elif ranging:
+            trigger_sentences.append("Price is ranging without a confirmed directional trigger.")
+
     evidence_bits = []
     if volume_present:
-        short_fallback = any("sellers kept pressure on price" in sentence.lower() for sentence in trigger_sentences)
-        evidence_bits.append("volume supported the selling pressure" if short_fallback else
-                             "volume backed the rejection" if not is_long else
-                             "volume backed the response from support")
+        evidence_bits.append("volume supported the bearish move" if not is_long else "volume supported the bullish move")
     if momentum_present:
         evidence_bits.append("downside momentum remains present" if not is_long else "momentum continues to favor buyers")
     htf_text = {"HTF_BEARISH": "the higher-timeframe bias is bearish",
                 "HTF_BULLISH": "the higher-timeframe bias is bullish",
                 "HTF_NEUTRAL": "the higher-timeframe bias is neutral"}.get(str(idea.higher_timeframe_bias or ""))
-    if htf_text and htf_text not in " ".join(evidence_bits):
+    if htf_text and htf_text not in " ".join(evidence_bits) and not is_bounce:
         evidence_bits.append(htf_text)
     if len(evidence_bits) == 1:
         evidence_sentence = evidence_bits[0].capitalize() + "."
@@ -381,14 +405,20 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     else:
         btc_sentence = ""
 
-    why = [lead, trend_line, *trigger_sentences, evidence_sentence, btc_sentence]
-    narrative = " ".join(escape(_format_reason_prices(part, decimals), quote=False)
+    bounce_htf = {"HTF_BEARISH": "The higher-timeframe trend is bearish.",
+                  "HTF_BULLISH": "The higher-timeframe trend is bullish.",
+                  "HTF_NEUTRAL": "The higher-timeframe trend is neutral."}.get(str(idea.higher_timeframe_bias or ""), "")
+    why = [lead, *( [bounce_htf] if is_bounce and bounce_htf else []), trend_line,
+           *trigger_sentences, evidence_sentence, btc_sentence]
+    narrative = " ".join(escape(part if " EMA" in part else _format_reason_prices(part, decimals), quote=False)
                          for part in why if part)
     if is_bounce and idea.entry_status == "WAIT_FOR_RETEST":
         # The canonical Telegram outbox intentionally does not dispatch this
         # state; this rendering remains accurate wherever a pending setup is shown.
+        pending_stop_reason = (f"below swing low at {price_fmt(stop_swing_level)}"
+                               if stop_swing_level is not None else "below the higher-low pivot")
         return (f"{color} {tag} · {safe_symbol} · {idea.timeframe.upper()}\n\n"
-                f"{narrative}\n\nPending setup\nLimit entry: {entry}\nStop: {stop} (below the higher low)\n"
+                f"{narrative}\n\nPending setup\nLimit entry: {entry}\nStop: {stop} ({pending_stop_reason})\n"
                 "Valid for 6 candles. The alert is sent only after the retest fills.")
     entry_mid = sum(idea.entry_zone) / 2
     risk = abs(entry_mid - idea.stop_loss)
@@ -396,15 +426,24 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     rr2 = abs((idea.take_profit_2 - entry_mid) / risk) if risk else idea.risk_reward_ratio
     side = "below" if is_long else "above"
     single_target = abs(float(idea.take_profit_1) - float(idea.take_profit_2)) < 1e-12
-    stop_reason = ("below the higher low" if is_bounce else
-                   "above the rejected zone" if not is_long and any("tested prior resistance" in s.lower() for s in trigger_sentences) else
-                   "below the defended support" if is_long else "above recent price structure")
+    if is_bounce:
+        higher_low_match = next((__import__("re").search(r"higher low at ([\d,.]+)", sentence, __import__("re").IGNORECASE)
+                                 for sentence in trigger_sentences if "higher low at" in sentence.lower()), None)
+        stop_reason = f"below swing low at {price_fmt(float(higher_low_match.group(1).replace(',', '')))}" if higher_low_match else "below the higher-low pivot"
+    elif stop_swing_level is not None:
+        stop_reason = f"{'below' if is_long else 'above'} swing level {price_fmt(stop_swing_level)}"
+    elif stop_atr_multiple is not None:
+        stop_reason = f"{stop_atr_multiple:.1f} ATR {'below' if is_long else 'above'} entry"
+    else:
+        stop_reason = "below entry" if is_long else "above entry"
     validity = "Valid for 48 hours."
     if is_bounce:
-        plan = (f"Plan\nEntry: {entry} (limit retest filled)\nStop: {stop} ({stop_reason})\nTarget: {tp1}\n"
+        target_label = f" ({target_basis})" if target_basis else ""
+        plan = (f"Plan\nEntry: {entry} (limit retest filled)\nStop: {stop} ({stop_reason})\nTarget: {tp1}{target_label}\n"
                 f"Risk/reward: 1 : {rr1:.1f}\n\n{validity}")
     elif single_target:
-        plan = (f"Plan\nEntry: {entry}\nStop: {stop} ({stop_reason})\nTarget: {tp1}\n"
+        target_label = f" ({target_basis})" if target_basis else ""
+        plan = (f"Plan\nEntry: {entry}\nStop: {stop} ({stop_reason})\nTarget: {tp1}{target_label}\n"
                 f"Risk/reward: 1 : {rr1:.1f}\n\n{validity}")
     else:
         plan = (f"Plan\nEntry: {entry}\nStop: {stop} ({stop_reason})\nTP1: {tp1} (50%) · TP2: {tp2} (remaining 50%)\n"

@@ -175,7 +175,9 @@ def detect_bounce_long(
                     f"Price swept prior support at {swing:g} and printed a low of {sweep_low:g}, "
                     f"then reclaimed {swing:g} with a close at {float(candles.close.iloc[reclaim_i]):g}. "
                     f"After the reclaim, price held a higher low at {higher_low:g} and closed above the "
-                    f"{bounce_high:g} bounce high, suggesting buyers have taken short-term control."
+                    f"{bounce_high:g} bounce high, suggesting buyers have taken short-term control. "
+                    f"Stop anchor swing level: {higher_low:g}. "
+                    f"Target basis: {'4H EMA50' if four_hour_ema50 is not None and abs(target - four_hour_ema50) < 1e-9 else 'resistance'}."
                 ), confidence_score=85.0,
                 invalid_condition=f"Invalid if a {timeframe.upper()} candle closes below {stop:.6g}.",
                 rank_score=85.0, position_size_units=round(risk_amount / risk, 6),
