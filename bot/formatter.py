@@ -210,15 +210,11 @@ def alert_symbol(symbol: str) -> str:
 
 
 def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -> str:
-    from datetime import UTC,datetime
-    from app.services.crypto_exit_policy import deadline
-    when=idea.tracking_deadline or deadline(idea.history_created_at or datetime.now(UTC),idea.timeframe)
     return (
         f"{alert_symbol(idea.symbol)} · {idea.timeframe.upper()} · {idea.direction.upper()}\n\n"
         f"Entry: {fmt_zone(idea.entry_zone)}\nStop Loss: {fmt(idea.stop_loss)}\n"
         f"TP1: {fmt(idea.take_profit_1)}\nTP2 (final target): {fmt(idea.take_profit_2)}\n\n"
-        "The trade closes after its 48-hour tracking window if neither the stop-loss nor the final target has been hit.\n"
-        f"Tracking close: {when.strftime('%Y-%m-%d %H:%M UTC')}."
+        "Valid for 48 hours."
     )
 
 

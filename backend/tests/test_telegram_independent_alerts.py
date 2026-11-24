@@ -57,8 +57,10 @@ def test_trade_alert_formatter_preserves_intentional_public_alert_fields():
     message = format_trade_alert(trade_idea)
 
     assert "LDO/USDT · 4H · SHORT" in message
-    for field in ("Entry: 0.34201", "Stop Loss: 0.352031", "TP1: 0.328189", "TP2 (final target): 0.315749", "48-hour", "Tracking close:"):
+    for field in ("Entry: 0.34201", "Stop Loss: 0.352031", "TP1: 0.328189", "TP2 (final target): 0.315749", "Valid for 48 hours."):
         assert field in message
+    assert "Tracking close:" not in message
+    assert "The trade closes after its 48-hour tracking window" not in message
     assert "Score:" not in message and "77/100" not in message
     assert "%" not in message and "3.3R" not in message
     removed_fields = [
@@ -95,7 +97,7 @@ def test_trade_alert_warns_when_direction_conflicts_with_bias():
     )
 
     assert "ARB/USDT" in message and "LONG" in message
-    assert "48-hour" in message
+    assert "Valid for 48 hours." in message
     assert "score" not in message.lower() and "-42.5" not in message
 
 
