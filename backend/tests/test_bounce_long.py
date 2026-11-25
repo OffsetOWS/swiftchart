@@ -124,7 +124,8 @@ def test_bounce_tags_on_entry_and_existing_tp_outcome_path(monkeypatch):
     assert idea is not None
     bounce_message = format_trade_alert(idea)
     assert bounce_message.startswith("🔵 BOUNCE LONG · HYPE · 1H")
-    assert "Counter-trend" in bounce_message and "Plan" in bounce_message
+    assert "Counter-trend" in bounce_message and "Signal" in bounce_message
+    assert bounce_message.index("Entry:") < bounce_message.index("Why this setup")
     assert "Price swept prior support" in bounce_message
     assert "85" not in bounce_message
     trend_long = idea.model_copy(update={"setup_family": "trend_continuation", "setup_score": 87.0})

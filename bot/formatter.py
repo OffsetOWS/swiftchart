@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 from app.models.schemas import AnalysisResponse, TradeIdea
 
 RISK_WARNING = "Not financial advice. Manage your risk."
@@ -41,6 +43,51 @@ def _format_reason_prices(reason: str, decimals: int | None) -> str:
         return f"{value:,.{decimals}f}"
 
     return re.sub(r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w.])", replace, reason)
+
+
+def _variant(options: tuple[str, ...], seed: str) -> str:
+    """Choose varied but repeatable wording from the signal's stable fields."""
+    digest = sha256(seed.casefold().encode("utf-8")).digest()
+    return options[int.from_bytes(digest[:4], "big") % len(options)]
+
+
+def _trigger_wording(sentence: str, seed: str) -> str:
+    """Paraphrase only whitelisted, computed trigger facts from the signal reason."""
+    import re
+
+    patterns = (
+        (r"^Price rallied into resistance at (.+) and was rejected\.$", (
+            "The rally met resistance at {level}, and sellers turned price away.",
+            "Price tested resistance at {level}; the advance was rejected.",
+            "Buyers pushed toward {level}, but resistance held and price was rejected.",
+        )),
+        (r"^Price retested broken support at (.+) and failed to reclaim it\.$", (
+            "Price returned to broken support at {level}, but the reclaim failed.",
+            "The retest at {level} could not recover former support.",
+            "Former support at {level} capped the rebound.",
+        )),
+        (r"^Price broke below support at (.+)\.$", (
+            "Price broke beneath support at {level}.",
+            "Support at {level} gave way to sellers.",
+            "Price moved through support at {level}, confirming the break.",
+        )),
+        (r"^Price retested broken resistance at (.+) and held above resistance at (.+)\.$", (
+            "Price revisited broken resistance at {first} and held above it.",
+            "The retest at {first} held as support after the breakout.",
+            "Price tested {first} from above and kept the reclaimed level.",
+        )),
+        (r"^Price reclaimed resistance at (.+) and held above resistance at (.+)\.$", (
+            "Price reclaimed resistance at {first} and held the breakout.",
+            "Resistance at {first} gave way, and price stayed above it.",
+            "Price moved back above {first} and held the reclaimed level.",
+        )),
+    )
+    for pattern, options in patterns:
+        match = re.match(pattern, sentence, re.IGNORECASE)
+        if match:
+            values = match.groups()
+            return _variant(options, seed).format(level=values[0], first=values[0])
+    return sentence
 
 
 def public_reason_summary(reason: str | None, max_sentences: int | None = None) -> str:
@@ -248,28 +295,53 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     bearish = regime in {"TRENDING_DOWN", "BREAKDOWN", "TRANSITION_TO_BEARISH"}
     bullish = regime in {"TRENDING_UP", "BREAKOUT", "TRANSITION_TO_BULLISH"}
     ranging = regime in {"RANGE_BOUND", "CHOP"}
+    timeframe = idea.timeframe.upper()
+    style_seed = f"{idea.symbol}:{idea.timeframe}:{direction}:{regime}"
+    htf_bias = str(idea.higher_timeframe_bias or "")
     if is_bounce:
-        lead = "Counter-trend long."
-    elif is_trend and ((is_long and bullish) or (not is_long and bearish)):
-        lead = ("With-trend long: the broader structure favors buyers."
-                if is_long else "With-trend short: the broader structure favors sellers.")
+        context_sentence = {
+            "HTF_BEARISH": "Counter-trend long against a bearish higher-timeframe trend.",
+            "HTF_BULLISH": "Counter-trend long against the local bearish setup; the higher-timeframe trend is bullish.",
+            "HTF_NEUTRAL": "Counter-trend long; the higher-timeframe trend is neutral.",
+        }.get(htf_bias, "Counter-trend long.")
     elif is_trend and ranging:
-        lead = ("Long setup in a ranging market; this is not a clear trend trade."
-                if is_long else "Short setup in a ranging market; this is not a clear trend trade.")
+        context_sentence = _variant((
+            f"This {direction} is a range setup; {coin} has not established a clear {timeframe} trend.",
+            f"The {timeframe} is ranging, so this {direction} is a range trade rather than a trend continuation.",
+            f"{coin} remains inside a {timeframe} range; this setup is not backed by a directional trend.",
+        ), style_seed)
+    elif is_trend and is_long and bullish:
+        context_sentence = _variant((
+            f"Buyers still have the upper hand on {coin}'s {timeframe} chart; this long follows that pressure.",
+            f"{coin} is still trending higher on the {timeframe}, keeping this long aligned with the move.",
+            f"The {timeframe} chart still favors buyers, so this long follows the prevailing direction.",
+        ), style_seed)
+    elif is_trend and not is_long and bearish:
+        context_sentence = _variant((
+            f"Sellers still have the upper hand on {coin}'s {timeframe} chart; this short follows that pressure.",
+            f"{coin} is still trending lower on the {timeframe}, keeping this short aligned with the move.",
+            f"The {timeframe} chart still favors sellers, so this short follows the prevailing direction.",
+        ), style_seed)
+    elif is_trend and is_long and bearish:
+        context_sentence = f"Counter-trend long against {coin}'s {timeframe} downtrend."
+    elif is_trend and not is_long and bullish:
+        context_sentence = f"Counter-trend short against {coin}'s {timeframe} uptrend."
+    elif is_trend and htf_bias in {"HTF_BEARISH", "HTF_BULLISH"}:
+        bias = "bearish" if htf_bias == "HTF_BEARISH" else "bullish"
+        context_sentence = f"This {direction} is counter-trend against a {bias} higher-timeframe bias."
     elif is_trend:
-        lead = ("Counter-trend long: the setup is against the current downtrend."
-                if is_long else "Counter-trend short: the setup is against the current uptrend.")
-    else:
-        lead = "Counter-trend setup: the trade is against the broader market direction."
-
-    if bearish:
-        trend_line = f"{coin} is in a downtrend on the {idea.timeframe.upper()}."
+        context_sentence = _variant((
+            f"{coin}'s {timeframe} structure has not established a clear trend; treat this as a tactical {direction} setup.",
+            f"The {timeframe} trend is unclear, so this {direction} rests on its trigger rather than broad trend alignment.",
+        ), style_seed)
+    elif bearish:
+        context_sentence = f"{coin}'s {timeframe} structure is pointing lower."
     elif bullish:
-        trend_line = f"{coin} is in an uptrend on the {idea.timeframe.upper()}."
+        context_sentence = f"{coin}'s {timeframe} structure is pointing higher."
     elif ranging:
-        trend_line = f"{coin} is ranging on the {idea.timeframe.upper()}."
+        context_sentence = f"{coin} is moving within a {timeframe} range."
     else:
-        trend_line = ""
+        context_sentence = ""
 
     trigger_sentences: list[str] = []
     volume_present = momentum_present = False
@@ -350,6 +422,11 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
                 second = "After the reclaim, price held" + second[len("Since then it held"):]
             trigger_sentences = [first + "."] + ([second + "."] if second.lower().startswith("after the reclaim, price held a higher low at ") else [])
 
+    trigger_sentences = [
+        _trigger_wording(sentence, f"{style_seed}:trigger:{index}:{sentence}")
+        for index, sentence in enumerate(trigger_sentences)
+    ]
+
     if is_trend and not trigger_sentences:
         structure = str(idea.regime_structure or "").lower()
         if "lower high" in structure or "lower low" in structure:
@@ -363,22 +440,53 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
         elif ranging:
             trigger_sentences.append("Price is ranging without a confirmed directional trigger.")
 
-    evidence_bits = []
-    if volume_present:
-        evidence_bits.append("volume supported the bearish move" if not is_long else "volume supported the bullish move")
-    if momentum_present:
-        evidence_bits.append("downside momentum remains present" if not is_long else "momentum continues to favor buyers")
-    htf_text = {"HTF_BEARISH": "the higher-timeframe bias is bearish",
-                "HTF_BULLISH": "the higher-timeframe bias is bullish",
-                "HTF_NEUTRAL": "the higher-timeframe bias is neutral"}.get(str(idea.higher_timeframe_bias or ""))
-    if htf_text and htf_text not in " ".join(evidence_bits) and not is_bounce:
-        evidence_bits.append(htf_text)
-    if len(evidence_bits) == 1:
-        evidence_sentence = evidence_bits[0].capitalize() + "."
-    elif len(evidence_bits) == 2:
-        evidence_sentence = evidence_bits[0].capitalize() + " and " + evidence_bits[1] + "."
-    elif len(evidence_bits) > 2:
-        evidence_sentence = ", ".join(evidence_bits[:-1]).capitalize() + ", with " + evidence_bits[-1] + "."
+    htf_word = {"HTF_BEARISH": "bearish", "HTF_BULLISH": "bullish", "HTF_NEUTRAL": "neutral"}.get(htf_bias)
+    market_side = "buyers" if is_long else "sellers"
+    momentum_word = "upside" if is_long else "downside"
+    htf_aligned = (is_long and htf_bias == "HTF_BULLISH") or (not is_long and htf_bias == "HTF_BEARISH")
+    htf_clause = (f"the higher-timeframe bias also favors {market_side}" if htf_aligned
+                  else f"the higher-timeframe bias is {htf_word}")
+    if is_bounce:
+        evidence_sentence = ""
+    elif volume_present and momentum_present and htf_word:
+        evidence_sentence = _variant((
+            f"Volume backed the move, and {momentum_word} momentum remains; {htf_clause}.",
+            f"The move had volume behind it, with {momentum_word} momentum and {htf_clause}.",
+            f"Volume and {momentum_word} momentum support the setup, while {htf_clause}.",
+        ), f"{style_seed}:evidence:volume-momentum-htf")
+    elif volume_present and momentum_present:
+        evidence_sentence = _variant((
+            f"Volume backed the move, and {momentum_word} momentum remains present.",
+            f"Both volume and {momentum_word} momentum support the move.",
+        ), f"{style_seed}:evidence:volume-momentum")
+    elif momentum_present and htf_word:
+        evidence_sentence = _variant((
+            f"{momentum_word.capitalize()} momentum remains present, and {htf_clause}.",
+            f"Momentum still leans {momentum_word}, while {htf_clause}.",
+            f"The move has {momentum_word} momentum behind it, and the higher-timeframe view agrees.",
+        ), f"{style_seed}:evidence:momentum-htf")
+    elif volume_present and htf_word:
+        evidence_sentence = _variant((
+            f"Volume supported the move, and {htf_clause}.",
+            f"The move drew volume, while {htf_clause}.",
+        ), f"{style_seed}:evidence:volume-htf")
+    elif momentum_present:
+        evidence_sentence = _variant((
+            f"{momentum_word.capitalize()} momentum remains present.",
+            f"Momentum continues to lean {momentum_word}.",
+            f"The latest move still has {momentum_word} momentum behind it.",
+        ), f"{style_seed}:evidence:momentum")
+    elif volume_present:
+        evidence_sentence = _variant((
+            "Volume supported the move.",
+            "The move came with supporting volume.",
+            "Trading activity expanded in the direction of the move.",
+        ), f"{style_seed}:evidence:volume")
+    elif htf_word and not is_bounce:
+        evidence_sentence = _variant((
+            f"The higher-timeframe bias is {htf_word}.",
+            f"The broader timeframe remains {htf_word}.",
+        ), f"{style_seed}:evidence:htf")
     else:
         evidence_sentence = ""
 
@@ -396,20 +504,30 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     btc_is_up = btc_regime in {"TRENDING_UP", "BREAKOUT", "TRANSITION_TO_BULLISH"}
     if btc_is_down:
         effect = "tailwind" if not is_long else "headwind"
-        btc_sentence = f"BTC is in a downtrend on the 4H, a {effect} for this {'long' if is_long else 'short'}."
+        options = (
+            f"BTC is trending lower on the 4H, a {effect} for this {'long' if is_long else 'short'}.",
+            f"The 4H move in BTC is down, providing a {effect} for this {'long' if is_long else 'short'}.",
+            f"BTC's 4H downtrend is a {effect} for this {'long' if is_long else 'short'}.",
+        )
+        btc_sentence = _variant(options, f"{style_seed}:btc:down")
     elif btc_is_up:
         effect = "headwind" if not is_long else "tailwind"
-        btc_sentence = f"BTC is in an uptrend on the 4H, a {effect} for this {'long' if is_long else 'short'}."
+        options = (
+            f"BTC is trending higher on the 4H, a {effect} for this {'long' if is_long else 'short'}.",
+            f"The 4H move in BTC is up, providing a {effect} for this {'long' if is_long else 'short'}.",
+            f"BTC's 4H uptrend is a {effect} for this {'long' if is_long else 'short'}.",
+        )
+        btc_sentence = _variant(options, f"{style_seed}:btc:up")
     elif btc_regime in {"RANGE_BOUND", "CHOP"}:
-        btc_sentence = f"BTC is ranging on the 4H, leaving broad-market conditions neutral for this {'long' if is_long else 'short'}."
+        btc_sentence = _variant((
+            f"BTC is ranging on the 4H, leaving conditions neutral for this {'long' if is_long else 'short'}.",
+            f"BTC's 4H market is moving sideways, so conditions remain neutral for this {'long' if is_long else 'short'}.",
+            f"With BTC range-bound on the 4H, the wider market is neutral for this {'long' if is_long else 'short'}.",
+        ), f"{style_seed}:btc:range")
     else:
         btc_sentence = ""
 
-    bounce_htf = {"HTF_BEARISH": "The higher-timeframe trend is bearish.",
-                  "HTF_BULLISH": "The higher-timeframe trend is bullish.",
-                  "HTF_NEUTRAL": "The higher-timeframe trend is neutral."}.get(str(idea.higher_timeframe_bias or ""), "")
-    why = [lead, *( [bounce_htf] if is_bounce and bounce_htf else []), trend_line,
-           *trigger_sentences, evidence_sentence, btc_sentence]
+    why = [context_sentence, *trigger_sentences, evidence_sentence, btc_sentence]
     narrative = " ".join(escape(part if " EMA" in part else _format_reason_prices(part, decimals), quote=False)
                          for part in why if part)
     if is_bounce and idea.entry_status == "WAIT_FOR_RETEST":
@@ -418,8 +536,9 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
         pending_stop_reason = (f"below swing low at {price_fmt(stop_swing_level)}"
                                if stop_swing_level is not None else "below the higher-low pivot")
         return (f"{color} {tag} · {safe_symbol} · {idea.timeframe.upper()}\n\n"
-                f"{narrative}\n\nPending setup\nLimit entry: {entry}\nStop: {stop} ({pending_stop_reason})\n"
-                "Valid for 6 candles. The alert is sent only after the retest fills.")
+                f"Pending setup\nLimit entry: {entry}\nStop: {stop} ({pending_stop_reason})\n"
+                "Valid for 6 candles. The alert is sent only after the retest fills.\n\n"
+                f"Why this setup\n{narrative}")
     entry_mid = sum(idea.entry_zone) / 2
     risk = abs(entry_mid - idea.stop_loss)
     rr1 = abs((idea.take_profit_1 - entry_mid) / risk) if risk else idea.risk_reward_ratio
@@ -439,19 +558,19 @@ def format_trade_alert(idea: TradeIdea, btc_context: str | dict | None = None) -
     validity = "Valid for 48 hours."
     if is_bounce:
         target_label = f" ({target_basis})" if target_basis else ""
-        plan = (f"Plan\nEntry: {entry} (limit retest filled)\nStop: {stop} ({stop_reason})\nTarget: {tp1}{target_label}\n"
+        plan = (f"Signal\nEntry: {entry} (limit retest filled)\nStop: {stop} ({stop_reason})\nTarget: {tp1}{target_label}\n"
                 f"Risk/reward: 1 : {rr1:.1f}\n\n{validity}")
     elif single_target:
         target_label = f" ({target_basis})" if target_basis else ""
-        plan = (f"Plan\nEntry: {entry}\nStop: {stop} ({stop_reason})\nTarget: {tp1}{target_label}\n"
+        plan = (f"Signal\nEntry: {entry}\nStop: {stop} ({stop_reason})\nTarget: {tp1}{target_label}\n"
                 f"Risk/reward: 1 : {rr1:.1f}\n\n{validity}")
     else:
-        plan = (f"Plan\nEntry: {entry}\nStop: {stop} ({stop_reason})\nTP1: {tp1} (50%) · TP2: {tp2} (remaining 50%)\n"
+        plan = (f"Signal\nEntry: {entry}\nStop: {stop} ({stop_reason})\nTP1: {tp1} (50%) · TP2: {tp2} (remaining 50%)\n"
                 f"Risk/reward: 1 : {rr1:.1f} (TP1) · 1 : {rr2:.1f} (TP2)\n\n"
                 f"{validity}")
     heading = (f"{color} {tag} · {safe_symbol} · {idea.timeframe.upper()}" if is_bounce or is_trend
                else f"{safe_symbol} · {idea.timeframe.upper()} · {tag}")
-    return f"{heading}\n\n{narrative}\n\n{plan}"
+    return f"{heading}\n\n{plan}\n\nWhy this setup\n{narrative}"
 
 def format_outcome_event(event: dict) -> str:
     from decimal import Decimal
