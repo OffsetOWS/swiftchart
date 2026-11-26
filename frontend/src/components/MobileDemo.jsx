@@ -1,8 +1,8 @@
 import { cryptoLifecycleStatus } from "../lib/cryptoLifecycle.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Bell,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   HelpCircle,
@@ -14,7 +14,6 @@ import {
   ScanLine,
   Search,
   Settings,
-  User,
   UserRound,
 } from "lucide-react";
 import { useAuth } from "../lib/AuthContext.jsx";
@@ -36,9 +35,11 @@ import { useAppPreferences } from "../lib/appPreferences.js";
 import AppSplashScreen from "./AppSplashScreen.jsx";
 import { CurrencyStrengthOpportunities, CurrencyStrengthRanking } from "./CurrencyStrength.jsx";
 import GraphiteStateCard from "./GraphiteStateCard.jsx";
-import { RecentOutcomes, RegimeCard, ScanStatusCard } from "./HomeOverview.jsx";
+import { BtcTicker, RecentOutcomes, RegimeCard, ScanStatusCard } from "./HomeOverview.jsx";
 import { AnalystNote, SignalFacts, SignalTopBar, TradeLadder } from "./SignalDetail.jsx";
 import { formatLadderPrice, formatValidUntil } from "../lib/tradeLadder.js";
+import { buildHistoryRow, historyResultR, historyStatus, HISTORY_FILTERS } from "../lib/historyRows.js";
+import { formatR } from "../lib/homeSummary.js";
 import { regimeFromScanStats } from "../lib/homeSummary.js";
 import InstrumentLogo from "./InstrumentLogo.jsx";
 import NotificationCenter from "./NotificationCenter.jsx";
@@ -288,8 +289,8 @@ function normalizeForexSignal(signal, index = 0) {
 function normalizeSavedTrade(trade) {
   const lifecycleStatus = cryptoLifecycleStatus(trade);
   const isForex = String(trade.exchange || "").toLowerCase() === MARKET_TYPES.forex;
-  const resultR = trade.result_r ?? trade.pnl;
-  const lifecycleLabel = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
+  const resultR = historyResultR(trade);
+  const lifecycleLabel = historyStatus(trade).label;
   if (isForex) {
     return {
       ...normalizeForexSignal({
@@ -328,7 +329,7 @@ function normalizeSavedTrade(trade) {
       setup_score: trade.setup_score ?? trade.confidence,
       confidence_score: trade.confidence ?? trade.setup_score,
       market_regime: trade.market_regime || trade.market_bias,
-      reason: trade.reason || "Saved SwiftChart setup.",
+      reason: trade.reason || "",
       status: lifecycleStatus,
       latest_price: trade.latest_price,
       latest_price_at: trade.latest_price_at,
@@ -391,6 +392,7 @@ function GraphiteHeader({
   unreadCount = 0,
   notificationPriority = "",
   notificationsOpen = false,
+  btc = null,
 }) {
   const countLabel = unreadCount > 99 ? "99+" : String(unreadCount);
   return (
@@ -402,7 +404,7 @@ function GraphiteHeader({
         </div>
       </div>
       <div className="graphite-header-actions">
-        {showMarketToggle ? <MarketToggle activeMarket={activeMarket} onChange={onMarketChange} /> : null}
+        {showMarketToggle ? <MarketToggle activeMarket={activeMarket} onChange={onMarketChange} /> : <BtcTicker btc={btc} />}
         <button
           type="button"
           className="graphite-alert-button"
@@ -420,7 +422,7 @@ function GraphiteHeader({
   );
 }
 
-function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, scanMeta, outcomes = [], loading = false, forexSignals, forexOverview, forexStrength, onViewStrength, onSelectPair }) {
+function HomeScreen({ signals, activeSignals, onSelect, onViewAll, onViewHistory, market, scanMeta, btc = null, outcomes = [], loading = false, forexSignals, forexOverview, forexStrength, onViewStrength, onSelectPair }) {
   if (market === MARKET_TYPES.forex) {
     return <ForexHomeScreen signals={forexSignals} overview={forexOverview} strength={forexStrength} onSelect={onSelect} onViewAll={onViewAll} onViewStrength={onViewStrength} onSelectPair={onSelectPair} />;
   }
@@ -429,7 +431,7 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, scanM
   const lastScanAt = scanMeta?.lastScanAt;
   return (
     <div className="graphite-screen">
-      {loading && !lastScanAt ? <div className="home-skeleton" aria-label="Loading market regime" /> : <RegimeCard regime={regime} updatedAt={lastScanAt} />}
+      {loading && !lastScanAt ? <div className="home-skeleton" aria-label="Loading market regime" /> : <RegimeCard regime={regime} updatedAt={lastScanAt} btc={btc} />}
 
       <section className="market-pair-section">
         <div className="graphite-section-head">
@@ -456,7 +458,7 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, scanM
         </section>
       ) : null}
 
-      <RecentOutcomes outcomes={outcomes} />
+      <RecentOutcomes outcomes={outcomes} onViewHistory={onViewHistory} />
 
     </div>
   );
@@ -896,26 +898,28 @@ function ScanScreen({
 
   return (
     <div className="graphite-screen">
-      <section className="graphite-scan-card">
-        <div>
-          <span>Scan</span>
-          <h1>Find clean setups</h1>
-          <p>Search one coin or rank the market in seconds.</p>
+      <header className="tm-page-head">
+        <div className="tm-row-head">
+          <h1>Scan</h1>
+          <button type="button" className="tm-button" onClick={startScan} disabled={scanState === "scanning" || cryptoLoading}>
+            <ScanLine size={16} aria-hidden="true" />
+            {scanState === "scanning" || cryptoLoading ? "Scanning…" : "Rescan market"}
+          </button>
         </div>
-        <button type="button" onClick={startScan} disabled={scanState === "scanning" || cryptoLoading}><ScanLine size={18} /> {scanState === "scanning" || cryptoLoading ? "Scanning..." : "Scan Market"}</button>
-      </section>
+        <p className="tm-body tm-quiet">Every setup below passed the regime, structure and risk filters.</p>
+      </header>
 
       <form className="graphite-search" onSubmit={scanCoin}>
         <Search size={17} />
-        <input value={coinQuery} onChange={(event) => setCoinQuery(event.target.value)} type="text" placeholder="Search coin (BTC, ETH, SOL...)" aria-label="Search coin" />
-        <button type="submit">Scan</button>
+        <input value={coinQuery} onChange={(event) => setCoinQuery(event.target.value)} type="text" placeholder="Filter by coin, e.g. ETH" aria-label="Filter results by coin" />
+        <button type="submit">Filter</button>
       </form>
 
       <div className="graphite-filters" aria-label="Scan filters">
         <label>
           <span className="sr-only">Timeframe</span>
           <select value={timeframe} onChange={(event) => setTimeframe(event.target.value)} aria-label="Timeframe">
-            <option value="all">All Timeframes</option>
+            <option value="all">Timeframe</option>
             {["15m", "1h", "2h", "4h", "6h", "1d"].map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}
           </select>
           <ChevronDown size={14} aria-hidden="true" />
@@ -923,7 +927,7 @@ function ScanScreen({
         <label>
           <span className="sr-only">Exchange</span>
           <select value={exchange} onChange={(event) => setExchange(event.target.value)} aria-label="Exchange">
-            <option value="all">All Exchanges</option>
+            <option value="all">Exchange</option>
             <option value="hyperliquid">Hyperliquid</option>
             <option value="variational">Variational</option>
           </select>
@@ -934,9 +938,9 @@ function ScanScreen({
       {scanState === "scanning" || cryptoLoading ? (
         <GraphiteStateCard
           tone="loading"
-          eyebrow="Scanning market"
-          title="Checking structure and confirmation"
-          message="Refreshing ranked opportunities without changing SwiftChart's qualification rules."
+          eyebrow="Scanning"
+          title="Reading structure across the market"
+          message="This usually takes under a minute."
           busy
         />
       ) : null}
@@ -944,8 +948,8 @@ function ScanScreen({
         <GraphiteStateCard
           tone="error"
           eyebrow="Refresh error"
-          title="Could not refresh ranked setups"
-          message="The last verified market view remains available. Retry when the connection is stable."
+          title="The rescan didn't finish"
+          message="You're still seeing the last good scan. Try again in a moment."
           actionLabel="Retry"
           onAction={startScan}
         />
@@ -953,22 +957,16 @@ function ScanScreen({
 
       <section className="graphite-section">
         <div className="graphite-section-head">
-          <span>Scan results</span>
-          <strong className="graphite-results-status">{scanState === "scanning" || cryptoLoading ? "Analyzing..." : scanState === "error" ? "Refresh failed" : "Live market"}<i /></strong>
+          <span>Results</span>
+          <strong className="graphite-results-status">{scanState === "scanning" || cryptoLoading ? "scanning…" : scanState === "error" ? "rescan failed" : `${visibleSignals.length} live`}</strong>
         </div>
         <div className="market-pair-list compact">
           {visibleSignals.map((signal) => <MarketSignalRow key={`${signal.symbol}-scan`} signal={signal} onSelect={onSelect} />)}
-          {visibleSignals.length === 0 ? <p className="graphite-no-results">No matching setup is currently ranked.</p> : null}
+          {visibleSignals.length === 0 ? <p className="graphite-no-results">{appliedCoinQuery ? `No live setup on ${appliedCoinQuery.toUpperCase()} right now.` : "Nothing passed the filters on the last scan."}</p> : null}
         </div>
       </section>
     </div>
   );
-}
-
-function sentenceCase(value) {
-  const text = String(value || "").trim().replace(/[.!?]+$/, "");
-  if (!text) return "market structure supports the setup";
-  return /^[A-Z]{2,}/.test(text) ? text : `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 }
 
 function reasoningSentences(signal, { isForex }) {
@@ -989,17 +987,10 @@ function reasoningSentences(signal, { isForex }) {
 }
 
 function tradeReasoning(signal, { isForex }) {
-  const direction = String(signal.direction || "trade").toLowerCase();
-  const timeframe = String(signal.timeframe || "").toUpperCase();
-  const symbol = signal.pair || signal.symbol;
-  const insights = reasoningSentences(signal, { isForex });
-  const primary = sentenceCase(insights[0]);
-  const supporting = insights[1]
-    ? `${insights[1].charAt(0).toUpperCase()}${insights[1].slice(1)}.`
-    : isForex
-      ? `The ${signal.session || "active"} session passed SwiftChart's execution checks.`
-      : `The stop remains beyond structural invalidation.`;
-  return `${symbol} is a ${direction} setup on ${timeframe} because ${primary}. ${supporting}`;
+  const insights = reasoningSentences(signal, { isForex })
+    .filter((value) => !/^saved swiftchart setup$/i.test(value));
+  if (!insights.length) return null;
+  return insights.slice(0, 3).map((value) => `${value.charAt(0).toUpperCase()}${value.slice(1)}.`).join(" ");
 }
 
 function detailRecency(signal) {
@@ -1033,8 +1024,10 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
       <article className="graphite-detail sd-wrap">
         <SignalTopBar signal={signal} onBack={onClose} recency={detailRecency(signal)} />
         <TradeLadder signal={signal} progress={progress} />
-        <AnalystNote text={tradeReasoning(signal, { isForex })} invalidation={signal.rawIdea?.invalidation} />
-        <SignalFacts rr={signal.rr} validity={isForex ? null : validity} regime={humanRegime(signal.regime)} />
+        {tradeReasoning(signal, { isForex }) || signal.rawIdea?.invalidation ? (
+          <AnalystNote text={tradeReasoning(signal, { isForex })} invalidation={signal.rawIdea?.invalidation} />
+        ) : null}
+        <SignalFacts rr={signal.rr} validity={isForex || signal.isHistory ? null : validity} regime={humanRegime(signal.regime)} result={signal.isHistory ? { label: signal.historyResult, r: signal.historyResultR === null || signal.historyResultR === undefined ? "" : formatR(Number(signal.historyResultR)) } : null} />
         {!signal.isHistory ? (
           <div className="sd-actions">
             <button
@@ -1076,63 +1069,57 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
   useEffect(() => {
     setMarketFilter(market);
   }, [market]);
-  const savedRows = paperTrades.map((trade) => {
-    const lifecycleStatus = String(trade.lifecycle_status || "").toUpperCase();
-    const resultR = trade.result_r ?? trade.pnl;
-    const state = trade.lifecycle_label || (trade.status === "taken" ? "Open" : trade.status || "Open");
-    const displayResult = state;
-    return {
-      symbol: trade.symbol,
-      direction: trade.direction || "Trade",
-      timeframe: trade.timeframe || "-",
-      score: Math.round(Number(trade.confidence || trade.setup_score || 0)),
-      result: trade.lifecycle_result || trade.result || "Open",
-      filterStatus: lifecycleStatus === "STOPPED" ? "sl" : lifecycleStatus.toLowerCase(),
-      state,
-      r: displayResult,
-      date: trade.taken_at ? new Date(trade.taken_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "Today",
-      market: String(trade.exchange || "").toLowerCase() === "forex" ? MARKET_TYPES.forex : MARKET_TYPES.crypto,
-      id: trade.id,
-      trade,
-    };
-  });
-  const rows = savedRows
+  const allRows = paperTrades.map(buildHistoryRow);
+  const rows = allRows
     .filter((item) => (marketFilter === "all" ? true : item.market === marketFilter))
-    .filter((item) => statusFilter === "all" || item.filterStatus.includes(statusFilter) || item.result.toLowerCase().includes(statusFilter));
+    .filter((item) => statusFilter === "all" || item.group === statusFilter);
+  const openCount = allRows.filter((item) => item.group === "open").length;
   return (
     <div className="graphite-screen">
-      <section className="graphite-history-hero"><span>Saved signals</span><p>Entry, target, stop and tracking status.</p></section>
+      <header className="tm-page-head">
+        <h1>History</h1>
+        <p className="tm-body tm-quiet">
+          {allRows.length
+            ? `${allRows.length} saved ${allRows.length === 1 ? "trade" : "trades"}, ${openCount} still open. Results in R before fees and funding.`
+            : "Trades you take from a signal are tracked here until they close."}
+        </p>
+      </header>
 
-      <div className="graphite-filter-row">
-        {(FOREX_ENABLED ? ["all", MARKET_TYPES.crypto, MARKET_TYPES.forex] : []).map((option) => <button key={option} type="button" className={marketFilter === option ? "active" : ""} onClick={() => setMarketFilter(option)}>{option}</button>)}
-      </div>
-      <div className="graphite-filter-row">
-        {["all", "open", "tp1", "tp2", "sl", "expired"].map((option) => <button key={option} type="button" className={statusFilter === option ? "active" : ""} onClick={() => setStatusFilter(option)}>{option}</button>)}
-      </div>
+      {FOREX_ENABLED ? (
+        <div className="graphite-filter-row">
+          {["all", MARKET_TYPES.crypto, MARKET_TYPES.forex].map((option) => <button key={option} type="button" className={marketFilter === option ? "active" : ""} onClick={() => setMarketFilter(option)}>{option}</button>)}
+        </div>
+      ) : null}
+      {allRows.length ? (
+        <div className="graphite-filter-row" role="group" aria-label="Filter by outcome">
+          {HISTORY_FILTERS.map(([key, label]) => (
+            <button key={key} type="button" className={statusFilter === key ? "active" : ""} aria-pressed={statusFilter === key} onClick={() => setStatusFilter(key)}>{label}</button>
+          ))}
+        </div>
+      ) : null}
 
-      <section className="graphite-timeline market-history-list">
-        <span>Trade timeline</span>
-        {rows.length === 0 ? (
-          <GraphiteStateCard
-            tone="empty"
-            eyebrow="History filter"
-            title="No matching trades"
-            message={`No ${marketFilter} historical signals match the selected outcome.`}
-          />
+      <section className="graphite-timeline market-history-list tm-history" aria-label="Saved trades">
+        {allRows.length && rows.length === 0 ? (
+          <p className="graphite-no-results">No saved trades match this filter.</p>
         ) : null}
-        {rows.map((item) => (
-          <button type="button" className="market-pair-row history" key={item.id || `${item.symbol}-${item.date}`} onClick={() => onSelect?.(item.trade)}>
-            <i className={/short|sell/i.test(item.direction) ? "short" : "long"} aria-hidden="true" />
-            <div className="market-pair-copy">
-              <div>
-                <strong>{item.symbol}</strong>
-                <Direction direction={item.direction} />
+        {rows.map((item) => {
+          const tone = item.r === null ? "" : item.r > 0.05 ? "up" : item.r < -0.05 ? "down" : "";
+          return (
+            <button type="button" className="market-pair-row history" key={item.id || `${item.base}-${item.date}`} onClick={() => onSelect?.(item.trade)}>
+              <div className="market-pair-copy">
+                <div>
+                  <strong>{item.base}{item.quote ? <em className="market-pair-quote">/{item.quote}</em> : null}</strong>
+                  <span className={`graphite-side ${item.direction}`}>{item.direction}</span>
+                </div>
+                <small>{[item.timeframe, item.date].filter(Boolean).join(" · ")}</small>
               </div>
-              <small>{item.timeframe.toUpperCase()} · {item.date} · {item.state}</small>
-            </div>
-            <span className="market-pair-quality"><strong>{item.state}</strong></span>
-          </button>
-        ))}
+              <span className="market-pair-quality">
+                <strong className={tone}>{item.r === null ? item.label : formatR(item.r)}</strong>
+                <small>{item.r === null ? "" : item.label}</small>
+              </span>
+            </button>
+          );
+        })}
       </section>
     </div>
   );
@@ -1159,16 +1146,15 @@ function AccountScreen({ onSettings, onSupport }) {
   return (
     <div className="graphite-screen">
       <section className="graphite-profile">
-        <div className="graphite-avatar"><User size={24} /></div>
+        <div className="graphite-avatar tm-initial" aria-hidden="true">{name.charAt(0).toUpperCase()}</div>
         <div>
-          <span>Profile</span>
           <strong>{name}</strong>
           <p>{auth.user?.email || "SwiftChart account"}</p>
         </div>
       </section>
 
       <div className="graphite-settings">
-        <button type="button" onClick={() => window.open(TELEGRAM_BOT_URL, "_blank", "noopener,noreferrer")}><MessageCircle size={18} /><span>Telegram</span><CheckCircle2 size={16} /></button>
+        <button type="button" onClick={() => window.open(TELEGRAM_BOT_URL, "_blank", "noopener,noreferrer")}><MessageCircle size={18} /><span>Telegram bot</span><ArrowUpRight size={16} aria-hidden="true" /></button>
         <button type="button" onClick={onSettings}><Settings size={18} /><span>Settings</span><ChevronRight size={16} /></button>
         <button type="button" onClick={onSupport}><HelpCircle size={18} /><span>Support</span><ChevronRight size={16} /></button>
         <button type="button" onClick={() => setConfirmLogout(true)} disabled={loggingOut}><LogOut size={18} /><span>{loggingOut ? "Signing out..." : "Log out"}</span><ChevronRight size={16} /></button>
@@ -1182,7 +1168,7 @@ function AccountScreen({ onSettings, onSupport }) {
             <p>You will need to sign in again to access your SwiftChart account.</p>
             <div>
               <button type="button" onClick={() => setConfirmLogout(false)}>Cancel</button>
-              <button type="button" className="danger" onClick={() => { setConfirmLogout(false); logout(); }}>Log Out</button>
+              <button type="button" className="danger" onClick={() => { setConfirmLogout(false); logout(); }}>Log out</button>
             </div>
           </section>
         </div>
@@ -1207,6 +1193,7 @@ export default function MobileDemo({
   initialConfigLoading = false,
   initialTab = "",
   scanMeta = null,
+  btcMarket = null,
   recentOutcomes = [],
   onRefreshCrypto,
   onNavigate,
@@ -1812,6 +1799,7 @@ export default function MobileDemo({
             unreadCount={notificationCenter.unreadCount}
             notificationPriority={notificationCenter.priorityIndicator}
             notificationsOpen={notificationsOpen}
+            btc={btcMarket}
           />
           {notificationsOpen ? (
             <div
@@ -1849,7 +1837,7 @@ export default function MobileDemo({
             />
           ) : <>
           <main className="graphite-content">
-            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} scanMeta={scanMeta} outcomes={recentOutcomes} loading={initialConfigLoading} forexSignals={forexSignals} forexOverview={forexOverview} forexStrength={forexStrength} onViewStrength={() => onNavigate?.("/app/forex/currency-strength")} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
+            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} scanMeta={scanMeta} btc={btcMarket} onViewHistory={() => selectTab("history")} outcomes={recentOutcomes} loading={initialConfigLoading} forexSignals={forexSignals} forexOverview={forexOverview} forexStrength={forexStrength} onViewStrength={() => onNavigate?.("/app/forex/currency-strength")} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
             {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} forexPairs={forexPairs} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} onSelect={openHistoryTrade} /> : null}
             {tab === "account" && accountView === "main" ? (

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import swiftChartLogo from "../assets/swiftchart-s-mark.png";
+import swiftChartLogo from "../assets/swiftchart-s-mark.webp";
 import "../styles/appSplash.css";
 
-const MIN_VISIBLE_MS = 1500;
+const MIN_VISIBLE_MS = 800;
 const MAX_VISIBLE_MS = 4000;
 const EXIT_DURATION_MS = 360;
 

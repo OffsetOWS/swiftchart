@@ -4,7 +4,11 @@ import { isSupabaseConfigured, supabase } from "./supabase.js";
 import { getPublicOrigin } from "./siteUrl.js";
 
 const AuthContext = createContext(null);
-const SUPABASE_CONFIG_ERROR = "Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.";
+// Shown to users. The developer detail goes to the console instead.
+const SUPABASE_CONFIG_ERROR = "Sign-in is unavailable right now. Please try again later.";
+if (!isSupabaseConfigured && typeof console !== "undefined") {
+  console.warn("SwiftChart auth: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable sign-in.");
+}
 const DEV_AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH_BYPASS === "true";
 const DEV_SESSION = DEV_AUTH_BYPASS ? {
   access_token: "swiftchart-local-preview",

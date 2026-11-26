@@ -65,11 +65,15 @@ export function TradeLadder({ signal, progress }) {
   );
 }
 
-export function SignalFacts({ rr, validity, regime }) {
+export function SignalFacts({ rr, validity, regime, result = null }) {
   return (
     <dl className="sd-facts">
       <div><dt>Risk / reward</dt><dd>{rr}</dd></div>
-      <div><dt>Valid until</dt><dd>{validity ? validity.when : "48h from entry"}{validity ? <small>{validity.left}</small> : null}</dd></div>
+      {result ? (
+        <div><dt>Result</dt><dd>{result.r || result.label}{result.r ? <small>{result.label}</small> : null}</dd></div>
+      ) : (
+        <div><dt>Valid until</dt><dd>{validity ? validity.when : "48h from entry"}{validity ? <small>{validity.left}</small> : null}</dd></div>
+      )}
       {regime ? <div className="sd-facts-wide"><dt>Market regime</dt><dd>{regime}</dd></div> : null}
     </dl>
   );
@@ -79,7 +83,7 @@ export function AnalystNote({ text, invalidation }) {
   return (
     <section className="sd-note" aria-labelledby="sd-note-title">
       <span id="sd-note-title" className="sd-eyebrow">Why this trade</span>
-      <p>{text}</p>
+      {text ? <p>{text}</p> : null}
       {invalidation ? (
         <p className="sd-invalidation"><strong>Invalidated if</strong> {invalidation}</p>
       ) : null}

@@ -45,7 +45,8 @@ test("Signal Detail uses the approved single-surface hierarchy and concise reaso
   assert.match(mobileApp, /function reasoningSentences/);
   assert.match(mobileApp, /\.slice|insights\[1\]/);
   assert.match(mobileApp, /\^\[A-Z\]\{6\}\\s\+qualified independently/);
-  assert.match(mobileApp, /\^\[A-Z\]\{2,\}/);
+  assert.match(mobileApp, /value\.charAt\(0\)\.toUpperCase\(\)/);
+  assert.doesNotMatch(mobileApp, /Saved SwiftChart setup\./);
   assert.doesNotMatch(mobileApp, /className="graphite-context-pills"/);
   assert.doesNotMatch(mobileApp, />View Chart</);
   assert.match(refinedStyles, /Refined signal detail: match the approved single-surface composition/);

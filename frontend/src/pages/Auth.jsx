@@ -1,6 +1,5 @@
 import { Chrome, Eye, EyeOff, LockKeyhole, Mail, UserRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import swiftChartLogo from "../assets/swiftchart-logo.png";
 import { useAuth } from "../lib/AuthContext.jsx";
 import { FOREX_ENABLED } from "../lib/markets.js";
 
@@ -44,10 +43,10 @@ export default function Auth() {
   }, [mode]);
 
   const copy = {
-    login: { title: "Welcome back", subtitle: "Sign in to continue to SwiftChart", action: "Sign In" },
-    signup: { title: "Create your account", subtitle: FOREX_ENABLED ? "Start using SwiftChart across Crypto and Forex" : "Start using SwiftChart for crypto signals", action: "Create Account" },
-    forgot: { title: "Reset your password", subtitle: "We will email you a secure reset link", action: "Send Reset Link" },
-    reset: { title: "Choose a new password", subtitle: "Set a new password for your SwiftChart account", action: "Update Password" },
+    login: { title: "Sign in", subtitle: "Your signals, saved trades and alerts.", action: "Sign in" },
+    signup: { title: "Create your account", subtitle: FOREX_ENABLED ? "Crypto and Forex signals, tracked from entry to exit." : "Crypto signals, tracked from entry to exit.", action: "Create account" },
+    forgot: { title: "Reset your password", subtitle: "We will email you a link to set a new one.", action: "Send reset link" },
+    reset: { title: "Choose a new password", subtitle: "Use at least 8 characters.", action: "Update password" },
   }[mode];
 
   function validate() {
@@ -162,7 +161,7 @@ export default function Auth() {
   return (
     <main className="auth-shell auth-graphite">
       <a className="auth-brand" href="/" aria-label="SwiftChart public website">
-        <img src={swiftChartLogo} alt="SwiftChart" />
+        <span className="auth-wordmark">swiftchart</span>
       </a>
 
       <section className="auth-card" aria-labelledby="auth-title">
@@ -260,7 +259,7 @@ export default function Auth() {
           {mode === "login" ? <a className="auth-forgot" href={routeWithReturnTo("/forgot-password", returnTo)}>Forgot password?</a> : null}
 
           <button className="auth-primary" type="submit" disabled={submitting || !auth.isSupabaseConfigured}>
-            {submitting ? "Please wait..." : copy.action}
+            {submitting ? "One moment…" : copy.action}
           </button>
         </form>
 
@@ -269,7 +268,7 @@ export default function Auth() {
 
         {mode === "login" || mode === "signup" ? (
           <>
-            <div className="auth-divider"><span>or continue with</span></div>
+            <div className="auth-divider"><span>or</span></div>
             <button className="google-auth-button" type="button" onClick={continueWithGoogle} disabled={submitting || !auth.isSupabaseConfigured}>
               <Chrome size={18} aria-hidden="true" />
               <span>Continue with Google</span>
