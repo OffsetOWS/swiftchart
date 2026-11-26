@@ -35,16 +35,21 @@ function friendlyErrorMessage(message) {
   return text;
 }
 
+const REQUEST_TIMEOUT_MS = 30_000;
+
 async function request(path, options = {}) {
-  const { accessToken, ...fetchOptions } = options;
+  const { accessToken, timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
   const headers = { "Content-Type": "application/json", ...(fetchOptions.headers || {}) };
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
   }
+  const controller = fetchOptions.signal ? null : new AbortController();
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       ...fetchOptions,
       headers,
+      signal: fetchOptions.signal || controller.signal,
     });
     if (!response.ok) {
       const detail = await response.text().then((text) => {
@@ -67,11 +72,18 @@ async function request(path, options = {}) {
     return response.json();
   } catch (error) {
     if (error?.status) throw error;
+    if (error?.name === "AbortError" && controller?.signal.aborted) {
+      const timeoutError = new Error("SwiftChart is taking too long to respond. Check your connection and try again.");
+      timeoutError.kind = "network";
+      throw timeoutError;
+    }
     const requestError = new Error(friendlyErrorMessage(error?.message));
     requestError.kind = /Failed to fetch|NetworkError|Load failed/i.test(String(error?.message || ""))
       ? "network"
       : "request";
     throw requestError;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -89,7 +101,7 @@ export function getAnalysis({ exchange, symbol, timeframe, risk }) {
     min_rr: risk.minRR,
     max_open_trades: risk.maxOpenTrades,
   });
-  return request(`/api/analyze?${params.toString()}`);
+  return request(`/api/analyze?${params.toString()}`, { timeoutMs: 90_000 });
 }
 
 export function getTopIdeas({ exchange, timeframe }) {
@@ -153,7 +165,7 @@ export function getTradeHistoryDetail(id) {
 }
 
 export function checkTradeHistory() {
-  return request("/api/trade-history/check", { method: "POST" });
+  return request("/api/trade-history/check", { method: "POST", timeoutMs: 120_000 });
 }
 
 export function getTradeStats() {
@@ -182,6 +194,7 @@ export function runForexScan(timeframe, accessToken) {
   return request(`/api/forex/scan?timeframe=${encodeURIComponent(timeframe)}`, {
     method: "POST",
     accessToken,
+    timeoutMs: 180_000,
   });
 }
 

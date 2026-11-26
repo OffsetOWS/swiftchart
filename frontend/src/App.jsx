@@ -9,7 +9,9 @@ import PairChartScreen from "./pages/ForexPairPage.jsx";
 import CurrencyStrengthPage from "./pages/CurrencyStrengthPage.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
-import { getActiveCryptoTrades, getTopIdeas, refreshTopIdeasCache } from "./lib/api.js";
+import { FOREX_ENABLED } from "./lib/markets.js";
+import { getActiveCryptoTrades, getTopIdeas, getTradeHistory, refreshTopIdeasCache } from "./lib/api.js";
+import { normalizeOutcomes } from "./lib/homeSummary.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
 
@@ -30,6 +32,8 @@ export default function App() {
   const [pendingSetups, setPendingSetups] = useState([]);
   const [activeCryptoTrades, setActiveCryptoTrades] = useState([]);
   const [loadingTopIdeas, setLoadingTopIdeas] = useState(false);
+  const [scanMeta, setScanMeta] = useState(null);
+  const [recentOutcomes, setRecentOutcomes] = useState([]);
 
   const isLandingPage = path === "/";
   const isLaunchPage = path === "/launch";
@@ -37,13 +41,13 @@ export default function App() {
   const isMobileAlias = path === "/mobile-demo";
   const isAppPage = path === "/app"
     || /^\/app\/(home|scan|history|account|notifications)$/.test(path)
-    || /^\/app\/signal\/[^/]+$/.test(path)
-    || path === "/app/forex/currency-strength"
-    || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
+    || (FOREX_ENABLED && /^\/app\/signal\/[^/]+$/.test(path))
+    || (FOREX_ENABLED && path === "/app/forex/currency-strength")
+    || (FOREX_ENABLED && /^\/app\/forex\/[A-Z0-9]+$/i.test(path));
   const isPublicReadOnlyAppPage = /^\/app\/(?:home|scan)(?:\/|$)/i.test(path)
-    || /^\/app\/signal\/[^/]+$/i.test(path)
-    || path === "/app/forex/currency-strength"
-    || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
+    || (FOREX_ENABLED && /^\/app\/signal\/[^/]+$/i.test(path))
+    || (FOREX_ENABLED && path === "/app/forex/currency-strength")
+    || (FOREX_ENABLED && /^\/app\/forex\/[A-Z0-9]+$/i.test(path));
   const isDisabledCommercePage = /^\/(?:admin\/payments?|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path)
     || /^\/app\/(?:upgrade|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path);
   const isAuthPage = ["/auth", "/login", "/signup", "/forgot-password", "/reset-password"].includes(path);
@@ -63,13 +67,23 @@ export default function App() {
     if (!silent && topIdeas.length === 0 && pendingSetups.length === 0) setLoadingTopIdeas(true);
     try {
       if (manual) await refreshTopIdeasCache({ exchange: "all", timeframe: "4h" });
-      const [ideasResult, activeResult] = await Promise.allSettled([
+      const [ideasResult, activeResult, historyResult] = await Promise.allSettled([
         getTopIdeas({ exchange: "all", timeframe: "4h" }),
         getActiveCryptoTrades("all"),
+        getTradeHistory({ limit: 40, sort: "desc" }),
       ]);
       if (ideasResult.status === "fulfilled") {
-        setTopIdeas(ideasResult.value.ideas || []);
-        setPendingSetups(ideasResult.value.pending_setups || []);
+        const value = ideasResult.value || {};
+        setTopIdeas(value.ideas || []);
+        setPendingSetups(value.pending_setups || []);
+        setScanMeta({
+          scanStats: value.scan_stats || null,
+          lastScanAt: value.last_refresh_finished_at || null,
+          refreshing: Boolean(value.refresh_in_progress),
+        });
+      }
+      if (historyResult.status === "fulfilled") {
+        setRecentOutcomes(normalizeOutcomes(historyResult.value?.records || []));
       }
       if (activeResult.status === "fulfilled") {
         setActiveCryptoTrades(activeResult.value.trades || []);
@@ -96,7 +110,7 @@ export default function App() {
 
   useEffect(() => {
     if (auth.loading) return;
-    if (isLandingPage) {
+    if (isLandingPage && auth.isAuthenticated) {
       navigate("/app/home", { replace: true });
       return;
     }
@@ -141,7 +155,7 @@ export default function App() {
     path,
   ]);
 
-  if (isLandingPage) return <AuthLoading />;
+  if (isLandingPage) return auth.loading || auth.isAuthenticated ? <AuthLoading /> : <><LaunchFlow /><Analytics /></>;
   if (isLaunchPage) return <><LaunchFlow /><Analytics /></>;
   if (isDocsPage) return <><Docs /><Analytics /></>;
   if (isAuthPage && auth.loading) return <><AuthLoading /><Analytics /></>;
@@ -150,6 +164,8 @@ export default function App() {
     return <><AuthLoading /><Analytics /></>;
   }
   if (isDisabledCommercePage || path.startsWith("/analysis/")) return <AuthLoading />;
+
+  if (!isAppPage && path.startsWith("/app/")) return <AuthLoading />;
 
   if (path === "/app/forex/currency-strength") {
     return (
@@ -183,6 +199,8 @@ export default function App() {
           activeCryptoTrades={activeCryptoTrades}
           initialConfigLoading={loadingTopIdeas}
           initialTab={appTabFromPath(path)}
+          scanMeta={scanMeta}
+          recentOutcomes={recentOutcomes}
           onRefreshCrypto={() => refreshTopIdeas({ manual: true })}
           onNavigate={navigate}
         />

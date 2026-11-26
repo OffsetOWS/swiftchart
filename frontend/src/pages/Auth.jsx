@@ -2,6 +2,7 @@ import { Chrome, Eye, EyeOff, LockKeyhole, Mail, UserRound } from "lucide-react"
 import { useEffect, useMemo, useState } from "react";
 import swiftChartLogo from "../assets/swiftchart-logo.png";
 import { useAuth } from "../lib/AuthContext.jsx";
+import { FOREX_ENABLED } from "../lib/markets.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_SPLASH_SESSION_KEY = "swiftchart.appSplashSeen.v1";
@@ -44,7 +45,7 @@ export default function Auth() {
 
   const copy = {
     login: { title: "Welcome back", subtitle: "Sign in to continue to SwiftChart", action: "Sign In" },
-    signup: { title: "Create your account", subtitle: "Start using SwiftChart across Crypto and Forex", action: "Create Account" },
+    signup: { title: "Create your account", subtitle: FOREX_ENABLED ? "Start using SwiftChart across Crypto and Forex" : "Start using SwiftChart for crypto signals", action: "Create Account" },
     forgot: { title: "Reset your password", subtitle: "We will email you a secure reset link", action: "Send Reset Link" },
     reset: { title: "Choose a new password", subtitle: "Set a new password for your SwiftChart account", action: "Update Password" },
   }[mode];

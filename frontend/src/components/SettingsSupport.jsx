@@ -33,6 +33,7 @@ import {
 import { getPublicOrigin } from "../lib/siteUrl.js";
 import packageJson from "../../package.json";
 import { useAuth } from "../lib/AuthContext.jsx";
+import { FOREX_ENABLED } from "../lib/markets.js";
 
 const TELEGRAM_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || "";
 const PUBLIC_SITE_URL = getPublicOrigin();
@@ -66,7 +67,7 @@ const FAQS = [
   ["Getting Started", "How do I find a setup?", "Open Scan, scan the market or a coin, then tap a ranked result to review its execution levels and reasoning."],
   ["Trade Bias", "What does Long or Short mean?", "Long expects price strength; Short expects price weakness. Always review the stop and invalidation before acting."],
   ["Entry, Stop Loss, TP1 and TP2", "How do execution levels work?", "Entry is the decision zone, Stop Loss defines invalidation, and TP1/TP2 are staged profit objectives."],
-  ["Crypto and Forex", "Can I switch markets?", "Use the Crypto/Forex switch on Home. The selected market carries into Scan, History, and Account."],
+  ...(FOREX_ENABLED ? [["Crypto and Forex", "Can I switch markets?", "Use the Crypto/Forex switch on Home. The selected market carries into Scan, History, and Account."]] : []),
   ["Notifications", "Why did I not receive browser push?", "In-app alerts remain available. Browser push also requires permission from your browser and operating system."],
   ["Account and Login", "How do I reset my password?", "Open Settings, then Privacy & Security or Profile, and request a secure reset email."],
   ["Telegram Alerts", "How do I connect Telegram?", "Open Telegram from Account and follow the configured SwiftChart bot flow. Staff will never request passwords or private keys."],
@@ -78,7 +79,7 @@ const DOCUMENTATION = [
   ["Long and Short", "Long setups look for upside continuation or reversal. Short setups look for downside continuation or rejection."],
   ["Risk-to-reward", "Potential reward divided by planned risk. It describes the setup profile, not its probability of winning."],
   ["Crypto scanning", "Ranks supported crypto markets using current market data and quality filters."],
-  ["Forex scanning", "Adds session timing, spread, pair behavior, and news-risk context to the ranking process."],
+  ...(FOREX_ENABLED ? [["Forex scanning", "Adds session timing, spread, pair behavior, and news-risk context to the ranking process."]] : []),
 ];
 
 function PageHeader({ title, onBack }) {
@@ -320,9 +321,11 @@ function TradingSettings({ preferences, updateSection, resetSection, onBack }) {
   return (
     <div className="graphite-screen settings-screen">
       <PageHeader title="Trading Preferences" onBack={onBack} />
-      <SettingsGroup title="Default Market">
-        <Segment value={settings.defaultMarket} options={[["crypto", "Crypto"], ["forex", "Forex"]]} onChange={(value) => updateSection("trading", { defaultMarket: value })} label="Default market" />
-      </SettingsGroup>
+      {FOREX_ENABLED ? (
+        <SettingsGroup title="Default Market">
+          <Segment value={settings.defaultMarket} options={[["crypto", "Crypto"], ["forex", "Forex"]]} onChange={(value) => updateSection("trading", { defaultMarket: value })} label="Default market" />
+        </SettingsGroup>
+      ) : null}
       <SettingsGroup title="Default Timeframe">
         <Segment value={settings.defaultTimeframe} options={[["1h", "1H"], ["4h", "4H"], ["1d", "1D"]]} onChange={(value) => updateSection("trading", { defaultTimeframe: value })} label="Default timeframe" />
       </SettingsGroup>
@@ -454,7 +457,7 @@ function AppInformation({ onBack }) {
       </SettingsGroup>
       <SettingsGroup title="About SwiftChart">
         <div className="settings-copy-block">
-          <p>SwiftChart is a market-analysis and decision-support product for ranked crypto and Forex setups.</p>
+          <p>SwiftChart is a market-analysis and decision-support product for ranked {FOREX_ENABLED ? "crypto and Forex" : "crypto"} setups.</p>
           <a href={PUBLIC_SITE_URL} target="_blank" rel="noreferrer">Official website <ExternalLink size={13} /></a>
           <small>SwiftChart does not guarantee profit or provide financial advice. Trading involves risk, and users remain responsible for their decisions.</small>
         </div>
