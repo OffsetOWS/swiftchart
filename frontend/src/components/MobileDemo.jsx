@@ -9,15 +9,11 @@ import {
   History,
   House,
   Info,
-  LineChart,
   LogOut,
   MessageCircle,
   ScanLine,
   Search,
   Settings,
-  Target,
-  TrendingDown,
-  TrendingUp,
   User,
   UserRound,
 } from "lucide-react";
@@ -40,6 +36,8 @@ import { useAppPreferences } from "../lib/appPreferences.js";
 import AppSplashScreen from "./AppSplashScreen.jsx";
 import { CurrencyStrengthOpportunities, CurrencyStrengthRanking } from "./CurrencyStrength.jsx";
 import GraphiteStateCard from "./GraphiteStateCard.jsx";
+import { RecentOutcomes, RegimeCard, ScanStatusCard } from "./HomeOverview.jsx";
+import { regimeFromScanStats } from "../lib/homeSummary.js";
 import InstrumentLogo from "./InstrumentLogo.jsx";
 import NotificationCenter from "./NotificationCenter.jsx";
 import SettingsSupport from "./SettingsSupport.jsx";
@@ -420,19 +418,6 @@ function GraphiteHeader({
   );
 }
 
-function SparkChart() {
-  return (
-    <div className="graphite-chart" aria-hidden="true">
-      <span className="bar a" />
-      <span className="bar b" />
-      <span className="bar c" />
-      <span className="bar d" />
-      <span className="bar e" />
-      <span className="line" />
-    </div>
-  );
-}
-
 function StatTile({ label, value, tone }) {
   return (
     <article className={`graphite-stat ${tone || ""}`}>
@@ -442,36 +427,16 @@ function StatTile({ label, value, tone }) {
   );
 }
 
-function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forexSignals, forexOverview, forexStrength, onViewStrength, onSelectPair }) {
+function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, scanMeta, outcomes = [], loading = false, forexSignals, forexOverview, forexStrength, onViewStrength, onSelectPair }) {
   if (market === MARKET_TYPES.forex) {
     return <ForexHomeScreen signals={forexSignals} overview={forexOverview} strength={forexStrength} onSelect={onSelect} onViewAll={onViewAll} onViewStrength={onViewStrength} onSelectPair={onSelectPair} />;
   }
-  const best = signals[0] || null;
-  const bullish = best ? !/short|sell/i.test(best.direction) : null;
   const opportunitySignals = signals.filter((signal) => !signal.isActiveTrade);
+  const regime = regimeFromScanStats(scanMeta?.scanStats);
+  const lastScanAt = scanMeta?.lastScanAt;
   return (
     <div className="graphite-screen">
-      <section className="graphite-hero-card">
-        <div className="graphite-hero-copy">
-          <span>Market Summary</span>
-          <h1>{best ? best.symbol : "Market overview"}</h1>
-          <p>{best ? `${best.symbol} is listed by 24-hour volume.` : "SwiftChart is tracking the live crypto market."}</p>
-          <span className={`graphite-bias-pill ${bullish === null ? "" : bullish ? "bullish" : "bearish"}`}>
-            {bullish === null ? <Target size={15} /> : bullish ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
-            {bullish === null ? "Waiting for confirmation" : bullish ? "Bullish momentum" : "Bearish momentum"}
-          </span>
-        </div>
-        <SparkChart />
-      </section>
-
-      <section className="graphite-regime-card">
-        <div>
-          <span>Market Regime</span>
-          <strong>{bullish === null ? "Neutral, selective" : bullish ? "Bullish, selective" : "Bearish, selective"}</strong>
-          <p>{bullish === null ? "Waiting for a confirmed directional edge." : bullish ? "Momentum favors longs." : "Momentum favors shorts."} Weak mid-range setups are filtered out.</p>
-        </div>
-        <LineChart size={24} />
-      </section>
+      {loading && !lastScanAt ? <div className="home-skeleton" aria-label="Loading market regime" /> : <RegimeCard regime={regime} updatedAt={lastScanAt} />}
 
       <section className="market-pair-section">
         <div className="graphite-section-head">
@@ -480,15 +445,8 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forex
         </div>
         <div className="market-pair-list">
           {opportunitySignals.slice(0, 4).map((signal) => <MarketSignalRow key={`${signal.symbol}-${signal.timeframe}-home`} signal={signal} onSelect={onSelect} />)}
-          {!opportunitySignals.length ? (
-            <GraphiteStateCard
-              tone="empty"
-              eyebrow="Market scan"
-              title="No new confirmed setup right now"
-              message="Active Telegram trades stay listed above while SwiftChart scans for the next opportunity."
-              actionLabel="Scan again"
-              onAction={onViewAll}
-            />
+          {!opportunitySignals.length && !(loading && !lastScanAt) ? (
+            <ScanStatusCard lastScanAt={lastScanAt} refreshing={scanMeta?.refreshing} telegramUrl={TELEGRAM_BOT_URL} />
           ) : null}
         </div>
       </section>
@@ -504,6 +462,8 @@ function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, forex
           </div>
         </section>
       ) : null}
+
+      <RecentOutcomes outcomes={outcomes} />
 
     </div>
   );
@@ -1332,6 +1292,8 @@ export default function MobileDemo({
   activeCryptoTrades = [],
   initialConfigLoading = false,
   initialTab = "",
+  scanMeta = null,
+  recentOutcomes = [],
   onRefreshCrypto,
   onNavigate,
 }) {
@@ -1973,7 +1935,7 @@ export default function MobileDemo({
             />
           ) : <>
           <main className="graphite-content">
-            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} forexSignals={forexSignals} forexOverview={forexOverview} forexStrength={forexStrength} onViewStrength={() => onNavigate?.("/app/forex/currency-strength")} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
+            {tab === "home" ? <HomeScreen signals={preferredSignals} activeSignals={activeSignals} onSelect={setSelectedSignal} onViewAll={() => selectTab("scan")} market={activeMarket} scanMeta={scanMeta} outcomes={recentOutcomes} loading={initialConfigLoading} forexSignals={forexSignals} forexOverview={forexOverview} forexStrength={forexStrength} onViewStrength={() => onNavigate?.("/app/forex/currency-strength")} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
             {tab === "scan" ? <ScanScreen signals={signals} onSelect={setSelectedSignal} market={activeMarket} forexSignals={forexSignals} onCryptoScan={onRefreshCrypto} onForexScan={scanForexNow} cryptoLoading={initialConfigLoading} scanningForex={forexScanLoading} forexScanResult={forexScanResult} forexFeedState={forexFeedState} forexScanError={forexScanError} onRetryForex={() => setForexReloadVersion((value) => value + 1)} tradingPreferences={preferences.trading} forexPairs={forexPairs} onSelectPair={(symbol) => onNavigate?.(`/app/forex/${symbol}`)} /> : null}
             {tab === "history" ? <HistoryScreen market={activeMarket} paperTrades={paperTrades} onSelect={openHistoryTrade} /> : null}
             {tab === "account" && accountView === "main" ? (

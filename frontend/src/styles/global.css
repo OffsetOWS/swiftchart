@@ -14,7 +14,7 @@
   --screen: #070908;
   --green: #145c38;
   --red: #7d2825;
-  --cyan: #6fd0d4;
+  --cyan: #e6e6e6;
   --amber: #806315;
   --shadow: 0 26px 60px rgba(0, 0, 0, 0.18);
   --mono: "IBM Plex Mono", "Space Mono", "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
@@ -2388,8 +2388,8 @@ button:disabled {
   background:
     linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px),
-    radial-gradient(circle at 50% 14%, rgba(93,217,207,0.07), transparent 30%),
-    #050607;
+    radial-gradient(circle at 50% 14%, rgba(244,245,246,0.07), transparent 30%),
+    #000;
   background-size: 32px 32px, 32px 32px, auto, auto;
 }
 
@@ -2494,8 +2494,8 @@ button:disabled {
 }
 
 .auth-field > div:focus-within {
-  border-color: rgba(93,217,207,0.52);
-  box-shadow: 0 0 0 3px rgba(93,217,207,0.08);
+  border-color: rgba(244,245,246,0.52);
+  box-shadow: 0 0 0 3px rgba(244,245,246,0.08);
 }
 
 .auth-field input {
@@ -2542,7 +2542,7 @@ button:disabled {
 
 .auth-forgot:hover,
 .auth-switch a:hover {
-  color: #5dd9cf;
+  color: #f4f5f6;
 }
 
 .auth-primary,
@@ -2562,9 +2562,9 @@ button:disabled {
 }
 
 .auth-primary {
-  color: #061112;
-  border: 1px solid #5dd9cf;
-  background: #5dd9cf;
+  color: var(--graphite-on-accent, #000);
+  border: 1px solid #f4f5f6;
+  background: #f4f5f6;
 }
 
 .auth-primary:hover:not(:disabled),
@@ -2620,8 +2620,8 @@ button:disabled {
 
 .auth-success {
   color: #96e4dc;
-  border: 1px solid rgba(93,217,207,0.22);
-  background: rgba(93,217,207,0.07);
+  border: 1px solid rgba(244,245,246,0.22);
+  background: rgba(244,245,246,0.07);
 }
 
 .auth-switch {
@@ -2681,7 +2681,7 @@ button:disabled {
 }
 
 .auth-resend:hover:not(:disabled) {
-  color: #5dd9cf;
+  color: #f4f5f6;
 }
 
 .auth-resend:disabled {
@@ -3449,7 +3449,7 @@ button:disabled {
     --mobile-muted: #4d4d4a;
     --mobile-line: rgba(17, 17, 17, 0.18);
     --mobile-green: #145c38;
-    --mobile-cyan: #6fd0d4;
+    --mobile-cyan: #e6e6e6;
     --mobile-amber: #806315;
     --mobile-red: #7d2825;
     --mobile-shadow: 0 18px 44px rgba(0, 0, 0, 0.14);
@@ -3472,7 +3472,7 @@ button:disabled {
     --mobile-muted: #aaa79e;
     --mobile-line: rgba(238, 238, 234, 0.16);
     --mobile-green: #77d99a;
-    --mobile-cyan: #6fd0d4;
+    --mobile-cyan: #e6e6e6;
     --mobile-amber: #dac06a;
     --mobile-red: #ff8a82;
     --mobile-shadow: 0 24px 62px rgba(0, 0, 0, 0.42);
@@ -4319,7 +4319,7 @@ button:disabled {
     --mobile-red: #ff8b89;
     --mobile-shadow: 0 22px 54px rgba(0, 0, 0, 0.36);
     color: var(--mobile-ink);
-    background: linear-gradient(180deg, #030a08 0%, #050807 100%);
+    background: #000;
   }
 
   .mobile-demo-header span,
@@ -7225,21 +7225,22 @@ button:disabled {
 @media (min-width: 0px) {
   .mobile-demo-page,
   .app-view.dark-mode {
-    background: #050607;
+    background: #000;
   }
 
   .graphite-app {
     --bottom-nav-height: 76px;
-    --graphite-bg: #050607;
-    --graphite-panel: #101214;
-    --graphite-panel-2: #16191c;
-    --graphite-raised: #1c2024;
+    --graphite-bg: #000000;
+    --graphite-panel: #0c0c0c;
+    --graphite-panel-2: #131313;
+    --graphite-raised: #1a1a1a;
     --graphite-ink: #f4f5f6;
-    --graphite-soft: #c6cbd0;
-    --graphite-muted: #7f878f;
+    --graphite-soft: #c9c9c9;
+    --graphite-muted: #8a8a8a;
     --graphite-line: rgba(255,255,255,0.09);
     --graphite-line-strong: rgba(255,255,255,0.14);
-    --graphite-teal: #5dd9cf;
+    --graphite-teal: #f4f5f6;
+    --graphite-on-accent: #000000;
     --graphite-profit: #3ddc97;
     --graphite-loss: #ff646d;
     --graphite-shadow: 0 24px 58px rgba(0,0,0,0.34);
@@ -7252,10 +7253,7 @@ button:disabled {
     max-height: 100dvh;
     overflow: hidden;
     color: var(--graphite-ink);
-    background:
-      radial-gradient(circle at 78% 2%, rgba(255,255,255,0.08), transparent 24%),
-      linear-gradient(145deg, rgba(255,255,255,0.045), transparent 24%),
-      #050607;
+    background: #000;
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
@@ -7273,7 +7271,7 @@ button:disabled {
     inset: -12% -40% auto -24%;
     z-index: -1;
     height: 520px;
-    opacity: 0.62;
+    opacity: 0;
     pointer-events: none;
     background:
       linear-gradient(128deg, transparent 12%, rgba(255,255,255,0.08) 46%, transparent 50%),
@@ -7291,7 +7289,7 @@ button:disabled {
     justify-content: space-between;
     gap: 10px;
     padding: 18px 14px 13px;
-    background: linear-gradient(#050607 72%, rgba(5,6,7,0));
+    background: linear-gradient(#000 72%, rgba(0,0,0,0));
   }
 
   .sr-only {
@@ -7396,8 +7394,8 @@ button:disabled {
     align-items: center;
     justify-content: center;
     padding: 0 4px;
-    color: #061112 !important;
-    border: 2px solid #050607;
+    color: var(--graphite-on-accent, #000) !important;
+    border: 2px solid #000;
     border-radius: 999px;
     background: var(--graphite-teal);
     font-size: 9px !important;
@@ -7513,7 +7511,7 @@ button:disabled {
     min-width: 72px;
     height: 36px;
     padding: 0 12px;
-    color: #071311;
+    color: var(--graphite-on-accent, #000);
     border: 0;
     border-radius: 11px;
     background: var(--graphite-teal);
@@ -8143,7 +8141,7 @@ button:disabled {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    color: #061112;
+    color: var(--graphite-on-accent, #000);
     border: 0;
     border-radius: 14px;
     background: var(--graphite-teal);
@@ -8293,7 +8291,7 @@ button:disabled {
   .forex-manual-signal button {
     min-height: 36px;
     padding: 0 10px;
-    color: #061112;
+    color: var(--graphite-on-accent, #000);
     border: 0;
     border-radius: 12px;
     background: var(--graphite-teal);
@@ -8387,7 +8385,7 @@ button:disabled {
 
   .graphite-filter-row button.active {
     color: var(--graphite-teal);
-    border-color: rgba(93,217,207,0.34);
+    border-color: rgba(244,245,246,0.34);
   }
 
   .graphite-history-hero {
@@ -8451,7 +8449,7 @@ button:disabled {
     height: 15px;
     flex: 0 0 auto;
     border: 2px solid rgba(6,17,18,0.3);
-    border-top-color: #061112;
+    border-top-color: var(--graphite-on-accent, #000);
     border-radius: 50%;
     animation: graphite-spin 700ms linear infinite;
   }
@@ -8478,7 +8476,7 @@ button:disabled {
   .graphite-empty-state button {
     min-height: 34px;
     padding: 0 10px;
-    color: #061112;
+    color: var(--graphite-on-accent, #000);
     border: 0;
     border-radius: 12px;
     background: var(--graphite-teal);
@@ -8545,7 +8543,7 @@ button:disabled {
     width: fit-content;
     padding: 7px 10px;
     color: var(--graphite-teal);
-    border: 1px solid rgba(93,217,207,0.32);
+    border: 1px solid rgba(244,245,246,0.32);
     border-radius: 999px;
     font-size: 12px;
     font-style: normal;
@@ -8623,7 +8621,7 @@ button:disabled {
     padding: 6px 10px;
     color: var(--graphite-teal);
     border-radius: 999px;
-    background: rgba(93,217,207,0.1);
+    background: rgba(244,245,246,0.1);
     font-size: 12px;
     text-transform: capitalize;
   }
@@ -8928,7 +8926,7 @@ button:disabled {
     gap: 8px;
     margin: 0 -2px;
     padding: 8px 2px max(14px, env(safe-area-inset-bottom));
-    background: linear-gradient(180deg, rgba(5,6,7,0), var(--graphite-bg) 28%);
+    background: linear-gradient(180deg, rgba(0,0,0,0), var(--graphite-bg) 28%);
   }
 
   .graphite-detail-actions:has(button:nth-child(3)) {
@@ -8987,9 +8985,9 @@ button:disabled {
     gap: 5px;
     padding: 0 10px;
     color: var(--graphite-teal);
-    border: 1px solid rgba(93, 217, 207, 0.24);
+    border: 1px solid rgba(244,245,246,0.24);
     border-radius: 12px;
-    background: rgba(93, 217, 207, 0.055);
+    background: rgba(244,245,246,0.055);
     font-size: 10px;
     font-weight: 800;
     white-space: nowrap;
@@ -9082,8 +9080,8 @@ button:disabled {
   }
 
   .notification-card.unread {
-    border-color: rgba(93, 217, 207, 0.2);
-    background: linear-gradient(90deg, rgba(93,217,207,0.075), rgba(255,255,255,0.025) 38%), var(--graphite-panel);
+    border-color: rgba(244,245,246,0.2);
+    background: linear-gradient(90deg, rgba(244,245,246,0.075), rgba(255,255,255,0.025) 38%), var(--graphite-panel);
   }
 
   .notification-asset {
@@ -9217,7 +9215,7 @@ button:disabled {
     align-items: center;
     gap: 6px;
     padding: 0 14px;
-    color: #061112;
+    color: var(--graphite-on-accent, #000);
     border: 0;
     border-radius: 13px;
     background: var(--graphite-teal);
@@ -9563,7 +9561,7 @@ button:disabled {
   --notification-ink: #f4f6f7;
   --notification-soft: #c7cdd2;
   --notification-muted: #818b94;
-  --notification-accent: #5dd9cf;
+  --notification-accent: #f4f5f6;
   position: fixed;
   overflow: hidden;
   color: var(--notification-ink);
@@ -9743,7 +9741,7 @@ button:disabled {
 }
 
 .notification-popover .notification-card.unread {
-  background: linear-gradient(90deg, rgba(93, 217, 207, 0.075), transparent 45%), var(--notification-panel);
+  background: linear-gradient(90deg, rgba(244,245,246,0.075), transparent 45%), var(--notification-panel);
 }
 
 .notification-popover .notification-asset {
@@ -9869,7 +9867,7 @@ button:disabled {
   align-items: center;
   gap: 5px;
   padding: 0 12px;
-  color: #061112;
+  color: var(--graphite-on-accent, #000);
   border: 0;
   border-radius: 10px;
   background: var(--notification-accent);
@@ -9947,7 +9945,8 @@ button:disabled {
   --graphite-muted: #6e797e;
   --graphite-line: rgba(16, 24, 28, 0.11);
   --graphite-line-strong: rgba(16, 24, 28, 0.17);
-  --graphite-teal: #087f79;
+  --graphite-teal: #121719;
+  --graphite-on-accent: #ffffff;
   --graphite-shadow: 0 20px 48px rgba(21, 31, 35, 0.12);
   --light-dark-surface: #182126;
   --light-dark-surface-alt: #1b2d2f;
@@ -9957,7 +9956,7 @@ button:disabled {
   --light-neutral-badge-text: #b8c3c6;
   color: var(--graphite-ink);
   background:
-    radial-gradient(circle at 78% 2%, rgba(93, 217, 207, 0.08), transparent 24%),
+    radial-gradient(circle at 78% 2%, rgba(244,245,246,0.08), transparent 24%),
     linear-gradient(145deg, rgba(255, 255, 255, 0.72), transparent 25%),
     var(--graphite-bg);
 }
@@ -10105,7 +10104,7 @@ button:disabled {
   --desktop-gate-soft: #b6c0c3;
   --desktop-gate-muted: #7f8b8f;
   --desktop-gate-line: rgba(255, 255, 255, 0.1);
-  --desktop-gate-accent: #5dd9cf;
+  --desktop-gate-accent: #f4f5f6;
   position: relative;
   isolation: isolate;
   min-height: 100svh;
@@ -10115,7 +10114,7 @@ button:disabled {
   padding: clamp(32px, 5vw, 72px);
   color: var(--desktop-gate-ink);
   background:
-    radial-gradient(circle at 72% 30%, rgba(93, 217, 207, 0.12), transparent 30%),
+    radial-gradient(circle at 72% 30%, rgba(244,245,246,0.12), transparent 30%),
     radial-gradient(circle at 18% 74%, rgba(54, 85, 91, 0.2), transparent 32%),
     linear-gradient(145deg, #111719 0%, #080b0c 54%, #040506 100%);
   animation: desktopGateEnter 480ms ease-out both;
@@ -10142,7 +10141,7 @@ button:disabled {
   pointer-events: none;
   background:
     linear-gradient(128deg, transparent 37%, rgba(255, 255, 255, 0.08) 38%, transparent 39%),
-    linear-gradient(142deg, transparent 52%, rgba(93, 217, 207, 0.09) 53%, transparent 54%);
+    linear-gradient(142deg, transparent 52%, rgba(244,245,246,0.09) 53%, transparent 54%);
   transform: rotate(-4deg);
 }
 
@@ -10181,7 +10180,7 @@ button:disabled {
 
 .desktop-mobile-eyebrow svg {
   padding: 2px;
-  border: 1px solid rgba(93, 217, 207, 0.42);
+  border: 1px solid rgba(244,245,246,0.42);
   border-radius: 50%;
 }
 
@@ -10299,7 +10298,7 @@ button:disabled {
   padding: 42px 13px 14px;
   border-radius: 38px;
   background:
-    radial-gradient(circle at 82% 14%, rgba(93, 217, 207, 0.09), transparent 24%),
+    radial-gradient(circle at 82% 14%, rgba(244,245,246,0.09), transparent 24%),
     #060809;
 }
 
@@ -10385,9 +10384,9 @@ button:disabled {
   display: grid;
   place-items: center;
   color: var(--desktop-gate-accent);
-  border: 1px solid rgba(93, 217, 207, 0.28);
+  border: 1px solid rgba(244,245,246,0.28);
   border-radius: 11px;
-  background: rgba(93, 217, 207, 0.07);
+  background: rgba(244,245,246,0.07);
   font-size: 11px;
   font-style: normal;
   font-weight: 900;
@@ -10570,7 +10569,7 @@ button:disabled {
 }
 
 button.settings-row:active {
-  background: rgba(93, 217, 207, 0.075);
+  background: rgba(244,245,246,0.075);
 }
 
 .settings-row:focus-visible,
@@ -10655,8 +10654,8 @@ button.settings-row:active {
 }
 
 .settings-switch.on {
-  border-color: rgba(93, 217, 207, 0.55);
-  background: rgba(93, 217, 207, 0.2);
+  border-color: rgba(244,245,246,0.55);
+  background: rgba(244,245,246,0.2);
 }
 
 .settings-switch.on i {
@@ -10683,7 +10682,7 @@ button.settings-row:active {
 }
 
 .settings-segment button.active {
-  color: #071213;
+  color: var(--graphite-on-accent, #000);
   background: var(--graphite-teal);
 }
 
@@ -10781,7 +10780,7 @@ button.settings-row:active {
   align-items: center;
   gap: 4px;
   padding: 0 9px;
-  color: #071213;
+  color: var(--graphite-on-accent, #000);
   border: 0;
   border-radius: 10px;
   background: var(--graphite-teal);
@@ -10806,7 +10805,7 @@ button.settings-row:active {
 }
 
 .settings-primary {
-  color: #071213;
+  color: var(--graphite-on-accent, #000);
   border: 0;
   background: var(--graphite-teal);
 }
@@ -10956,7 +10955,7 @@ button.settings-row:active {
 }
 
 .settings-confirm button:last-child {
-  color: #071213;
+  color: var(--graphite-on-accent, #000);
   border: 0;
   background: var(--graphite-teal);
 }
@@ -11157,7 +11156,7 @@ button.settings-row:active {
   align-items: center;
   gap: 6px;
   padding: 0 13px;
-  color: #071213;
+  color: var(--graphite-on-accent, #000);
   border: 0;
   border-radius: 12px;
   background: var(--graphite-teal);
@@ -11461,9 +11460,9 @@ button.settings-row:active {
   width: 42px;
   height: 42px;
   color: var(--graphite-teal);
-  border: 1px solid rgba(93, 217, 207, 0.18);
+  border: 1px solid rgba(244,245,246,0.18);
   border-radius: 14px;
-  background: rgba(93, 217, 207, 0.055);
+  background: rgba(244,245,246,0.055);
 }
 
 .graphite-app .graphite-section {
@@ -11537,7 +11536,7 @@ button.settings-row:active {
 }
 
 .graphite-app .graphite-score.elite {
-  color: #061112;
+  color: var(--graphite-on-accent, #000);
   border: 0;
   background: var(--graphite-teal);
 }
@@ -11551,7 +11550,7 @@ button.settings-row:active {
 }
 
 .graphite-app .graphite-row.is-active-trade {
-  border-color: rgba(93, 217, 207, 0.15);
+  border-color: rgba(244,245,246,0.15);
 }
 
 .graphite-app .graphite-row.is-active-trade em {
@@ -11590,8 +11589,8 @@ button.settings-row:active {
 }
 
 .graphite-app .graphite-filters label:first-child {
-  border-color: rgba(93, 217, 207, 0.28);
-  background: rgba(93, 217, 207, 0.055);
+  border-color: rgba(244,245,246,0.28);
+  background: rgba(244,245,246,0.055);
 }
 
 .graphite-app .graphite-state-card {
@@ -11609,9 +11608,9 @@ button.settings-row:active {
   display: grid;
   place-items: center;
   color: var(--graphite-teal);
-  border: 1px solid rgba(93, 217, 207, 0.18);
+  border: 1px solid rgba(244,245,246,0.18);
   border-radius: 12px;
-  background: rgba(93, 217, 207, 0.055);
+  background: rgba(244,245,246,0.055);
 }
 
 .graphite-app .graphite-state-copy {
@@ -11684,7 +11683,7 @@ button.settings-row:active {
 .graphite-app .graphite-state-actions button {
   min-height: 40px;
   padding: 0 13px;
-  color: #061112;
+  color: var(--graphite-on-accent, #000);
   border: 0;
   border-radius: 12px;
   background: var(--graphite-teal);
