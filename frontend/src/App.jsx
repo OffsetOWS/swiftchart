@@ -1,19 +1,20 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
 import MobileDemo from "./components/MobileDemo.jsx";
-import Auth from "./pages/Auth.jsx";
-import Docs from "./pages/Docs.jsx";
-import LaunchFlow from "./pages/LaunchFlow.jsx";
-import PairChartScreen from "./pages/ForexPairPage.jsx";
-import CurrencyStrengthPage from "./pages/CurrencyStrengthPage.jsx";
+const Auth = lazy(() => import("./pages/Auth.jsx"));
+const Docs = lazy(() => import("./pages/Docs.jsx"));
+const LaunchFlow = lazy(() => import("./pages/LaunchFlow.jsx"));
+const PairChartScreen = lazy(() => import("./pages/ForexPairPage.jsx"));
+const CurrencyStrengthPage = lazy(() => import("./pages/CurrencyStrengthPage.jsx"));
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
 import { FOREX_ENABLED } from "./lib/markets.js";
-import { getActiveCryptoTrades, getTopIdeas, getTradeHistory, refreshTopIdeasCache } from "./lib/api.js";
+import { getActiveCryptoTrades, getCandles, getTopIdeas, getTradeHistory, refreshTopIdeasCache } from "./lib/api.js";
+import { summariseBtcCandles } from "./lib/btcMarket.js";
 import { normalizeOutcomes } from "./lib/homeSummary.js";
-import swiftChartLogo from "./assets/swiftchart-logo.png";
 import "./styles/global.css";
+import "./styles/terminal.css";
 
 function appTabFromPath(pathname) {
   const match = String(pathname || "").match(/^\/app\/(home|scan|history|account|notifications)$/i);
@@ -34,6 +35,7 @@ export default function App() {
   const [loadingTopIdeas, setLoadingTopIdeas] = useState(false);
   const [scanMeta, setScanMeta] = useState(null);
   const [recentOutcomes, setRecentOutcomes] = useState([]);
+  const [btcMarket, setBtcMarket] = useState(null);
 
   const isLandingPage = path === "/";
   const isLaunchPage = path === "/launch";
@@ -67,11 +69,16 @@ export default function App() {
     if (!silent && topIdeas.length === 0 && pendingSetups.length === 0) setLoadingTopIdeas(true);
     try {
       if (manual) await refreshTopIdeasCache({ exchange: "all", timeframe: "4h" });
-      const [ideasResult, activeResult, historyResult] = await Promise.allSettled([
+      const [ideasResult, activeResult, historyResult, btcResult] = await Promise.allSettled([
         getTopIdeas({ exchange: "all", timeframe: "4h" }),
         getActiveCryptoTrades("all"),
         getTradeHistory({ limit: 40, sort: "desc" }),
+        getCandles({ exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "1h" }),
       ]);
+      if (btcResult.status === "fulfilled") {
+        const summary = summariseBtcCandles(btcResult.value);
+        if (summary) setBtcMarket(summary);
+      }
       if (ideasResult.status === "fulfilled") {
         const value = ideasResult.value || {};
         setTopIdeas(value.ideas || []);
@@ -200,6 +207,7 @@ export default function App() {
           initialConfigLoading={loadingTopIdeas}
           initialTab={appTabFromPath(path)}
           scanMeta={scanMeta}
+          btcMarket={btcMarket}
           recentOutcomes={recentOutcomes}
           onRefreshCrypto={() => refreshTopIdeas({ manual: true })}
           onNavigate={navigate}
@@ -214,11 +222,9 @@ function AuthLoading() {
   return (
     <main className="auth-shell auth-graphite">
       <section className="auth-card auth-loading-card" aria-live="polite">
-        <div className="launch-mark" aria-hidden="true"><img src={swiftChartLogo} alt="" /></div>
+        <span className="auth-wordmark">swiftchart</span>
         <div className="auth-copy">
-          <span className="eyebrow">SwiftChart account</span>
-          <h1>Restoring session</h1>
-          <p>Loading your dashboard, profile, and saved SwiftChart access.</p>
+          <p>Signing you in…</p>
         </div>
         <div className="launch-progress"><span /></div>
       </section>
@@ -234,5 +240,5 @@ const canonicalRedirectUrl = getCanonicalRedirectUrl();
 if (canonicalRedirectUrl) {
   window.location.replace(canonicalRedirectUrl);
 } else {
-  appRoot.render(<AuthProvider><App /></AuthProvider>);
+  appRoot.render(<AuthProvider><Suspense fallback={<div className="app-suspense" />}><App /></Suspense></AuthProvider>);
 }

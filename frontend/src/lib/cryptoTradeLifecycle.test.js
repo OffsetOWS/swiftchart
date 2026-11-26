@@ -13,5 +13,6 @@ test("crypto history refreshes lifecycle and live price for signed-in users", ()
 test("saved crypto detail feeds lifecycle and latest price into the execution ladder", () => {
   assert.match(mobileApp, /status: lifecycleStatus/);
   assert.match(mobileApp, /latestPrice: trade\.latest_price/);
-  assert.match(mobileApp, /Nearest:[\s\S]*?nearestDistancePct/);
+  assert.match(mobileApp, /const progress = executionLadderState\(signal\)/);
+  assert.match(mobileApp, /<TradeLadder signal=\{signal\} progress=\{progress\} \/>/);
 });

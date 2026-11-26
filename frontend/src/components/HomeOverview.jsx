@@ -1,22 +1,35 @@
-import { ArrowUpRight, Send } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import { formatChangePct } from "../lib/btcMarket.js";
 import { formatR, timeAgo } from "../lib/homeSummary.js";
 import "../styles/home.css";
 
-export function RegimeCard({ regime, updatedAt }) {
+export function BtcTicker({ btc }) {
+  if (!btc) return null;
+  const change = formatChangePct(btc.changePct);
+  const tone = btc.changePct > 0.05 ? "up" : btc.changePct < -0.05 ? "down" : "";
+  return (
+    <span className="tm-ticker" aria-label={`Bitcoin ${btc.priceLabel} dollars, ${change} in 24 hours`}>
+      <span className="tm-ticker-sym">BTC</span>
+      <span className="tm-ticker-price">{btc.priceLabel}</span>
+      {change ? <span className={`tm-ticker-change ${tone}`}>{change}</span> : null}
+    </span>
+  );
+}
+
+export function RegimeCard({ regime, updatedAt, btc }) {
   const updated = timeAgo(updatedAt);
   return (
-    <section className="home-card home-regime" aria-labelledby="home-regime-title">
-      <div className="home-card-head">
-        <span className="home-eyebrow">Market regime</span>
-        {updated ? <span className="home-meta">Updated {updated}</span> : null}
-      </div>
-      <h1 id="home-regime-title" className="home-regime-title">{regime.label}</h1>
-      <p className="home-body">{regime.summary}</p>
-      {regime.position !== null ? (
-        <div className="home-regime-scale" aria-hidden="true">
-          <span className="home-regime-track" />
-          <span className="home-regime-marker" style={{ left: `${regime.position}%` }} />
-          <div className="home-regime-labels"><span>Down</span><span>Range</span><span>Up</span></div>
+    <section className="tm-block tm-regime" aria-labelledby="home-regime-title">
+      <p className="tm-label">{updated ? `Market · last scan ${updated}` : "Market"}</p>
+      <h1 id="home-regime-title" className="tm-statement">{regime.key === "unknown" ? regime.label : `${regime.label}.`}</h1>
+      <p className="tm-body">{regime.summary}</p>
+      {btc ? (
+        <div className="tm-range" aria-label={`BTC ${btc.rangeDays}-day range ${btc.rangeLowLabel} to ${btc.rangeHighLabel}`}>
+          <span className="tm-range-line" aria-hidden="true" />
+          <span className="tm-range-marker" style={{ left: `${btc.rangePosition}%` }} aria-hidden="true" />
+          <span className="tm-range-end low">{btc.rangeLowLabel}</span>
+          <span className="tm-range-caption">BTC · {btc.rangeDays}d range</span>
+          <span className="tm-range-end high">{btc.rangeHighLabel}</span>
         </div>
       ) : null}
     </section>
@@ -26,18 +39,14 @@ export function RegimeCard({ regime, updatedAt }) {
 export function ScanStatusCard({ lastScanAt, refreshing, telegramUrl }) {
   const last = timeAgo(lastScanAt);
   return (
-    <section className="home-card" aria-live="polite">
-      <div className="home-card-head">
-        <span className="home-eyebrow">Market scan</span>
-        <span className="home-meta">{refreshing ? "Scanning now…" : last ? `Last scan ${last}` : ""}</span>
+    <section className="tm-block" aria-live="polite">
+      <div className="tm-row-head">
+        <h2 className="tm-heading">Nothing worth taking yet</h2>
+        <span className="tm-meta">{refreshing ? "scanning…" : last ? `scanned ${last}` : ""}</span>
       </div>
-      <h2 className="home-title">No setup passes the filter yet</h2>
-      <p className="home-body">
-        Weak mid-range trades are skipped on purpose. You'll get the signal on Telegram the moment one qualifies.
-      </p>
-      <a className="home-primary" href={telegramUrl} target="_blank" rel="noreferrer">
-        <Send size={15} aria-hidden="true" />
-        Get alerts on Telegram
+      <p className="tm-body tm-quiet">Mid-range trades get skipped on purpose. When something qualifies, it hits Telegram first.</p>
+      <a className="tm-link" href={telegramUrl} target="_blank" rel="noreferrer">
+        Open the Telegram bot <ArrowRight size={14} aria-hidden="true" />
       </a>
     </section>
   );
@@ -46,34 +55,32 @@ export function ScanStatusCard({ lastScanAt, refreshing, telegramUrl }) {
 export function RecentOutcomes({ outcomes, onViewHistory }) {
   if (!outcomes.length) return null;
   return (
-    <section className="home-card home-outcomes" aria-labelledby="home-outcomes-title">
-      <div className="home-card-head">
-        <span id="home-outcomes-title" className="home-eyebrow">Recent outcomes</span>
+    <section className="tm-block" aria-labelledby="home-outcomes-title">
+      <div className="tm-row-head">
+        <h2 id="home-outcomes-title" className="tm-heading">Closed recently</h2>
         {onViewHistory ? (
-          <button type="button" className="home-link" onClick={onViewHistory}>
-            History <ArrowUpRight size={13} aria-hidden="true" />
-          </button>
+          <button type="button" className="tm-link small" onClick={onViewHistory}>History</button>
         ) : null}
       </div>
-      <ul className="home-outcome-list">
+      <ul className="tm-tape">
         {outcomes.map((item) => {
-          const tone = item.r === null ? "" : item.r > 0.05 ? "is-win" : item.r < -0.05 ? "is-loss" : "";
+          const tone = item.r === null ? "" : item.r > 0.05 ? "up" : item.r < -0.05 ? "down" : "";
           return (
-            <li key={item.id} className="home-outcome">
-              <div>
-                <strong>{item.symbol}</strong>
-                <span className={`home-side ${item.direction}`}>{item.direction === "short" ? "Short" : "Long"}</span>
-                <span className="home-outcome-event">{item.event}</span>
-              </div>
-              <div className="home-outcome-right">
-                <b className={tone}>{formatR(item.r)}</b>
-                <span>{timeAgo(item.closedAt)}</span>
-              </div>
+            <li key={item.id}>
+              <span className="tm-tape-left">
+                <b className="tm-mono">{item.symbol}</b>
+                <span className={`tm-side ${item.direction}`}>{item.direction}</span>
+                <span className="tm-muted">{item.event}</span>
+              </span>
+              <span className="tm-tape-right">
+                <b className={`tm-mono ${tone}`}>{formatR(item.r)}</b>
+                <span className="tm-mono tm-muted">{timeAgo(item.closedAt).replace(" ago", "")}</span>
+              </span>
             </li>
           );
         })}
       </ul>
-      <p className="home-footnote">Results in R before fees and funding.</p>
+      <p className="tm-footnote">R before fees and funding.</p>
     </section>
   );
 }

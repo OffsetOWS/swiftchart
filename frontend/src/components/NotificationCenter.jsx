@@ -131,9 +131,8 @@ export default function NotificationCenter({
         </section>
       ) : (
         <section className="notification-empty">
-          <Bell size={27} />
-          <h2>No notifications yet</h2>
-          <p>We&apos;ll notify you when high-quality trading opportunities or important market updates are available.</p>
+          <h2>Nothing yet</h2>
+          <p>New signals, TP hits and stops show up here.</p>
           <button type="button" onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
         </section>
       )}

@@ -1,0 +1,370 @@
+.graphite-app .graphite-detail-screen .sd-wrap {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 96px;
+}
+
+.graphite-app .sd-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0 6px;
+}
+
+.graphite-app .sd-back {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 1px solid var(--graphite-line);
+  border-radius: 12px;
+  color: var(--graphite-ink);
+  background: var(--graphite-panel);
+  cursor: pointer;
+}
+
+.graphite-app .sd-top .instrument-logo,
+.graphite-app .sd-top > span:not(.sd-side),
+.graphite-app .sd-top > div:not(.sd-title) {
+  flex: none;
+}
+
+.graphite-app .sd-title {
+  min-width: 0;
+}
+
+.graphite-app .sd-title h1 {
+  margin: 0;
+  color: var(--graphite-ink);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.graphite-app .sd-title p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  color: var(--graphite-muted);
+  font-size: 12px;
+}
+
+.graphite-app .sd-side {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.graphite-app .sd-side.long {
+  color: var(--graphite-profit);
+  background: rgba(61, 220, 151, 0.12);
+}
+
+.graphite-app .sd-side.short {
+  color: var(--graphite-loss);
+  background: rgba(255, 100, 109, 0.12);
+}
+
+.graphite-app .sd-eyebrow {
+  color: var(--graphite-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.graphite-app .sd-ladder {
+  padding: 16px;
+  border: 1px solid var(--graphite-line);
+  border-radius: 18px;
+  background: var(--graphite-panel);
+}
+
+.graphite-app .sd-ladder-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.graphite-app .sd-ladder-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.graphite-app .sd-price {
+  color: var(--graphite-ink);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+
+.graphite-app .sd-status {
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid var(--graphite-line-strong);
+  border-radius: 999px;
+  color: var(--graphite-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.graphite-app .sd-status.is-active {
+  color: var(--graphite-ink);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.graphite-app .sd-status.is-disabled {
+  color: var(--graphite-muted);
+}
+
+.graphite-app .sd-rows {
+  position: relative;
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graphite-app .sd-rows::before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: 22px;
+  left: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--graphite-line-strong);
+}
+
+.graphite-app .sd-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 0;
+}
+
+.graphite-app .sd-row + .sd-row {
+  border-top: 1px solid var(--graphite-line);
+}
+
+.graphite-app .sd-node {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--graphite-line-strong);
+  border-radius: 50%;
+  color: #000;
+  background: var(--graphite-panel);
+}
+
+.graphite-app .sd-row.is-target .sd-node { border-color: var(--graphite-profit); }
+.graphite-app .sd-row.is-stop .sd-node { border-color: var(--graphite-loss); }
+.graphite-app .sd-row.is-entry .sd-node { border-color: var(--graphite-soft); border-radius: 6px; }
+.graphite-app .sd-row.is-target.is-done .sd-node { background: var(--graphite-profit); }
+.graphite-app .sd-row.is-stop.is-done .sd-node { background: var(--graphite-loss); }
+
+.graphite-app .sd-row.is-now .sd-node {
+  border: 0;
+  background: var(--graphite-ink);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.12);
+  animation: sdPulse 2.4s ease-in-out infinite;
+}
+
+.graphite-app .sd-row.is-now {
+  min-height: 48px;
+  margin: 0 -10px;
+  padding-inline: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.graphite-app .sd-row.is-now + .sd-row,
+.graphite-app .sd-row + .sd-row.is-now {
+  border-top-color: transparent;
+}
+
+.graphite-app .sd-row-label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.graphite-app .sd-row-label strong {
+  color: var(--graphite-ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.graphite-app .sd-row-label span {
+  color: var(--graphite-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.graphite-app .sd-row-value {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.graphite-app .sd-row-value b {
+  color: var(--graphite-ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.graphite-app .sd-row-value span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.graphite-app .sd-row.is-target .sd-row-value span { color: var(--graphite-profit); }
+.graphite-app .sd-row.is-stop .sd-row-value span { color: var(--graphite-loss); }
+.graphite-app .sd-row.is-done .sd-row-label strong { color: var(--graphite-soft); }
+
+.graphite-app .sd-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.graphite-app .sd-facts > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--graphite-line);
+  border-radius: 14px;
+  background: var(--graphite-panel);
+}
+
+.graphite-app .sd-facts .sd-facts-wide {
+  grid-column: 1 / -1;
+}
+
+.graphite-app .sd-facts dt {
+  color: var(--graphite-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.graphite-app .sd-facts dd {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  color: var(--graphite-ink);
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.graphite-app .sd-facts dd small {
+  color: var(--graphite-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.graphite-app .sd-note {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--graphite-line);
+  border-radius: 18px;
+  background: var(--graphite-panel);
+}
+
+.graphite-app .sd-note p {
+  margin: 0;
+  color: var(--graphite-soft);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.graphite-app .sd-note .sd-invalidation {
+  padding-top: 10px;
+  border-top: 1px solid var(--graphite-line);
+  font-size: 13px;
+}
+
+.graphite-app .sd-note .sd-invalidation strong {
+  color: var(--graphite-ink);
+  font-weight: 650;
+}
+
+.graphite-app .sd-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  gap: 8px;
+  margin: 0 -14px;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, var(--tm-bg, #000) 30%);
+}
+
+.graphite-app .sd-actions button {
+  min-height: 52px;
+  border: 0;
+  border-radius: 14px;
+  color: var(--graphite-on-accent);
+  background: var(--graphite-teal);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.graphite-app .sd-actions button:active { transform: scale(0.98); }
+.graphite-app .sd-actions button:disabled { opacity: 0.55; cursor: default; transform: none; }
+
+.graphite-app .sd-actions .graphite-action-error {
+  margin: 0;
+  color: var(--graphite-loss);
+  font-size: 13px;
+  text-align: center;
+}
+
+@keyframes sdPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.12); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graphite-app .sd-row.is-now .sd-node { animation: none; }
+}
+
+.graphite-app .market-pair-row .market-pair-quote {
+  margin-left: 1px;
+  color: var(--graphite-muted);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 0.82em;
+}
+
+.graphite-app .market-pair-row .market-pair-quality strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.graphite-app .market-pair-row .graphite-side.long {
+  color: var(--graphite-profit);
+  background: rgba(61, 220, 151, 0.12);
+}

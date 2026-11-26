@@ -47,36 +47,36 @@ const LEGAL_URLS = {
 const SETTINGS_SECTIONS = [
   ["settings-profile", "Profile", "Account details and security", User],
   ["settings-notifications", "Notifications", "Trade, market, and delivery alerts", Bell],
-  ["settings-trading", "Trading Preferences", "Default market and scan filters", SlidersHorizontal],
+  ["settings-trading", "Trading preferences", "Default market and scan filters", SlidersHorizontal],
   ["settings-appearance", "Appearance", "Theme, spacing, and motion", Palette],
-  ["settings-security", "Privacy & Security", "Password, sessions, and data", Shield],
-  ["settings-info", "App Information", "Version, updates, and about", Info],
+  ["settings-security", "Privacy and security", "Password, sessions, and data", Shield],
+  ["settings-info", "App information", "Version, updates, and about", Info],
 ];
 
 const SUPPORT_SECTIONS = [
-  ["support-help", "Help Center", "Search SwiftChart answers", CircleHelp],
-  ["support-contact", "Contact Support", "Account or technical help", MessageCircle],
-  ["support-bug", "Report a Bug", "Send a structured technical report", Bug],
-  ["support-feature", "Request a Feature", "Tell us what SwiftChart should solve", Sparkles],
-  ["support-telegram", "Telegram Community", "Open the configured SwiftChart Telegram", Send],
+  ["support-help", "Help center", "Search SwiftChart answers", CircleHelp],
+  ["support-contact", "Contact support", "Account or technical help", MessageCircle],
+  ["support-bug", "Report a bug", "Send a structured technical report", Bug],
+  ["support-feature", "Request a feature", "Tell us what SwiftChart should solve", Sparkles],
+  ["support-telegram", "Telegram community", "Talk to other SwiftChart traders", Send],
   ["support-docs", "Documentation", "Learn signal levels and scanning", BookOpen],
-  ["support-legal", "Legal and Risk Information", "Trading disclaimer and policies", FileText],
+  ["support-legal", "Legal and risk information", "Trading disclaimer and policies", FileText],
 ];
 
 const FAQS = [
-  ["Getting Started", "How do I find a setup?", "Open Scan, scan the market or a coin, then tap a ranked result to review its execution levels and reasoning."],
-  ["Trade Bias", "What does Long or Short mean?", "Long expects price strength; Short expects price weakness. Always review the stop and invalidation before acting."],
+  ["Getting started", "How do I find a setup?", "Open Scan, scan the market or a coin, then tap a ranked result to review its execution levels and reasoning."],
+  ["Trade bias", "What does Long or Short mean?", "Long expects price strength; Short expects price weakness. Always review the stop and invalidation before acting."],
   ["Entry, Stop Loss, TP1 and TP2", "How do execution levels work?", "Entry is the decision zone, Stop Loss defines invalidation, and TP1/TP2 are staged profit objectives."],
   ...(FOREX_ENABLED ? [["Crypto and Forex", "Can I switch markets?", "Use the Crypto/Forex switch on Home. The selected market carries into Scan, History, and Account."]] : []),
   ["Notifications", "Why did I not receive browser push?", "In-app alerts remain available. Browser push also requires permission from your browser and operating system."],
-  ["Account and Login", "How do I reset my password?", "Open Settings, then Privacy & Security or Profile, and request a secure reset email."],
-  ["Telegram Alerts", "How do I connect Telegram?", "Open Telegram from Account and follow the configured SwiftChart bot flow. Staff will never request passwords or private keys."],
+  ["Account and login", "How do I reset my password?", "Open Settings, then Privacy & Security or Profile, and request a secure reset email."],
+  ["Telegram alerts", "How do I connect Telegram?", "Open Telegram from Account and follow the configured SwiftChart bot flow. Staff will never request passwords or private keys."],
 ];
 
 const DOCUMENTATION = [
   ["How SwiftChart works", "SwiftChart filters market data, ranks valid structures, and presents the strongest setups with execution context."],
   ["Market bias and regime", "Bias describes directional pressure. Regime describes whether conditions are trending, ranging, or selective."],
-  ["Long and Short", "Long setups look for upside continuation or reversal. Short setups look for downside continuation or rejection."],
+  ["Long and short", "Long setups look for upside continuation or reversal. Short setups look for downside continuation or rejection."],
   ["Risk-to-reward", "Potential reward divided by planned risk. It describes the setup profile, not its probability of winning."],
   ["Crypto scanning", "Ranks supported crypto markets using current market data and quality filters."],
   ...(FOREX_ENABLED ? [["Forex scanning", "Adds session timing, spread, pair behavior, and news-risk context to the ranking process."]] : []),
@@ -249,9 +249,9 @@ function ProfileSettings({ onBack }) {
           <SettingsRow icon={KeyRound} title="Change password" description="Send a secure reset email" onClick={sendPasswordReset} />
         </SettingsGroup>
         <Notice>{notice}</Notice><Notice tone="error">{error}</Notice>
-        <button className="settings-primary" type="submit" disabled={saving}>{saving ? "Saving..." : "Save Changes"}</button>
+        <button className="settings-primary" type="submit" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
       </form>
-      <SettingsGroup title="Danger Zone" className="danger-zone">
+      <SettingsGroup title="Danger zone" className="danger-zone">
         <SettingsRow icon={Trash2} title="Delete account" description="Permanently remove your SwiftChart account" onClick={() => setConfirmDelete(true)} />
       </SettingsGroup>
       {confirmDelete ? (
@@ -290,17 +290,17 @@ function NotificationSettings({ preferences, updateSection, onBack }) {
   }
 
   const groups = [
-    ["Trade Alerts", [["highConviction", "New Setups"], ["tp1", "TP1 Hit Alerts"], ["tp2", "TP2 Hit Alerts"], ["stopLoss", "Stop Loss Alerts"], ["nearEntry", "Price Near Entry Alerts"], ["tradeOpened", "Trade Opened"], ["tradeClosed", "Trade Closed"]]],
-    ["Market Alerts", [["marketBias", "Market Bias Changes"], ["sessions", "Market Session Alerts"], ["dailySummary", "Daily Market Summary"]]],
-    ["App Alerts", [["systemNotices", "System and Account Notices"]]],
-    ["Delivery Preferences", [["sound", "Sound"], ["vibration", "Vibration"]]],
+    ["Trade alerts", [["highConviction", "New setups"], ["tp1", "TP1 Hit Alerts"], ["tp2", "TP2 Hit Alerts"], ["stopLoss", "Stop loss alerts"], ["nearEntry", "Price near entry alerts"], ["tradeOpened", "Trade Opened"], ["tradeClosed", "Trade closed"]]],
+    ["Market alerts", [["marketBias", "Market bias changes"], ["sessions", "Market session alerts"], ["dailySummary", "Daily market summary"]]],
+    ["App alerts", [["systemNotices", "System and account notices"]]],
+    ["Delivery preferences", [["sound", "Sound"], ["vibration", "Vibration"]]],
   ];
 
   return (
     <div className="graphite-screen settings-screen">
       <PageHeader title="Notifications" onBack={onBack} />
       <SettingsGroup>
-        <SettingsRow icon={Bell} title="Push Notifications" description="In-app notifications remain available when push is off." trailing={<Switch label="Push Notifications" checked={settings.pushEnabled} onChange={togglePush} />} />
+        <SettingsRow icon={Bell} title="Push notifications" description="In-app notifications remain available when push is off." trailing={<Switch label="Push notifications" checked={settings.pushEnabled} onChange={togglePush} />} />
       </SettingsGroup>
       {permissionState === "denied" ? <Notice tone="error">Browser notifications are blocked. Enable them in your browser or device settings.</Notice> : null}
       {permissionState === "unsupported" ? <Notice>Browser push is not supported here. In-app notifications still work.</Notice> : null}
@@ -320,21 +320,21 @@ function TradingSettings({ preferences, updateSection, resetSection, onBack }) {
   const [confirmReset, setConfirmReset] = useState(false);
   return (
     <div className="graphite-screen settings-screen">
-      <PageHeader title="Trading Preferences" onBack={onBack} />
+      <PageHeader title="Trading preferences" onBack={onBack} />
       {FOREX_ENABLED ? (
-        <SettingsGroup title="Default Market">
+        <SettingsGroup title="Default market">
           <Segment value={settings.defaultMarket} options={[["crypto", "Crypto"], ["forex", "Forex"]]} onChange={(value) => updateSection("trading", { defaultMarket: value })} label="Default market" />
         </SettingsGroup>
       ) : null}
-      <SettingsGroup title="Default Timeframe">
+      <SettingsGroup title="Default timeframe">
         <Segment value={settings.defaultTimeframe} options={[["1h", "1H"], ["4h", "4H"], ["1d", "1D"]]} onChange={(value) => updateSection("trading", { defaultTimeframe: value })} label="Default timeframe" />
       </SettingsGroup>
-      <SettingsGroup title="Scan Defaults">
+      <SettingsGroup title="Scan defaults">
         <label className="settings-select">Preferred exchange<select value={settings.preferredExchange} onChange={(event) => updateSection("trading", { preferredExchange: event.target.value })}><option value="all">All Exchanges</option><option value="hyperliquid">Hyperliquid</option><option value="variational">Variational</option></select><ChevronDown size={15} /></label>
         <label className="settings-select">Default sorting<select value={settings.defaultSorting} onChange={(event) => updateSection("trading", { defaultSorting: event.target.value })}><option value="highest_volume">Highest 24h volume</option><option value="newest">Newest</option><option value="highest_rr">Highest R:R</option></select><ChevronDown size={15} /></label>
       </SettingsGroup>
-      <SettingsGroup title="Result Display">
-        {[["showOnlyOpen", "Show Only Open Setups"], ["rememberFilters", "Remember Last Used Filters"]].map(([key, label]) => (
+      <SettingsGroup title="Result display">
+        {[["showOnlyOpen", "Show only open setups"], ["rememberFilters", "Remember last used filters"]].map(([key, label]) => (
           <SettingsRow key={key} title={label} trailing={<Switch label={label} checked={settings[key]} onChange={(value) => updateSection("trading", { [key]: value })} />} />
         ))}
       </SettingsGroup>
@@ -353,7 +353,7 @@ function AppearanceSettings({ preferences, updateSection, onBack }) {
         <Segment value={settings.theme} options={[["dark", "Dark"], ["light", "Light"]]} onChange={(value) => updateSection("appearance", { theme: value })} label="Theme" />
       </SettingsGroup>
       <SettingsGroup title="Display">
-        {[["compactLayout", "Compact Layout", "Reduces spacing while keeping touch targets comfortable"], ["largeText", "Large Text", "Increases essential labels and values"], ["reduceAnimations", "Reduce Animations", "Minimizes transitions and panel motion"]].map(([key, label, description]) => (
+        {[["compactLayout", "Compact layout", "Reduces spacing while keeping touch targets comfortable"], ["largeText", "Large text", "Increases essential labels and values"], ["reduceAnimations", "Reduce animations", "Minimizes transitions and panel motion"]].map(([key, label, description]) => (
           <SettingsRow key={key} title={label} description={description} trailing={<Switch label={label} checked={settings[key]} onChange={(value) => updateSection("appearance", { [key]: value })} />} />
         ))}
       </SettingsGroup>
@@ -395,26 +395,26 @@ function SecuritySettings({ onBack, onDeleteAccount }) {
 
   return (
     <div className="graphite-screen settings-screen">
-      <PageHeader title="Privacy & Security" onBack={onBack} />
+      <PageHeader title="Privacy and security" onBack={onBack} />
       <SettingsGroup title="Security">
-        <SettingsRow icon={KeyRound} title="Change Password" description="Send a secure reset email" onClick={resetPassword} />
-        <SettingsRow icon={LockKeyhole} title="Two-Factor Authentication" value="Coming Soon" />
-        <SettingsRow icon={Laptop} title="Biometric Login" value={window.PublicKeyCredential ? "Coming Soon" : "Unavailable"} />
+        <SettingsRow icon={KeyRound} title="Change password" description="Send a secure reset email" onClick={resetPassword} />
+        <SettingsRow icon={LockKeyhole} title="Two-Factor Authentication" value="Coming soon" />
+        <SettingsRow icon={Laptop} title="Biometric login" value={window.PublicKeyCredential ? "Coming soon" : "Unavailable"} />
       </SettingsGroup>
-      <SettingsGroup title="Active Devices">
+      <SettingsGroup title="Active devices">
         <SettingsRow icon={Laptop} title={device} description="Current device · active now · location not collected" />
-        <SettingsRow icon={Shield} title="Log Out From All Devices" description="The current device will also be logged out" onClick={() => setConfirmLogoutAll(true)} />
+        <SettingsRow icon={Shield} title="Log out from all devices" description="The current device will also be logged out" onClick={() => setConfirmLogoutAll(true)} />
       </SettingsGroup>
-      <SettingsGroup title="Data Controls">
-        <SettingsRow icon={Download} title="Download My Data" value="Coming Soon" />
-        <SettingsRow icon={Trash2} title="Delete Account" onClick={onDeleteAccount} />
+      <SettingsGroup title="Data controls">
+        <SettingsRow icon={Download} title="Download my data" value="Coming soon" />
+        <SettingsRow icon={Trash2} title="Delete account" onClick={onDeleteAccount} />
       </SettingsGroup>
       <SettingsGroup title="Legal">
-        <LegalLink title="Privacy Policy" url={LEGAL_URLS.privacy} />
-        <LegalLink title="Terms of Service" url={LEGAL_URLS.terms} />
+        <LegalLink title="Privacy policy" url={LEGAL_URLS.privacy} />
+        <LegalLink title="Terms of service" url={LEGAL_URLS.terms} />
       </SettingsGroup>
       <Notice>{notice}</Notice><Notice tone="error">{error}</Notice>
-      {confirmLogoutAll ? <ConfirmDialog title="Log out all devices?" message="Supabase will end the current session too. You will need to sign in again." confirmLabel="Log Out All" danger onCancel={() => setConfirmLogoutAll(false)} onConfirm={logoutAll} /> : null}
+      {confirmLogoutAll ? <ConfirmDialog title="Log out all devices?" message="Supabase will end the current session too. You will need to sign in again." confirmLabel="Log out all" danger onCancel={() => setConfirmLogoutAll(false)} onConfirm={logoutAll} /> : null}
     </div>
   );
 }
@@ -448,12 +448,12 @@ function AppInformation({ onBack }) {
 
   return (
     <div className="graphite-screen settings-screen">
-      <PageHeader title="App Information" onBack={onBack} />
+      <PageHeader title="App information" onBack={onBack} />
       <SettingsGroup>
-        <SettingsRow icon={AppWindow} title="Current Version" value={packageJson.version} />
+        <SettingsRow icon={AppWindow} title="Current version" value={packageJson.version} />
         <SettingsRow icon={Sparkles} title="What's New" value="No changelog published" disabled />
         <SettingsRow icon={RefreshCw} title="Check for Updates" onClick={checkUpdates} />
-        <SettingsRow icon={Trash2} title="Clear Cache" description="Keeps your account, plan, backend trades, and saved preferences" onClick={() => setConfirmClear(true)} />
+        <SettingsRow icon={Trash2} title="Clear cache" description="Keeps your account, plan, backend trades, and saved preferences" onClick={() => setConfirmClear(true)} />
       </SettingsGroup>
       <SettingsGroup title="About SwiftChart">
         <div className="settings-copy-block">
@@ -463,7 +463,7 @@ function AppInformation({ onBack }) {
         </div>
       </SettingsGroup>
       <Notice>{notice}</Notice>
-      {confirmClear ? <ConfirmDialog title="Clear cached app data?" message="Cached assets and temporary session data will be removed. Your account, backend history, and preferences remain." confirmLabel="Clear Cache" onCancel={() => setConfirmClear(false)} onConfirm={clearCache} /> : null}
+      {confirmClear ? <ConfirmDialog title="Clear cached app data?" message="Cached assets and temporary session data will be removed. Your account, backend history, and preferences remain." confirmLabel="Clear cache" onCancel={() => setConfirmClear(false)} onConfirm={clearCache} /> : null}
     </div>
   );
 }
@@ -485,7 +485,7 @@ function HelpCenter({ onBack }) {
   const visible = FAQS.filter((item) => item.join(" ").toLowerCase().includes(query.toLowerCase()));
   return (
     <div className="graphite-screen settings-screen">
-      <PageHeader title="Help Center" onBack={onBack} />
+      <PageHeader title="Help center" onBack={onBack} />
       <label className="settings-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search help articles" /></label>
       <div className="faq-list">
         {visible.map(([category, question, answer]) => (
@@ -508,7 +508,7 @@ function SupportForm({ kind, onBack }) {
     name: auth.profile?.username || "",
     email: auth.user?.email || "",
     subject: "",
-    category: "Technical Issue",
+    category: "Technical issue",
     message: "",
     title: "",
     happened: "",
@@ -520,7 +520,7 @@ function SupportForm({ kind, onBack }) {
   const [attachment, setAttachment] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const title = kind === "contact" ? "Contact Support" : kind === "bug" ? "Report a Bug" : "Request a Feature";
+  const title = kind === "contact" ? "Contact support" : kind === "bug" ? "Report a bug" : "Request a feature";
   const diagnostic = `${navigator.userAgent.split(" ").slice(-2).join(" ")} · ${window.innerWidth}×${window.innerHeight} · ${window.location.pathname} · v${packageJson.version}`;
 
   function set(key, value) {
@@ -569,7 +569,7 @@ function SupportForm({ kind, onBack }) {
             <label>Name<input value={values.name} onChange={(event) => set("name", event.target.value)} required /></label>
             <label>Email<input type="email" value={values.email} onChange={(event) => set("email", event.target.value)} required /></label>
             <label>Subject<input value={values.subject} onChange={(event) => set("subject", event.target.value)} required /></label>
-            <label>Category<select value={values.category} onChange={(event) => set("category", event.target.value)}>{["Account", "Technical Issue", "Signal or Scan Issue", "Telegram", "Feature Question", "Other"].map((option) => <option key={option}>{option}</option>)}</select></label>
+            <label>Category<select value={values.category} onChange={(event) => set("category", event.target.value)}>{["Account", "Technical issue", "Signal or scan issue", "Telegram", "Feature question", "Other"].map((option) => <option key={option}>{option}</option>)}</select></label>
             <label>Message<textarea value={values.message} onChange={(event) => set("message", event.target.value)} required /></label>
           </>
         ) : null}
@@ -591,7 +591,7 @@ function SupportForm({ kind, onBack }) {
         ) : null}
         {kind !== "feature" ? <label className="settings-file"><Upload size={16} /> Optional screenshot<input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseFile} /><small>{attachment ? `${attachment.name} · ${(attachment.size / 1024).toFixed(0)} KB` : "PNG, JPG, or WebP · max 5 MB"}</small></label> : null}
         <Notice tone="error">{error}</Notice>
-        <button className="settings-primary" disabled={submitting} type="submit">{submitting ? "Submitting..." : kind === "contact" ? "Send Message" : kind === "bug" ? "Submit Bug Report" : "Submit Request"}</button>
+        <button className="settings-primary" disabled={submitting} type="submit">{submitting ? "Submitting..." : kind === "contact" ? "Send message" : kind === "bug" ? "Submit bug report" : "Submit request"}</button>
       </form>
     </div>
   );
@@ -600,7 +600,7 @@ function SupportForm({ kind, onBack }) {
 function TelegramSupport({ onBack }) {
   return (
     <div className="graphite-screen settings-screen">
-      <PageHeader title="Telegram Community" onBack={onBack} />
+      <PageHeader title="Telegram community" onBack={onBack} />
       <section className="support-telegram-card">
         <MessageCircle size={25} />
         <h2>SwiftChart on Telegram</h2>
@@ -624,11 +624,11 @@ function Documentation({ onBack }) {
 function LegalSupport({ onBack }) {
   return (
     <div className="graphite-screen settings-screen">
-      <PageHeader title="Legal & Risk" onBack={onBack} />
+      <PageHeader title="Legal and risk" onBack={onBack} />
       <SettingsGroup>
-        <LegalLink title="Risk Disclaimer" url={LEGAL_URLS.risk} />
-        <LegalLink title="Privacy Policy" url={LEGAL_URLS.privacy} />
-        <LegalLink title="Terms of Service" url={LEGAL_URLS.terms} />
+        <LegalLink title="Risk disclaimer" url={LEGAL_URLS.risk} />
+        <LegalLink title="Privacy policy" url={LEGAL_URLS.privacy} />
+        <LegalLink title="Terms of service" url={LEGAL_URLS.terms} />
       </SettingsGroup>
       <section className="settings-copy-block legal-copy">
         <h2>Trading disclaimer</h2>

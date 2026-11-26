@@ -1,7 +1,6 @@
 import { MDXProvider } from "@mdx-js/react";
 import { Menu, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import swiftChartLogo from "../assets/swiftchart-logo.png";
 import { docSections, docs, getDocBySlug } from "../docs/registry.js";
 
 function slugify(value) {
@@ -55,12 +54,12 @@ export default function Docs() {
     <main className="docs-shell">
       <header className="docs-topbar">
         <a className="docs-brand" href="/" aria-label="SwiftChart home">
-          <img src={swiftChartLogo} alt="" />
-          <span>Docs</span>
+          <b>swiftchart</b>
+          <span>docs</span>
         </a>
         <div className="docs-search">
           <Search size={17} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search docs..." />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search docs" />
           {query ? (
             <div className="docs-search-results">
               {filteredDocs.length ? (
@@ -76,7 +75,7 @@ export default function Docs() {
             </div>
           ) : null}
         </div>
-        <a className="docs-launch" href="/login?returnTo=%2Fapp%2Fhome">Launch App</a>
+        <a className="docs-launch" href="/login?returnTo=%2Fapp%2Fhome">Open app</a>
         <button className="docs-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open docs menu">
           <Menu size={28} />
         </button>
@@ -85,7 +84,7 @@ export default function Docs() {
       <div className="docs-layout">
         <aside className={sidebarOpen ? "docs-sidebar open" : "docs-sidebar"}>
           <div className="docs-sidebar-head">
-            <span>SwiftChart Docs</span>
+            <span>Docs</span>
             <button type="button" onClick={() => setSidebarOpen(false)} aria-label="Close docs menu">
               <X size={28} />
             </button>

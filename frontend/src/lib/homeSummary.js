@@ -10,18 +10,18 @@ export function regimeFromScanStats(scanStats) {
     return {
       key: "unknown",
       label: "Reading the market",
-      summary: "The first scan of this session is still running. The regime appears once it finishes.",
+      summary: "The first scan is still running. The read shows up as soon as it finishes.",
       position: null,
       breadth: hasBreadth ? Math.round(breadth) : null,
     };
   }
   const position = Math.min(100, Math.max(0, (score + 100) / 2));
-  const breadthText = hasBreadth ? ` ${Math.round(breadth)}% of scanned markets trade above their trend average.` : "";
+  const breadthText = hasBreadth ? ` ${Math.round(breadth)}% of markets sit above their trend average.` : "";
   if (score >= 25) {
     return {
       key: "up",
       label: "Trending up",
-      summary: `Buyers control the broader market, so SwiftChart favours longs on pullbacks.${breadthText}`,
+      summary: `Buyers are in control. We look for longs on pullbacks instead of chasing.${breadthText}`,
       position,
       breadth: hasBreadth ? Math.round(breadth) : null,
     };
@@ -30,7 +30,7 @@ export function regimeFromScanStats(scanStats) {
     return {
       key: "down",
       label: "Trending down",
-      summary: `Sellers control the broader market, so SwiftChart favours shorts into resistance.${breadthText}`,
+      summary: `Sellers are in control. We look for shorts into resistance.${breadthText}`,
       position,
       breadth: hasBreadth ? Math.round(breadth) : null,
     };
@@ -38,7 +38,7 @@ export function regimeFromScanStats(scanStats) {
   return {
     key: "range",
     label: "Range-bound",
-    summary: `No side has control. SwiftChart waits for sweeps at range edges and skips mid-range trades.${breadthText}`,
+    summary: `No side has control. We only take sweeps at the edges, so expect fewer signals.${breadthText}`,
     position,
     breadth: hasBreadth ? Math.round(breadth) : null,
   };

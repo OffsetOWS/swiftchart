@@ -1,0 +1,1460 @@
+/*
+  SwiftChart terminal layer. Loaded after global.css.
+  Display: Syne. Numbers: JetBrains Mono. Body: Inter.
+  Sections are separated by hairlines, not boxed in cards.
+*/
+
+@import "@fontsource-variable/syne/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+@import "@fontsource-variable/inter/wght.css";
+
+:root {
+  --tm-display: "Syne Variable", "Syne", ui-sans-serif, system-ui, sans-serif;
+  --tm-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --tm-body: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --tm-ink: #ededed;
+  --tm-soft: #bdbdbd;
+  --tm-muted: #7a7a7a;
+  --tm-faint: #4a4a4a;
+  --tm-line: #1c1c1c;
+  --tm-line-strong: #2c2c2c;
+  --tm-up: #3ddc97;
+  --tm-down: #ff646d;
+  --tm-bg: #000;
+  --tm-surface: #070707;
+  --tm-raised: #080808;
+  --tm-hover: #141414;
+  --tm-row-line: #141414;
+  --tm-on-ink: #000;
+  --tm-nav-bg: rgba(8, 8, 8, 0.92);
+  --tm-shadow: rgba(0, 0, 0, 0.6);
+}
+
+.graphite-app.is-light {
+  --tm-ink: #111111;
+  --tm-soft: #3d3d3d;
+  --tm-muted: #6e6e6e;
+  --tm-faint: #9c9c9c;
+  --tm-line: #e4e4e2;
+  --tm-line-strong: #d2d2cf;
+  --tm-up: #0f9d63;
+  --tm-down: #d93a44;
+  --tm-bg: #f7f7f5;
+  --tm-surface: #ffffff;
+  --tm-raised: #ffffff;
+  --tm-hover: #ececea;
+  --tm-row-line: #ececea;
+  --tm-on-ink: #ffffff;
+  --tm-nav-bg: rgba(255, 255, 255, 0.92);
+  --tm-shadow: rgba(0, 0, 0, 0.12);
+  --graphite-teal: #111111;
+  --graphite-on-accent: #ffffff;
+  --graphite-bg: #f7f7f5;
+  --graphite-panel: #ffffff;
+}
+
+.graphite-app.is-light,
+.app-view.mobile-only-app:has(.graphite-app.is-light) {
+  background: var(--tm-bg);
+}
+
+.graphite-app,
+.graphite-app button,
+.graphite-app input,
+.graphite-app select,
+.graphite-app textarea {
+  font-family: var(--tm-body);
+}
+
+.graphite-app {
+  --graphite-ink: var(--tm-ink);
+  --graphite-soft: var(--tm-soft);
+  --graphite-muted: var(--tm-muted);
+  --graphite-line: var(--tm-line);
+  --graphite-line-strong: var(--tm-line-strong);
+  --graphite-profit: var(--tm-up);
+  --graphite-loss: var(--tm-down);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tm-mono,
+.graphite-app .tm-mono {
+  font-family: var(--tm-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Header ---------------------------------------------------------------- */
+
+.graphite-app .graphite-header {
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--tm-line);
+}
+
+.graphite-app .graphite-brand span {
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-transform: lowercase;
+}
+
+.graphite-app .graphite-brand strong {
+  display: none;
+}
+
+.graphite-app .graphite-header-actions {
+  gap: 12px;
+}
+
+.graphite-app .graphite-alert-button {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--tm-line-strong);
+  background: transparent;
+  box-shadow: none;
+}
+
+.tm-ticker {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--tm-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tm-ticker-sym { color: var(--tm-muted); }
+.tm-ticker-price { color: var(--tm-ink); }
+.tm-ticker-change { color: var(--tm-muted); }
+.tm-ticker-change.up { color: var(--tm-up); }
+.tm-ticker-change.down { color: var(--tm-down); }
+
+/* Shared building blocks ----------------------------------------------- */
+
+.graphite-app .graphite-screen {
+  gap: 0;
+}
+
+.graphite-app .tm-block {
+  display: grid;
+  gap: 8px;
+  padding: 20px 0;
+  border-top: 1px solid var(--tm-line);
+}
+
+.graphite-app .graphite-screen > .tm-block:first-child,
+.graphite-app .graphite-screen > .tm-page-head:first-child + .tm-block {
+  border-top: 0;
+}
+
+.graphite-app .tm-label,
+.graphite-app .tm-meta {
+  margin: 0;
+  color: var(--tm-muted);
+  font-size: 12px;
+  font-weight: 450;
+}
+
+.graphite-app .tm-meta {
+  font-family: var(--tm-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.graphite-app .tm-statement {
+  margin: 2px 0 4px;
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  font-size: clamp(34px, 10.5vw, 42px);
+  font-weight: 700;
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+}
+
+.graphite-app .tm-heading {
+  margin: 0;
+  color: var(--tm-ink);
+  font-family: var(--tm-body);
+  font-size: 15px;
+  font-weight: 560;
+  line-height: 1.3;
+}
+
+.graphite-app .tm-body {
+  margin: 0;
+  color: var(--tm-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.graphite-app .tm-body.tm-quiet,
+.graphite-app .tm-muted {
+  color: var(--tm-muted);
+}
+
+.graphite-app .tm-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.graphite-app .tm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--tm-ink);
+  border-radius: 0;
+  color: var(--tm-ink);
+  background: none;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.graphite-app .tm-link.small {
+  margin: 0;
+  border-bottom-color: var(--tm-faint);
+  color: var(--tm-soft);
+  font-size: 12px;
+}
+
+.graphite-app .tm-footnote {
+  margin: 4px 0 0;
+  color: var(--tm-faint);
+  font-size: 11px;
+}
+
+.graphite-app .tm-side {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.graphite-app .tm-side.long { color: var(--tm-up); }
+.graphite-app .tm-side.short { color: var(--tm-down); }
+.graphite-app .up { color: var(--tm-up); }
+.graphite-app .down { color: var(--tm-down); }
+
+/* Home ------------------------------------------------------------------ */
+
+.graphite-app .tm-regime {
+  padding-top: 18px;
+}
+
+.graphite-app .tm-range {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.graphite-app .tm-range-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--tm-line-strong);
+}
+
+.graphite-app .tm-range-marker {
+  position: absolute;
+  top: -5px;
+  width: 1px;
+  height: 11px;
+  background: var(--tm-ink);
+  transition: left 600ms ease-out;
+}
+
+.graphite-app .tm-range-marker::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tm-ink);
+}
+
+.graphite-app .tm-range-end,
+.graphite-app .tm-range-caption {
+  color: var(--tm-muted);
+  font-family: var(--tm-mono);
+  font-size: 11px;
+}
+
+.graphite-app .tm-range-caption {
+  text-align: center;
+  color: var(--tm-faint);
+}
+
+.graphite-app .tm-tape {
+  display: grid;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graphite-app .tm-tape li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--tm-row-line);
+  font-size: 13px;
+}
+
+.graphite-app .tm-tape li:first-child {
+  border-top: 0;
+}
+
+.graphite-app .tm-tape-left,
+.graphite-app .tm-tape-right {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graphite-app .tm-tape-left b {
+  color: var(--tm-ink);
+  font-weight: 500;
+}
+
+.graphite-app .tm-tape-right b {
+  font-weight: 500;
+}
+
+.graphite-app .tm-tape-right .tm-muted {
+  min-width: 26px;
+  text-align: right;
+  font-size: 11px;
+}
+
+/* Section heads become plain lowercase labels -------------------------- */
+
+.graphite-app .graphite-section-head {
+  padding: 20px 0 6px;
+  border-top: 1px solid var(--tm-line);
+}
+
+.graphite-app .graphite-section-head > span,
+.graphite-app .graphite-timeline > span {
+  color: var(--tm-ink);
+  font-family: var(--tm-body);
+  font-size: 15px;
+  font-weight: 560;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.graphite-app .graphite-section-head button {
+  border: 0;
+  border-bottom: 1px solid var(--tm-faint);
+  border-radius: 0;
+  padding: 0 0 2px;
+  color: var(--tm-soft);
+  background: none;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+/* Signal rows ----------------------------------------------------------- */
+
+.graphite-app .market-pair-list {
+  gap: 0;
+}
+
+.graphite-app .market-pair-row {
+  min-height: 0;
+  padding: 13px 0;
+  border: 0;
+  border-top: 1px solid var(--tm-row-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.graphite-app .market-pair-row:first-child {
+  border-top: 0;
+}
+
+.graphite-app .market-pair-row > i {
+  display: none;
+}
+
+.graphite-app .market-pair-copy strong {
+  font-family: var(--tm-mono);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.graphite-app .market-pair-copy small {
+  color: var(--tm-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.graphite-app .market-pair-quality strong {
+  font-family: var(--tm-mono);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.graphite-app .market-pair-quality small {
+  font-family: var(--tm-mono);
+  color: var(--tm-muted);
+  font-size: 11px;
+}
+
+.graphite-app .market-pair-quality strong.up { color: var(--tm-up); }
+.graphite-app .market-pair-quality strong.down { color: var(--tm-down); }
+
+.graphite-app .graphite-side,
+.graphite-app .market-pair-row .graphite-side.long,
+.graphite-app .market-pair-row .graphite-side.short {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: lowercase;
+}
+
+.graphite-app .graphite-side.long { color: var(--tm-up); }
+.graphite-app .graphite-side.short { color: var(--tm-down); }
+
+/* Page heads (Scan, History) ------------------------------------------- */
+
+.graphite-app .tm-page-head {
+  display: grid;
+  gap: 6px;
+  padding: 18px 0 16px;
+}
+
+.graphite-app .tm-page-head h1 {
+  margin: 0;
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.graphite-app .tm-page-head .tm-row-head {
+  align-items: center;
+}
+
+.graphite-app .tm-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--tm-on-ink);
+  background: var(--tm-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.graphite-app .tm-button:active { transform: scale(0.98); }
+.graphite-app .tm-button:disabled { opacity: 0.5; cursor: default; }
+
+.graphite-app .tm-button.ghost {
+  border: 1px solid var(--tm-line-strong);
+  color: var(--tm-ink);
+  background: transparent;
+}
+
+/* Search and filters ---------------------------------------------------- */
+
+.graphite-app .graphite-search {
+  min-height: 46px;
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.graphite-app .graphite-search input {
+  font-size: 14px;
+}
+
+.graphite-app .graphite-search button {
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.graphite-app .graphite-filters,
+.graphite-app .graphite-filter-row {
+  gap: 6px;
+}
+
+.graphite-app .graphite-filters select,
+.graphite-app .graphite-filters button,
+.graphite-app .graphite-filter-row button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 999px;
+  color: var(--tm-muted);
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.graphite-app .graphite-filter-row button.active,
+.graphite-app .graphite-filters button.active {
+  border-color: var(--tm-ink);
+  color: var(--tm-on-ink);
+  background: var(--tm-ink);
+}
+
+.graphite-app .graphite-results-status {
+  font-family: var(--tm-mono);
+  font-size: 11px;
+}
+
+/* Signal detail --------------------------------------------------------- */
+
+.graphite-app .sd-title h1 {
+  font-family: var(--tm-display);
+  font-size: 26px;
+  letter-spacing: -0.03em;
+}
+
+.graphite-app .sd-title p > span:first-child {
+  padding: 0;
+  background: none;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+.graphite-app .sd-title p {
+  font-family: var(--tm-mono);
+  font-size: 11px;
+}
+
+.graphite-app .sd-back {
+  width: 36px;
+  height: 36px;
+  border-color: var(--tm-line-strong);
+  border-radius: 10px;
+  background: transparent;
+}
+
+.graphite-app .sd-top {
+  padding: 14px 0 6px;
+}
+
+.graphite-app .sd-eyebrow,
+.graphite-app .sd-facts dt {
+  color: var(--tm-muted);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.graphite-app .sd-ladder {
+  border-color: var(--tm-line-strong);
+  border-radius: 16px;
+  background: var(--tm-surface);
+}
+
+.graphite-app .sd-price,
+.graphite-app .sd-row-value b,
+.graphite-app .sd-row-value span,
+.graphite-app .sd-row-label span,
+.graphite-app .sd-facts dd {
+  font-family: var(--tm-mono);
+  letter-spacing: -0.01em;
+}
+
+.graphite-app .sd-price {
+  font-size: 30px;
+  font-weight: 500;
+}
+
+.graphite-app .sd-row-value b {
+  font-weight: 500;
+}
+
+.graphite-app .sd-row-label strong {
+  font-weight: 550;
+}
+
+.graphite-app .sd-row-label span {
+  font-size: 11px;
+}
+
+.graphite-app .sd-status {
+  font-size: 11px;
+  font-weight: 500;
+  border-color: var(--tm-line-strong);
+}
+
+.graphite-app .sd-note {
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--tm-line);
+  border-radius: 0;
+  background: none;
+}
+
+.graphite-app .sd-note p {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.graphite-app .sd-facts {
+  gap: 0;
+  border-top: 1px solid var(--tm-line);
+}
+
+.graphite-app .sd-facts > div {
+  padding: 14px 0;
+  border: 0;
+  border-bottom: 1px solid var(--tm-line);
+  border-radius: 0;
+  background: none;
+}
+
+.graphite-app .sd-facts > div:nth-child(2) {
+  padding-left: 14px;
+  border-left: 1px solid var(--tm-line);
+}
+
+.graphite-app .sd-facts dd {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.graphite-app .sd-facts dd small {
+  font-family: var(--tm-body);
+}
+
+.graphite-app .sd-actions button {
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+/* Account --------------------------------------------------------------- */
+
+.graphite-app .graphite-profile {
+  padding: 22px 0 20px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.graphite-app .graphite-profile strong {
+  font-family: var(--tm-display);
+  font-size: 30px;
+  letter-spacing: -0.03em;
+}
+
+.graphite-app .graphite-profile span,
+.graphite-app .graphite-profile p {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.graphite-app .graphite-avatar {
+  border: 1px solid var(--tm-line-strong);
+  background: transparent;
+}
+
+.graphite-app .graphite-settings,
+.graphite-app .settings-group,
+.graphite-app .settings-list {
+  border: 0;
+  border-top: 1px solid var(--tm-line);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.graphite-app .graphite-settings > button,
+.graphite-app .graphite-settings > a,
+.graphite-app .settings-row {
+  min-height: 56px;
+  padding-inline: 0;
+  border-radius: 0;
+  background: transparent;
+  border-color: var(--tm-line);
+}
+
+.graphite-app .graphite-settings > button span,
+.graphite-app .settings-row strong {
+  font-weight: 500;
+}
+
+.graphite-app .settings-row small,
+.graphite-app .settings-row p {
+  color: var(--tm-muted);
+}
+
+.graphite-app .settings-row svg:first-child,
+.graphite-app .settings-row-icon {
+  border: 0;
+  background: none;
+  color: var(--tm-muted);
+}
+
+.graphite-app .settings-group-title,
+.graphite-app .settings-group > h2,
+.graphite-app .settings-group > span {
+  color: var(--tm-muted);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Notifications --------------------------------------------------------- */
+
+.graphite-app .notification-popover-layer {
+  background: color-mix(in srgb, var(--tm-bg) 60%, transparent);
+}
+
+.graphite-app .notification-popover,
+.graphite-app .notification-center {
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 16px;
+  background: var(--tm-raised);
+  box-shadow: 0 24px 60px var(--tm-shadow);
+}
+
+/* Bottom navigation ----------------------------------------------------- */
+
+.graphite-app .graphite-nav {
+  border: 1px solid var(--tm-line-strong);
+  background: var(--tm-nav-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 -12px 40px var(--tm-shadow);
+}
+
+.graphite-app .graphite-nav button span {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.graphite-app .graphite-nav button.active {
+  background: var(--tm-hover);
+  box-shadow: none;
+}
+
+/* Empty and loading states --------------------------------------------- */
+
+.graphite-app .graphite-state-card {
+  border: 0;
+  border-top: 1px solid var(--tm-line);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  padding-inline: 0;
+}
+
+.graphite-app .graphite-state-card span,
+.graphite-app .graphite-state-card small {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.graphite-app .home-skeleton {
+  height: 150px;
+  margin-top: 18px;
+  border-radius: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graphite-app .tm-range-marker { transition: none; }
+}
+
+/* Rows without the old coloured edge bar */
+.graphite-app .market-pair-row,
+.graphite-app .market-pair-list.compact .market-pair-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.graphite-app .market-pair-copy {
+  gap: 5px;
+}
+
+.graphite-app .market-pair-copy > small {
+  line-height: 1.3;
+}
+
+/* Filter selects: room for the chevron */
+.graphite-app .graphite-filters label {
+  position: relative;
+}
+
+.graphite-app .graphite-filters select {
+  padding-right: 30px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.graphite-app .graphite-filters label svg {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--tm-muted);
+}
+
+.graphite-app .graphite-filters label {
+  border: 0;
+  background: none;
+  padding: 0;
+  box-shadow: none;
+}
+
+.graphite-app .graphite-filters select {
+  width: auto;
+  min-width: 0;
+}
+
+.graphite-app .graphite-filter-row {
+  margin-bottom: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.graphite-app .graphite-filter-row::-webkit-scrollbar {
+  display: none;
+}
+
+.graphite-app .graphite-filter-row button {
+  flex: none;
+}
+
+.graphite-app .tm-history {
+  border-top: 1px solid var(--tm-line);
+}
+
+/* Account and settings -------------------------------------------------- */
+
+.graphite-app .tm-initial {
+  display: grid;
+  place-items: center;
+  color: var(--tm-ink);
+  font-family: var(--tm-mono);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.graphite-app .graphite-profile > div:last-child {
+  display: grid;
+  gap: 4px;
+}
+
+.graphite-app .graphite-profile p {
+  color: var(--tm-muted);
+  font-family: var(--tm-mono);
+  font-size: 12px;
+}
+
+.graphite-app .graphite-settings > button {
+  border-bottom: 1px solid var(--tm-line);
+}
+
+.graphite-app .graphite-settings > button svg {
+  color: var(--tm-muted);
+}
+
+.graphite-app .settings-page-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0 12px;
+}
+
+.graphite-app .settings-page-header h1 {
+  margin: 0;
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-align: left;
+}
+
+.graphite-app .settings-page-header button {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.graphite-app .settings-group {
+  padding: 0;
+  margin-top: 4px;
+}
+
+.graphite-app .settings-group > div {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.graphite-app .settings-group-title {
+  display: block;
+  padding: 18px 0 6px;
+}
+
+.graphite-app .settings-row {
+  gap: 14px;
+  border: 0;
+  border-bottom: 1px solid var(--tm-line);
+}
+
+.graphite-app .settings-row-icon {
+  width: auto;
+  height: auto;
+}
+
+.graphite-app .settings-row-copy strong {
+  color: var(--tm-ink);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.graphite-app .settings-row-copy small {
+  margin-top: 2px;
+  color: var(--tm-muted);
+  font-size: 12px;
+}
+
+.graphite-app .settings-row em {
+  color: var(--tm-muted);
+  font-family: var(--tm-mono);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.graphite-app .settings-primary {
+  border-radius: 12px;
+  color: var(--tm-on-ink);
+  background: var(--tm-ink);
+  box-shadow: none;
+}
+
+.graphite-app .settings-secondary {
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.graphite-app .settings-confirm {
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 16px;
+  background: var(--tm-surface);
+}
+
+.graphite-app .settings-confirm h2 {
+  font-family: var(--tm-display);
+  letter-spacing: -0.02em;
+}
+
+/* Notification panel ---------------------------------------------------- */
+
+.graphite-app .notification-empty {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin: 0;
+  padding: 18px 16px 20px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+}
+
+.graphite-app .notification-empty h2 {
+  margin: 0;
+  color: var(--tm-ink);
+  font-size: 15px;
+  font-weight: 560;
+}
+
+.graphite-app .notification-empty p {
+  margin: 0;
+  color: var(--tm-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.graphite-app .notification-empty button {
+  margin-top: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 999px;
+  color: var(--tm-ink);
+  background: transparent;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+/* Sign-in --------------------------------------------------------------- */
+
+.auth-shell.auth-graphite {
+  min-height: 100dvh;
+  padding: 28px 20px 40px;
+  color: var(--tm-ink);
+  background: #000;
+  font-family: var(--tm-body);
+}
+
+.auth-shell.auth-graphite::before,
+.auth-shell.auth-graphite::after {
+  display: none;
+}
+
+.auth-shell.auth-graphite .auth-brand {
+  justify-self: start;
+  align-self: start;
+  margin: 0 auto 0 0;
+  text-decoration: none;
+}
+
+.auth-wordmark {
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.auth-shell.auth-graphite .auth-card {
+  width: min(100%, 400px);
+  margin: 9vh auto 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.auth-shell.auth-graphite .auth-copy {
+  text-align: left;
+}
+
+.auth-shell.auth-graphite .auth-copy h1 {
+  margin: 0;
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.auth-shell.auth-graphite .auth-copy p {
+  margin: 10px 0 0;
+  color: var(--tm-muted);
+  font-family: var(--tm-body);
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.auth-shell.auth-graphite .auth-form {
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.auth-shell.auth-graphite .auth-field > span {
+  color: var(--tm-muted);
+  font-family: var(--tm-body);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.auth-shell.auth-graphite .auth-field > div {
+  min-height: 48px;
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.auth-shell.auth-graphite .auth-field > div:focus-within {
+  border-color: var(--tm-soft);
+}
+
+.auth-shell.auth-graphite .auth-field input {
+  color: var(--tm-ink);
+  font-family: var(--tm-body);
+  font-size: 15px;
+}
+
+.auth-shell.auth-graphite .auth-field input::placeholder {
+  color: var(--tm-faint);
+  font-family: var(--tm-body);
+}
+
+.auth-shell.auth-graphite .auth-field svg {
+  color: var(--tm-muted);
+}
+
+.auth-shell.auth-graphite .auth-forgot,
+.auth-shell.auth-graphite .auth-switch,
+.auth-shell.auth-graphite .auth-resend,
+.auth-shell.auth-graphite .auth-confirmation-back {
+  color: var(--tm-muted);
+  font-family: var(--tm-body);
+  font-size: 13px;
+}
+
+.auth-shell.auth-graphite .auth-switch a,
+.auth-shell.auth-graphite .auth-forgot {
+  color: var(--tm-ink);
+}
+
+.auth-shell.auth-graphite .auth-primary {
+  min-height: 50px;
+  border: 0;
+  border-radius: 12px;
+  color: #000;
+  background: var(--tm-ink);
+  font-family: var(--tm-body);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  box-shadow: none;
+}
+
+.auth-shell.auth-graphite .auth-primary:disabled {
+  opacity: 0.45;
+}
+
+.auth-shell.auth-graphite .google-auth-button {
+  min-height: 50px;
+  border: 1px solid var(--tm-line-strong);
+  border-radius: 12px;
+  color: var(--tm-ink);
+  background: transparent;
+  font-family: var(--tm-body);
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.auth-shell.auth-graphite .auth-divider span {
+  color: var(--tm-faint);
+  font-family: var(--tm-body);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  background: #000;
+}
+
+.auth-shell.auth-graphite .auth-error {
+  border: 0;
+  border-left: 2px solid var(--tm-down);
+  border-radius: 0;
+  padding: 4px 0 4px 12px;
+  color: #ff9aa0;
+  background: none;
+  font-family: var(--tm-body);
+  font-size: 13px;
+  text-align: left;
+}
+
+.auth-shell.auth-graphite .auth-success {
+  border: 0;
+  border-left: 2px solid var(--tm-up);
+  border-radius: 0;
+  padding: 4px 0 4px 12px;
+  background: none;
+  font-family: var(--tm-body);
+  text-align: left;
+}
+
+/* Docs ------------------------------------------------------------------ */
+
+.docs-shell {
+  color: var(--tm-ink);
+  background: #000;
+  font-family: var(--tm-body);
+}
+
+.docs-shell::before {
+  display: none;
+}
+
+.docs-shell .docs-topbar {
+  border-bottom: 1px solid var(--tm-line);
+  background: rgba(0, 0, 0, 0.85);
+  box-shadow: none;
+}
+
+.docs-shell .docs-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--tm-ink);
+}
+
+.docs-shell .docs-brand b {
+  font-family: var(--tm-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.docs-shell .docs-brand span {
+  color: var(--tm-muted);
+  font-family: var(--tm-mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.docs-shell .docs-search,
+.docs-shell .docs-menu-button {
+  border: 1px solid var(--tm-line-strong);
+  background: transparent;
+  box-shadow: none;
+  color: var(--tm-ink);
+}
+
+.docs-shell .docs-search input {
+  color: var(--tm-ink);
+  font-family: var(--tm-body);
+}
+
+.docs-shell .docs-search input::placeholder {
+  color: var(--tm-faint);
+}
+
+.docs-shell .docs-search-results {
+  border: 1px solid var(--tm-line-strong);
+  background: #080808;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.docs-shell .docs-search-results a { color: var(--tm-ink); }
+.docs-shell .docs-search-results a:hover { background: #141414; }
+.docs-shell .docs-search-results span,
+.docs-shell .docs-search-results p { color: var(--tm-muted); }
+
+.docs-shell .docs-launch {
+  border-radius: 10px;
+  color: #000;
+  background: var(--tm-ink);
+  font-family: var(--tm-body);
+  font-weight: 600;
+}
+
+.docs-shell .docs-sidebar,
+.docs-shell .docs-toc {
+  background: #000;
+}
+
+.docs-shell .docs-sidebar h2,
+.docs-shell .docs-toc h2 {
+  color: var(--tm-muted);
+  font-family: var(--tm-body);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.docs-shell .docs-sidebar a,
+.docs-shell .docs-toc a {
+  color: var(--tm-muted);
+}
+
+.docs-shell .docs-sidebar a:hover,
+.docs-shell .docs-sidebar a.active,
+.docs-shell .docs-toc a:hover {
+  color: var(--tm-ink);
+  background: #111;
+}
+
+.docs-shell .docs-main {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.docs-shell .docs-breadcrumbs,
+.docs-shell .docs-breadcrumbs b {
+  color: var(--tm-muted);
+  font-family: var(--tm-mono);
+  font-size: 11px;
+}
+
+.docs-shell .docs-meta span {
+  border: 0;
+  padding: 0;
+  color: var(--tm-muted);
+  background: none;
+  font-family: var(--tm-body);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.docs-shell .docs-meta p {
+  color: var(--tm-soft);
+}
+
+.docs-shell .docs-title {
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  letter-spacing: -0.035em;
+}
+
+.docs-shell .docs-main h2 {
+  color: var(--tm-ink);
+  font-family: var(--tm-display);
+  letter-spacing: -0.02em;
+}
+
+.docs-shell .docs-paragraph,
+.docs-shell .docs-list {
+  color: var(--tm-soft);
+  line-height: 1.7;
+}
+
+.auth-shell.auth-graphite .auth-copy,
+.auth-shell.auth-graphite .auth-copy p {
+  text-align: left;
+}
+
+.auth-shell.auth-graphite .auth-error,
+.auth-shell.auth-graphite .auth-success {
+  font-weight: 400;
+}
+
+.docs-shell .docs-main .docs-paragraph,
+.docs-shell .docs-main .docs-list,
+.docs-shell .docs-main p,
+.docs-shell .docs-main li {
+  color: #c4c4c4;
+  font-size: 15px;
+  opacity: 1;
+}
+
+.docs-shell .docs-main .docs-title {
+  margin-bottom: 18px;
+}
+
+.docs-shell .docs-main .docs-list {
+  padding-left: 18px;
+}
+
+.app-suspense {
+  min-height: 100dvh;
+  background: #000;
+}
+
+.auth-shell.auth-graphite .auth-loading-card {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  margin-top: 30vh;
+  text-align: center;
+}
+
+.auth-shell.auth-graphite .auth-loading-card .auth-copy p {
+  margin: 0;
+  text-align: center;
+  font-family: var(--tm-mono);
+  font-size: 12px;
+}
+
+.auth-shell.auth-graphite .launch-progress {
+  display: none;
+}
+
+body:has(.graphite-app.is-light) {
+  background: #f7f7f5;
+}
+
+.graphite-app.is-light .sd-ladder {
+  background: var(--tm-surface);
+}
+
+.graphite-app.is-light .sd-row.is-now {
+  background: var(--tm-hover);
+}
+
+.graphite-app.is-light .sd-row.is-now .sd-node {
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.08);
+}
+
+.graphite-app .graphite-timeline,
+.graphite-app.is-light .graphite-timeline {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.graphite-app.is-light .graphite-header {
+  background: var(--tm-bg);
+}
+
+.graphite-app.is-light .sd-status {
+  border-color: var(--tm-line-strong);
+}
+
+main.auth-shell.auth-graphite .auth-card .auth-copy,
+main.auth-shell.auth-graphite .auth-card .auth-copy p {
+  text-align: left;
+  margin-left: 0;
+  max-width: none;
+}
+
+main.auth-shell.auth-graphite .auth-copy p {
+  justify-self: start;
+}
+
+main.auth-shell.auth-graphite .auth-brand {
+  display: inline-block;
+  width: auto;
+  width: min(400px, 100%);
+  margin: 0 auto;
+}
