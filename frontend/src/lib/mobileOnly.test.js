@@ -4,6 +4,7 @@ import test from "node:test";
 
 const app = readFileSync(new URL("../App.jsx", import.meta.url), "utf8");
 const mobileApp = readFileSync(new URL("../components/MobileDemo.jsx", import.meta.url), "utf8");
+const signalDetail = readFileSync(new URL("../components/SignalDetail.jsx", import.meta.url), "utf8");
 const deployScript = readFileSync(new URL("../../../scripts/deploy_frontend.sh", import.meta.url), "utf8");
 process.env.SWIFTCHART_BACKEND_ORIGIN = "http://localhost:8000";
 const { config: vercelConfig } = await import("../../../vercel.ts");
@@ -18,7 +19,7 @@ test("the active application has no legacy desktop view", () => {
 });
 
 test("mobile Take Trade and History flows remain present", () => {
-  assert.match(mobileApp, /Trade plan/);
+  assert.match(signalDetail, /Trade plan/);
   assert.match(mobileApp, /Saving to History\.\.\./);
   assert.match(mobileApp, /Saved to History/);
   assert.match(mobileApp, /function HistoryScreen/);

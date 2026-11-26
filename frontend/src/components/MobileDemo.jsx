@@ -37,6 +37,8 @@ import AppSplashScreen from "./AppSplashScreen.jsx";
 import { CurrencyStrengthOpportunities, CurrencyStrengthRanking } from "./CurrencyStrength.jsx";
 import GraphiteStateCard from "./GraphiteStateCard.jsx";
 import { RecentOutcomes, RegimeCard, ScanStatusCard } from "./HomeOverview.jsx";
+import { AnalystNote, SignalFacts, SignalTopBar, TradeLadder } from "./SignalDetail.jsx";
+import { formatLadderPrice, formatValidUntil } from "../lib/tradeLadder.js";
 import { regimeFromScanStats } from "../lib/homeSummary.js";
 import InstrumentLogo from "./InstrumentLogo.jsx";
 import NotificationCenter from "./NotificationCenter.jsx";
@@ -418,15 +420,6 @@ function GraphiteHeader({
   );
 }
 
-function StatTile({ label, value, tone }) {
-  return (
-    <article className={`graphite-stat ${tone || ""}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </article>
-  );
-}
-
 function HomeScreen({ signals, activeSignals, onSelect, onViewAll, market, scanMeta, outcomes = [], loading = false, forexSignals, forexOverview, forexStrength, onViewStrength, onSelectPair }) {
   if (market === MARKET_TYPES.forex) {
     return <ForexHomeScreen signals={forexSignals} overview={forexOverview} strength={forexStrength} onSelect={onSelect} onViewAll={onViewAll} onViewStrength={onViewStrength} onSelectPair={onSelectPair} />;
@@ -513,19 +506,24 @@ function marketRowStatus(signal) {
 
 function MarketSignalRow({ signal, onSelect }) {
   const isShort = /short|sell/i.test(signal.direction);
+  const pairMatch = signal.pair ? null : String(signal.symbol || "").match(/^(.+?)(USDT|USDC|USD)$/i);
+  const rowBase = signal.pair || (pairMatch ? pairMatch[1] : signal.symbol);
+  const rowQuote = pairMatch ? pairMatch[2] : "";
+  const livePrice = Number(signal.latestPrice);
+  const rowPrice = Number.isFinite(livePrice) && signal.latestPrice !== null ? formatLadderPrice(livePrice) : signal.entry;
   return (
     <button type="button" className="market-pair-row" onClick={() => onSelect(signal)}>
       <i className={isShort ? "short" : "long"} aria-hidden="true" />
       <div className="market-pair-copy">
         <div>
-          <strong>{signal.symbol}</strong>
+          <strong>{rowBase}{rowQuote ? <em className="market-pair-quote">/{rowQuote}</em> : null}</strong>
           <Direction direction={signal.direction} />
         </div>
         <small>{signal.timeframe.toUpperCase()} · {marketRowStatus(signal)}</small>
       </div>
       <span className="market-pair-quality">
-        <strong>{marketRowStatus(signal)}</strong>
-        <small>{signal.rr}</small>
+        <strong>{rowPrice}</strong>
+        <small>{signal.rr !== "-" ? `R/R ${String(signal.rr).replace(/R$/, "")}` : ""}</small>
       </span>
     </button>
   );
@@ -967,82 +965,6 @@ function ScanScreen({
   );
 }
 
-function ExecutionMarker({ position }) {
-  const markerRef = useRef(null);
-  const previousPosition = useRef(position);
-
-  useEffect(() => {
-    const marker = markerRef.current;
-    const previous = previousPosition.current;
-    previousPosition.current = position;
-    if (!marker || previous === position || typeof marker.animate !== "function") return undefined;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || marker.closest(".reduce-animations")) return undefined;
-    const railWidth = marker.parentElement?.clientWidth || 0;
-    const offset = ((previous - position) / 100) * railWidth;
-    if (!Number.isFinite(offset) || Math.abs(offset) < 1) return undefined;
-    const animation = marker.animate(
-      [
-        { transform: `translateX(${offset}px) translateX(-50%)` },
-        { transform: "translateX(-50%)" },
-      ],
-      { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
-    );
-    return () => animation.cancel();
-  }, [position]);
-
-  return (
-    <i ref={markerRef} className="current-price" style={{ left: `${position}%` }}>
-      <b />
-    </i>
-  );
-}
-
-function ExecutionLadder({ signal }) {
-  const progress = executionLadderState(signal);
-  const priceDigits = /JPY/i.test(signal.symbol) ? 3 : /XAU/i.test(signal.symbol) ? 2 : 5;
-  const updatedAt = signal.latestPriceAt || signal.rawIdea?.latest_price_at || signal.rawIdea?.last_price_updated_at;
-  const hasTp2 = signal.tp2 && signal.tp2 !== "-";
-  return (
-    <section className={`graphite-execution-ladder is-${progress.tone}${progress.disabled ? " is-disabled" : ""}`} aria-label="Trade plan">
-      <div className="graphite-ladder-heading">
-        <span className="graphite-ladder-title">Trade plan</span>
-        <strong>{progress.label}</strong>
-      </div>
-      <div className="graphite-ladder-live">
-        <span>Current: <strong>{progress.currentPrice === null ? "-" : fmt(progress.currentPrice, priceDigits)}</strong></span>
-        <span>Updated: {updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"}</span>
-        {progress.nearestLevel ? <span>Nearest: <strong>{progress.nearestLevel} · {progress.nearestDistancePct.toFixed(2)}%</strong></span> : null}
-      </div>
-      <div className="graphite-ladder-rail" aria-hidden="true">
-        <i className={`target tp2${progress.tp2Complete ? " complete" : ""}`} style={{ left: `${progress.tp2Position}%` }} />
-        <i className={`target tp1${progress.tp1Complete ? " complete" : ""}`} style={{ left: `${progress.tp1Position}%` }} />
-        <i className="entry-zone" style={{ left: `${progress.entryStart}%`, width: `${Math.max(2, progress.entryEnd - progress.entryStart)}%` }} />
-        <i className={`stop${progress.stopComplete ? " complete" : ""}`} style={{ left: `${progress.stopPosition}%` }} />
-        {progress.currentPrice !== null ? <ExecutionMarker position={progress.markerPosition} /> : null}
-      </div>
-      <div className={`graphite-ladder-values plan-values${hasTp2 ? " has-tp2" : ""}`}>
-        <div className="stop">
-          <span>Stop loss</span>
-          <strong>{signal.sl}</strong>
-        </div>
-        <div className="entry">
-          <span>Entry zone</span>
-          <strong>{signal.entry}</strong>
-        </div>
-        <div className="current">
-          <span>Current</span>
-          <strong>{progress.currentPrice === null ? "-" : fmt(progress.currentPrice, priceDigits)}</strong>
-        </div>
-        <div className="target">
-          <span>TP1</span>
-          <strong>{signal.tp}</strong>
-        </div>
-        {hasTp2 ? <div className="target tp2-value"><span>TP2</span><strong>{signal.tp2}</strong></div> : null}
-      </div>
-    </section>
-  );
-}
-
 function sentenceCase(value) {
   const text = String(value || "").trim().replace(/[.!?]+$/, "");
   if (!text) return "market structure supports the setup";
@@ -1103,57 +1025,49 @@ function TradeAnalysis({ signal, onClose, onTakeTrade, tradeSaveState }) {
   const activeTradeSaveState = tradeSaveState?.symbol === signal.symbol ? tradeSaveState : { status: "idle" };
   const terminalForexStatus = ["TP2_HIT", "STOPPED", "EXPIRED", "CANCELLED"].includes(String(signal.status).toUpperCase());
   const trackingDeadline = signal.trackingDeadline || signal.rawIdea?.tracking_deadline;
-  const trackingDeadlineDate = trackingDeadline ? new Date(trackingDeadline) : null;
-  const trackingDeadlineLabel = trackingDeadlineDate && Number.isFinite(trackingDeadlineDate.getTime())
-    ? `${trackingDeadlineDate.toISOString().slice(0, 16).replace("T", " ")} UTC`
-    : null;
+  const progress = executionLadderState(signal);
+  const validity = formatValidUntil(trackingDeadline);
+  const saveStatus = activeTradeSaveState.status;
   return (
     <main className="graphite-detail-screen" aria-label={`${signal.symbol} trade analysis`}>
-      <article className="graphite-detail">
-        <header>
-          <InstrumentLogo symbol={signal.symbol} marketType={signal.market} />
-          <div>
-            <span>{isForex ? "Forex Trade Analysis" : "Trade Analysis"}</span>
-            <strong>{isForex ? signal.pair : signal.symbol}</strong>
-            <p>{isForex ? "Session-qualified setup" : "Setup detail"} · {detailRecency(signal)}</p>
-          </div>
-        </header>
-
-        <div className="graphite-trade-meta">
-          <StatTile label="Direction" value={signal.direction} tone={/short|sell/i.test(signal.direction) ? "loss" : "profit"} />
-          <StatTile label="Timeframe" value={signal.timeframe.toUpperCase()} />
-          <StatTile label="R/R" value={signal.rr} tone="reward" />
-        </div>
-
-
-        {!isForex ? <section className="graphite-reasoning">
-          <span>Signal validity</span>
-          <p>Valid for 48 hours.</p>
-          {trackingDeadlineLabel ? <p>Valid until: {trackingDeadlineLabel}</p> : <p>The 48-hour window starts at the first tracking candle.</p>}
-        </section> : null}
-        <ExecutionLadder signal={signal} />
-
-        <section className="graphite-reasoning">
-          <span>Reasoning</span>
-          <p>{tradeReasoning(signal, { isForex })}</p>
-        </section>
-
-        <div className="graphite-detail-actions">
-          <button type="button" className="ghost" onClick={onClose}>Close</button>
-          {!signal.isHistory ? (
+      <article className="graphite-detail sd-wrap">
+        <SignalTopBar signal={signal} onBack={onClose} recency={detailRecency(signal)} />
+        <TradeLadder signal={signal} progress={progress} />
+        <AnalystNote text={tradeReasoning(signal, { isForex })} invalidation={signal.rawIdea?.invalidation} />
+        <SignalFacts rr={signal.rr} validity={isForex ? null : validity} regime={humanRegime(signal.regime)} />
+        {!signal.isHistory ? (
+          <div className="sd-actions">
             <button
               type="button"
-              disabled={activeTradeSaveState.status === "saving" || activeTradeSaveState.status === "saved" || terminalForexStatus}
+              disabled={saveStatus === "saving" || saveStatus === "saved" || terminalForexStatus}
               onClick={() => onTakeTrade(signal)}
             >
-              {terminalForexStatus ? "Signal closed" : activeTradeSaveState.status === "saving" ? "Saving to History..." : activeTradeSaveState.status === "saved" ? "Saved to History" : "Take Trade"}
+              {terminalForexStatus ? "Signal closed" : saveStatus === "saving" ? "Saving to History..." : saveStatus === "saved" ? "Saved to History" : "Take Trade"}
             </button>
-          ) : null}
-        </div>
-        {activeTradeSaveState.status === "error" ? <p className="graphite-action-error" role="alert">{activeTradeSaveState.message}</p> : null}
+            {saveStatus === "error" ? <p className="graphite-action-error" role="alert">{activeTradeSaveState.message}</p> : null}
+          </div>
+        ) : null}
       </article>
     </main>
   );
+}
+
+const REGIME_LABELS = {
+  RANGE_BOUND: "Range-bound",
+  TRENDING_UP: "Trending up",
+  TRENDING_DOWN: "Trending down",
+  BREAKOUT: "Breakout",
+  BREAKDOWN: "Breakdown",
+  CHOP: "Choppy",
+  TRANSITION_TO_BULLISH: "Turning bullish",
+  TRANSITION_TO_BEARISH: "Turning bearish",
+  NO_TRADE: "No-trade conditions",
+};
+
+function humanRegime(value) {
+  const key = String(value || "").trim();
+  if (!key || /awaiting/i.test(key)) return null;
+  return REGIME_LABELS[key.toUpperCase()] || key;
 }
 
 function HistoryScreen({ market, paperTrades = [], onSelect }) {
