@@ -3,13 +3,16 @@ export const MARKET_TYPES = Object.freeze({
   forex: "forex",
 });
 
+// Forex is paused. Set VITE_FOREX_ENABLED=true at build time to bring it back.
+export const FOREX_ENABLED = String(import.meta.env?.VITE_FOREX_ENABLED || "").toLowerCase() === "true";
+
 export const MARKET_OPTIONS = Object.freeze([
   { key: MARKET_TYPES.crypto, label: "Crypto" },
-  { key: MARKET_TYPES.forex, label: "Forex" },
+  ...(FOREX_ENABLED ? [{ key: MARKET_TYPES.forex, label: "Forex" }] : []),
 ]);
 
 export function normalizeMarket(value) {
-  return value === MARKET_TYPES.forex ? MARKET_TYPES.forex : MARKET_TYPES.crypto;
+  return FOREX_ENABLED && value === MARKET_TYPES.forex ? MARKET_TYPES.forex : MARKET_TYPES.crypto;
 }
 
 export function marketFromSearch(search) {

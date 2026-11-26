@@ -28,7 +28,7 @@ import {
   getForexSignals,
   runForexScan,
 } from "../lib/api.js";
-import { MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
+import { FOREX_ENABLED, MARKET_TYPES, marketFromSearch, normalizeMarket } from "../lib/markets.js";
 import { formatSessionCountdown, formatUtcClock, getForexSessionState } from "../lib/forexSessions.js";
 import { createPaperTradeFromSignal, getPaperTradeDetail, listPaperTrades, signalIdForIdea } from "../lib/paperTrades.js";
 import { pushSwiftChartNotification, useNotifications } from "../lib/notifications.js";
@@ -1190,7 +1190,7 @@ function HistoryScreen({ market, paperTrades = [], onSelect }) {
       <section className="graphite-history-hero"><span>Saved signals</span><p>Entry, target, stop and tracking status.</p></section>
 
       <div className="graphite-filter-row">
-        {["all", MARKET_TYPES.crypto, MARKET_TYPES.forex].map((option) => <button key={option} type="button" className={marketFilter === option ? "active" : ""} onClick={() => setMarketFilter(option)}>{option}</button>)}
+        {(FOREX_ENABLED ? ["all", MARKET_TYPES.crypto, MARKET_TYPES.forex] : []).map((option) => <button key={option} type="button" className={marketFilter === option ? "active" : ""} onClick={() => setMarketFilter(option)}>{option}</button>)}
       </div>
       <div className="graphite-filter-row">
         {["all", "open", "tp1", "tp2", "sl", "expired"].map((option) => <button key={option} type="button" className={statusFilter === option ? "active" : ""} onClick={() => setStatusFilter(option)}>{option}</button>)}
@@ -1651,7 +1651,7 @@ export default function MobileDemo({
 
   useEffect(() => {
     const signalMatch = window.location.pathname.match(/^\/app\/signal\/([^/]+)$/i);
-    if (!signalMatch) return;
+    if (!signalMatch || !FOREX_ENABLED) return;
     let cancelled = false;
     const signalId = decodeURIComponent(signalMatch[1]);
     setActiveMarketState(MARKET_TYPES.forex);
@@ -1893,7 +1893,7 @@ export default function MobileDemo({
             title={tab === "home" || tab === "scan" ? "" : tab}
             activeMarket={activeMarket}
             onMarketChange={setActiveMarket}
-            showMarketToggle={tab === "home" || tab === "scan"}
+            showMarketToggle={FOREX_ENABLED && (tab === "home" || tab === "scan")}
             onOpenNotifications={openNotifications}
             unreadCount={notificationCenter.unreadCount}
             notificationPriority={notificationCenter.priorityIndicator}

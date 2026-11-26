@@ -9,6 +9,7 @@ import PairChartScreen from "./pages/ForexPairPage.jsx";
 import CurrencyStrengthPage from "./pages/CurrencyStrengthPage.jsx";
 import { AuthProvider, useAuth } from "./lib/AuthContext.jsx";
 import { getCanonicalRedirectUrl } from "./lib/siteUrl.js";
+import { FOREX_ENABLED } from "./lib/markets.js";
 import { getActiveCryptoTrades, getTopIdeas, getTradeHistory, refreshTopIdeasCache } from "./lib/api.js";
 import { normalizeOutcomes } from "./lib/homeSummary.js";
 import swiftChartLogo from "./assets/swiftchart-logo.png";
@@ -40,13 +41,13 @@ export default function App() {
   const isMobileAlias = path === "/mobile-demo";
   const isAppPage = path === "/app"
     || /^\/app\/(home|scan|history|account|notifications)$/.test(path)
-    || /^\/app\/signal\/[^/]+$/.test(path)
-    || path === "/app/forex/currency-strength"
-    || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
+    || (FOREX_ENABLED && /^\/app\/signal\/[^/]+$/.test(path))
+    || (FOREX_ENABLED && path === "/app/forex/currency-strength")
+    || (FOREX_ENABLED && /^\/app\/forex\/[A-Z0-9]+$/i.test(path));
   const isPublicReadOnlyAppPage = /^\/app\/(?:home|scan)(?:\/|$)/i.test(path)
-    || /^\/app\/signal\/[^/]+$/i.test(path)
-    || path === "/app/forex/currency-strength"
-    || /^\/app\/forex\/[A-Z0-9]+$/i.test(path);
+    || (FOREX_ENABLED && /^\/app\/signal\/[^/]+$/i.test(path))
+    || (FOREX_ENABLED && path === "/app/forex/currency-strength")
+    || (FOREX_ENABLED && /^\/app\/forex\/[A-Z0-9]+$/i.test(path));
   const isDisabledCommercePage = /^\/(?:admin\/payments?|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path)
     || /^\/app\/(?:upgrade|payments?|pricing|billing|subscribe)(?:\/|$)/i.test(path);
   const isAuthPage = ["/auth", "/login", "/signup", "/forgot-password", "/reset-password"].includes(path);
@@ -163,6 +164,8 @@ export default function App() {
     return <><AuthLoading /><Analytics /></>;
   }
   if (isDisabledCommercePage || path.startsWith("/analysis/")) return <AuthLoading />;
+
+  if (!isAppPage && path.startsWith("/app/")) return <AuthLoading />;
 
   if (path === "/app/forex/currency-strength") {
     return (
