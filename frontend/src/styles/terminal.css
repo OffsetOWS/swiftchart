@@ -1440,3 +1440,21 @@ body:has(.graphite-app.is-light) {
 .graphite-app.is-light .sd-status {
   border-color: var(--tm-line-strong);
 }
+
+main.auth-shell.auth-graphite .auth-card .auth-copy,
+main.auth-shell.auth-graphite .auth-card .auth-copy p {
+  text-align: left;
+  margin-left: 0;
+  max-width: none;
+}
+
+main.auth-shell.auth-graphite .auth-copy p {
+  justify-self: start;
+}
+
+main.auth-shell.auth-graphite .auth-brand {
+  display: inline-block;
+  width: auto;
+  width: min(400px, 100%);
+  margin: 0 auto;
+}
